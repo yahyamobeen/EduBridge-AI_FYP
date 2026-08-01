@@ -1,0 +1,26 @@
+# Normalize line endings: LF in the repository, native in the working directory.
+# Prevents CRLF/LF churn between Windows dev machines and Linux CI/Docker.
+* text=auto eol=lf
+
+# Scripts and container files must always be LF
+*.sh   text eol=lf
+Dockerfile text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Windows-specific scripts stay CRLF
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+
+# Treat these as binary (never diff or line-ending convert)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.pptx binary
+*.docx binary
+*.gguf binary
+*.safetensors binary
+*.onnx binary
