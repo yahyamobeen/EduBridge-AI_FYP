@@ -8,9 +8,9 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 | File | Contents |
 |---|---|
-| `20260801120000_initial_schema.sql` | Extensions, enums, all tables, indexes, triggers, partitions |
+| `20260801120000_initial_schema.sql` | Extensions, enums, all tables (incl. two-factor auth), the admin 2FA status view, indexes, triggers, partitions |
 | `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, Row Level Security policies |
-| `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (48 tracks) |
+| `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects and elective-group mappings |
 
 Migrations run in filename order. **Never edit an applied migration** — add a new one instead.
 

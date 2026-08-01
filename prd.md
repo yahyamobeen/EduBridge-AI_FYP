@@ -2,7 +2,7 @@
 
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform for Secondary & Higher-Secondary Students
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Draft — under section-by-section review
 **Last Updated:** July 19, 2026
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen)
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial PRD draft derived from the approved FYP proposal and the agreed planning blueprint. Adopts supervisor PRD format; extended to engineering depth for TDD derivation. |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Added **TEL-5** endpoint access logging + admin daily-logs view; entity `ApiRequestLog`; RBAC + Admin-dashboard updates (kept in sync with TDD v0.1.1). |
+| 0.3.0 | 2026-08-01 | EduBridge AI Team | **Two-factor authentication mandatory for all roles** — added **FR-A4** (enrolment + challenge) and **SEC-14** (TOTP primary, email-OTP fallback, hashed single-use backup codes, admin-assisted recovery). Data model gains `TwoFactorEnrollment` and `TwoFactorBackupCode`. NFR-2 records the usability trade-off and its mitigations. |
 | 0.2.0 | 2026-08-01 | EduBridge AI Team | **Subject matrix expanded to 10 subjects** with per-class lists and **elective groups** (science/computer, pre-medical/pre-engineering/ICS). Two content branches replaced by **four content strategies**, adding **FR-17 religious-verbatim** (Quran Translation is retrieval-only). Database moved to **Supabase**; **Row Level Security** added as defense-in-depth (SEC-13). Data model updated (`subject_group`, `student_group`, `content_strategy`, `question_key`, `agent_component`). |
 
 > **Reading note.** Priorities are tagged **P0 / P1 / P2** (see §23 Roadmap). Requirements use the IDs `FR-N` (functional), `SEC-N` (security), `NFR-N` (non-functional), and `US-x.x` (user stories). Items marked **[PROPOSED — confirm]** are open decisions to be resolved during review (consolidated in §2.5 and referenced inline).
@@ -192,6 +193,8 @@ Legend: ✅ allowed · 🔵 read-only · ⛔ not allowed · *scope notes inline*
 | Capability | Student | Teacher | Parent | Admin |
 |---|---|---|---|---|
 | Register / manage own account | ✅ (self-serve) | ✅ | ✅ | ✅ |
+| Enrol / manage own second factor (2FA) | ✅ (required) | ✅ (required) | ✅ (required) | ✅ (required) |
+| Reset another user's 2FA (identity-verified, audited) | ⛔ | ⛔ | ⛔ | ✅ |
 | Use tutor chatbot (ask, voice, visuals, avatar) | ✅ | ✅ (own testing) | ⛔ | ⛔ |
 | View own progress / coverage / exam-readiness | ✅ (own) | — | 🔵 (linked child, all subjects) | ⛔ |
 | Create / edit class space | ⛔ | ✅ | ✅ (as guardian space) | ✅ |
@@ -262,7 +265,9 @@ CI/CD via **GitHub Actions**; containerized with **Docker**; the **self-updating
 
 ### 6.1 Student onboarding + parental-consent gate
 
-1. Student signs up (self-serve) with minimal PII; selects **board**, **class (9–12)**, and **medium/language**.
+1. Student signs up (self-serve) with minimal PII; selects **board**, **class (9–12)**, **elective group**, and **medium/language**.
+1a. **Email verification** — the student confirms their address before proceeding.
+1b. **Two-factor enrolment (mandatory, FR-A4)** — the student chooses TOTP or email-OTP, confirms one challenge, and saves the 10 backup codes shown once. Full access is withheld until this completes.
 2. **If Class 9–10:** the student must link a parent/guardian. The student initiates an invite (email/code); the parent creates/confirms an account and the link is **verified**. *Full tutor access is gated until the link is verified (hard gate — [PROPOSED — confirm], §4.3).*
 3. **If Class 11–12:** parental linkage is offered but optional; the student proceeds directly.
 4. Student lands on the student dashboard (progress, recent chats, avatar entry point).
@@ -310,6 +315,10 @@ Requirements are grouped by **Epic** (A–K). Each carries the proposal's `FR-ID
 ### Epic A — Authentication, Roles & RBAC *(derived; P0)*
 - **FR-A1 (P0):** Self-serve **student registration & login** (JWT), with board/class/medium capture. *AC:* account created; session established; role assigned. *Deps:* §4. *Edge:* duplicate email; weak password; unverified email.
 - **FR-A2 (P0):** **Role-based access control** for student/teacher/parent/admin. *AC:* each capability enforced per §4.2 matrix. *Edge:* privilege-escalation attempt → denied + audited.
+- **FR-A4 (P0):** **Two-factor authentication — mandatory for every role.** *As any user, I want a second authentication factor, so that a stolen password alone cannot expose a student's account or data.* **AC:** after email verification, the user must enrol a second factor before gaining full access; login becomes two-step (password → factor challenge); a valid challenge is required for every new session. **Methods:** **TOTP** (authenticator app) is primary; **email-OTP** is offered for users without a smartphone; **10 single-use backup codes** are issued at enrolment and shown exactly once. *Role:* all. *Deps:* email verification, SEC-14. *Edge:* lost device → backup code; lost device *and* codes → admin-assisted recovery with identity verification (audited); repeated failures → temporary lock, not permanent lockout.
+
+  > **Accessibility note.** Mandatory 2FA is in tension with **NFR-2** ("usable by students new to digital tools, without training"). Many Class 9–10 students share a device or have no smartphone. The email-OTP method and backup codes exist specifically to keep that cohort from being locked out; enrolment UX must therefore present email-OTP as an equal option, not a fallback buried behind TOTP.
+
 - **FR-A3 (P0):** **Class-based parental-consent gate** — Class 9–10 require a verified parent link before full access; 11–12 optional. *AC:* 9–10 student blocked from full tutor use until parent verified; 11–12 unaffected. *Deps:* §4.3, §6.1. *Edge:* parent never confirms → student remains gated (grace behavior [PROPOSED]).
 
 ### Epic B — Board Curriculum Chatbot *(P0)*
@@ -453,6 +462,8 @@ This is a **product-level** entity model — the seed for the TDD database schem
 - **ParentProfile** — `user_id`.
 - **AdminProfile** — `user_id, admin_scope`.
 - **GuardianLink** — `parent_user_id, student_user_id, status (pending|verified|revoked), verified_at`; enforces the class-based parental gate (§4.3).
+- **TwoFactorEnrollment** — `user_id, method (totp|email_otp), status (pending|active|disabled), totp_secret_encrypted, confirmed_at, last_used_at, failed_attempts, locked_until`; one per user (SEC-14). The secret is stored encrypted and is never readable through the API after enrolment.
+- **TwoFactorBackupCode** — `id, user_id, code_hash, used_at`; 10 issued per enrolment, **hashed** and single-use.
 - **Institution** *(optional)* — `id, name`; institutions attach via spaces (§15).
 
 ### 9.2 Classroom & collaboration
@@ -629,6 +640,7 @@ Security is a **first-class, built-in** capability (proposal title: "Secure & Ag
 - **SEC-10 (P0) — Data protection & PII:** **AES-256 at rest, TLS 1.3 in transit**; RBAC; **minimal PII** collection; minors' data minimized (§26).
 - **SEC-11 (P1) — Audit logging:** who/what/when for tool calls and data access (§21) with tamper-evident storage.
 - **SEC-12 (P1) — Supply-chain hardening in CI:** static analysis (**Semgrep**), policy-as-code (**OPA/Rego**), and artifact signing (**sigstore/cosign**) in the CI/CD pipeline; the Secure Skills & MCP scanner runs on every PR.
+- **SEC-14 (P0) — Two-factor authentication (all roles):** every account must hold an active second factor before full access is granted (FR-A4). **TOTP** (RFC 6238, 6 digits, 30 s period) is the primary method, with **email-OTP** as an equal-standing alternative and **10 single-use backup codes** for recovery. Storage rules: the **TOTP secret is encrypted at rest** and never returned after enrolment; **backup codes are hashed** (argon2id) and never retrievable. Verification is **rate-limited and locked after repeated failures** (a 6-digit code is only 10⁶ combinations), each attempt is audited, and a used TOTP code cannot be replayed within its window. Password authentication alone never yields a full session — it yields only a short-lived challenge token.
 - **SEC-13 (P0) — Row Level Security (database-level authorization):** every table enforces RLS so the **database itself** filters rows by the acting user, independent of application code. Policies implement the §4.2 RBAC matrix: a student sees only their own data; a parent sees a linked child's data only through a **verified** guardian link; a teacher sees only students enrolled in their space **and** only subjects they are scoped to; chat content is **owner-only** with no teacher/parent/admin read path. Two hard guarantees: **answer keys are unreadable by the application role** (no policy grants access — NFR-8 backstop), and access **fails closed** if the acting user is not established. RLS is defense-in-depth beneath application authorization, not a replacement for it.
 
 ### 16.2 OWASP threat → requirement → acceptance mapping
@@ -642,6 +654,7 @@ Security is a **first-class, built-in** capability (proposal title: "Secure & Ag
 | **Agentic/Skills Top 10 — untrusted/over-privileged skills & MCP** | SEC-4…SEC-8, SEC-12 | Every component vetted, least-privileged, sandboxed, SBOM-recorded; over-privileged/malicious blocked. |
 | **Sensitive-data exposure (minors)** | SEC-10, SEC-11, SEC-13, §26 | Encryption in transit/at rest; RBAC **plus database-level RLS**; minimal PII; audited access; chat content owner-only. |
 | **Broken access control / IDOR** | SEC-13 | An application bug or leaked credential still cannot return another student's rows — RLS filters at the database. |
+| **Credential stuffing / stolen password** | SEC-14 | A password alone never yields a session; a second factor is required for every role, rate-limited and audited. |
 
 ---
 
@@ -662,7 +675,7 @@ Verbatim from the proposal NFR table (Table 3.2), each with an added **verificat
 | ID | Category | Requirement | Target / metric | Verification |
 |---|---|---|---|---|
 | **NFR-1** | Performance | Interactive chatbot latency | Median response **under 3 s** for cached curriculum queries | Load test on cached queries; measure median latency |
-| **NFR-2** | Usability | Usable by students new to digital tools | Tasks done **without training**; multilingual UI | Task-based usability test (untrained users); UI in EN/UR |
+| **NFR-2** | Usability | Usable by students new to digital tools | Tasks done **without training**; multilingual UI. **Trade-off:** mandatory 2FA (SEC-14) adds friction for this cohort — mitigated by offering email-OTP as an equal method, backup codes, and admin-assisted recovery. Enrolment must be completable by a first-time user without help | Task-based usability test (untrained users), **including 2FA enrolment on a shared/basic device**; UI in EN/UR |
 | **NFR-3** | Reliability | Checkable, bounded agent actions | **Per-step checking**; graceful degradation on failure | Fault-injection; verify degradation paths (§20) |
 | **NFR-4** | Security | Skill/MCP checking + PII protection | **AES-256** at rest, **TLS 1.3** in transit; least-privilege manifests | Config audit; pen-test; manifest review |
 | **NFR-5** | Availability / abuse-resistance | Rate-limited model and API calls | Redis token-bucket per user/IP; **HTTP 429** on exceed (LLM10) | Rate-limit test → assert 429 + quota behavior |
@@ -757,6 +770,7 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 | Low teacher adoption of classroom/quiz tools | Medium | Medium | Minimal teacher UI (quiz + report viewing only); pilot one section first | Product lead | Low teacher activation in pilot |
 | Student performance data mishandled | Low | High | AES-256 at rest, TLS 1.3 in transit; RBAC **+ database RLS (SEC-13)**; minimal PII collection | Security lead | Access anomaly / audit finding |
 | **Inaccurate or paraphrased religious content** (Quran Translation, Islamiat) | Low | **Critical** | Quran Translation is **retrieval-only, verbatim** with generation disabled (FR-17); explicit "not found" on retrieval miss; board-approved sources only, teacher-reviewed | Content lead | Any generated/paraphrased religious text detected in evaluation |
+| **2FA locks students out** (no smartphone, shared device, lost codes) | **Medium** | High | Email-OTP offered as an equal method; 10 backup codes at enrolment; admin-assisted recovery with identity verification; temporary lock on failure, never permanent | Product lead | Support requests or drop-off at the enrolment step |
 | Student measured against subjects they don't take | Medium | Medium | Elective-group model (§2.4.1); coverage and exam-readiness computed only over the student's group subjects | Data lead | Coverage % looks implausible for a group |
 
 **Project-level risk (added):** P0 breadth (both boards × all classes) is data-intensive — the binding constraint is curriculum digitization (proposal §1.7). Schedule/coverage tracked against the data-acquisition plan (§12).
@@ -815,6 +829,10 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 | Content strategy | Per-subject rule governing how the agent may answer: `branch_a_english_source`, `branch_b_urdu_native`, `english_language`, or `religious_verbatim` |
 | Religious-verbatim | Retrieval-only mode (Quran Translation) where text is returned word-for-word and generation is disabled |
 | RLS (Row Level Security) | PostgreSQL feature where the database itself filters rows per acting user, independent of application code |
+| 2FA (two-factor authentication) | Requiring a second proof of identity beyond the password; mandatory for every role (SEC-14) |
+| TOTP | Time-based One-Time Password (RFC 6238) — the rotating 6-digit code shown by an authenticator app |
+| Email-OTP | A one-time code sent by email; the alternative second factor for users without a smartphone |
+| Backup codes | Ten single-use recovery codes issued at 2FA enrolment, stored hashed and shown only once |
 | Supabase | Managed PostgreSQL platform used as the OLTP database (Supabase Auth is not used; auth is application-managed) |
 | Tashreeh / Khulasa / Markazi khayal | Urdu-subject exam forms: explication / summary / central idea |
 | Mazmoon / Khat / Darkhwast | Essay / letter / application (Urdu productive items) |
@@ -835,7 +853,7 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 | O5 Multimodal Layer | G-3 | D | FR-5, FR-6 | SEC-2, NFR-3 | P0 |
 | O6 Self-Updating Pipeline | G-7 | J | FR-12 | SEC-9 | P2 |
 | O7 Secure Skills & MCP Layer | G-8 | H, I | FR-13, FR-14 | SEC-1…12, NFR-4/5 | P1 (baseline P0) |
-| (Platform foundation) | — | A, K | FR-A1/A2/A3, FR-K1 | SEC-10, **SEC-13**, NFR-6 | P0 |
+| (Platform foundation) | — | A, K | FR-A1/A2/A3, **FR-A4**, FR-K1 | SEC-10, **SEC-13**, **SEC-14**, NFR-2/6 | P0 |
 
 ---
 
@@ -877,6 +895,7 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 
 ### Appendix C — Testing Checklist (per epic, high level)
 - [ ] A: signup, RBAC, parental gate (9–10 blocked until verified; 11–12 optional)
+- [ ] A/2FA: enrolment required before full access; TOTP **and** email-OTP both work; backup code consumes single-use; replay of a used TOTP rejected; lockout after repeated failures is temporary; admin reset is audited
 - [ ] B: exact-question retrieval, class-adaptive language, generate-in-Urdu + glossary
 - [ ] C: couplet tashreeh template; essay/letter length & structure
 - [ ] C2: Quran Translation returned verbatim; generation disabled; retrieval miss → explicit "not found" (FR-17)

@@ -60,7 +60,15 @@ CREATE TYPE content_strategy   AS ENUM (
   'english_language'
 );
 CREATE TYPE guardian_status    AS ENUM ('pending','verified','revoked');
-CREATE TYPE token_kind         AS ENUM ('refresh','guardian_invite','email_verify','password_reset');
+CREATE TYPE token_kind         AS ENUM ('refresh','guardian_invite','email_verify','password_reset',
+                                        'two_factor_email_otp','two_factor_pending');
+
+-- Two-factor authentication (SEC-14). Mandatory for every role.
+--   totp      - RFC 6238, 6 digits, 30s period (authenticator app)
+--   email_otp - equal-standing alternative for users without a smartphone
+--               (many Class 9-10 students share or lack a device - NFR-2)
+CREATE TYPE two_factor_method  AS ENUM ('totp','email_otp');
+CREATE TYPE two_factor_status  AS ENUM ('pending','active','disabled');
 CREATE TYPE space_owner_role   AS ENUM ('teacher','parent');
 CREATE TYPE space_status       AS ENUM ('active','archived');
 CREATE TYPE quiz_source        AS ENUM ('teacher','agent_draft');
@@ -177,6 +185,61 @@ CREATE TABLE public.auth_token (
 );
 CREATE INDEX ix_auth_token_user_kind
   ON public.auth_token(user_id, kind) WHERE revoked = false;
+
+-- Two-factor authentication (SEC-14 / FR-A4) ---------------------------------
+-- A password alone never yields a session: it yields a short-lived
+-- 'two_factor_pending' token that must be exchanged via /2fa/verify.
+-- Recovery ladder: alternate method -> backup code -> audited admin reset.
+CREATE TABLE public.two_factor_enrollment (
+  user_id               uuid PRIMARY KEY REFERENCES public.app_user(id) ON DELETE CASCADE,
+  method                two_factor_method NOT NULL,
+  status                two_factor_status NOT NULL DEFAULT 'pending',
+  -- AES-256 ciphertext; the key lives in application config, NOT in the
+  -- database, so a database dump alone does not yield usable secrets.
+  totp_secret_encrypted bytea,
+  confirmed_at          timestamptz,
+  last_used_at          timestamptz,
+  -- Replay guard: the TOTP time-step counter most recently accepted.
+  -- A code at a counter <= this value is rejected even if still in-window.
+  last_used_counter     bigint,
+  failed_attempts       smallint    NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+  locked_until          timestamptz,          -- ALWAYS temporary, never a permanent lockout
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_totp_requires_secret
+    CHECK (method <> 'totp' OR totp_secret_encrypted IS NOT NULL),
+  CONSTRAINT ck_email_otp_has_no_secret
+    CHECK (method <> 'email_otp' OR totp_secret_encrypted IS NULL),
+  CONSTRAINT ck_active_is_confirmed
+    CHECK (status <> 'active' OR confirmed_at IS NOT NULL)
+);
+CREATE TRIGGER trg_two_factor_enrollment_updated BEFORE UPDATE ON public.two_factor_enrollment
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_at();
+CREATE INDEX ix_2fa_locked ON public.two_factor_enrollment(locked_until)
+  WHERE locked_until IS NOT NULL;
+
+-- 10 per enrollment, argon2id-hashed, single use.
+-- Plaintext exists only in the one response that issues them.
+CREATE TABLE public.two_factor_backup_code (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid        NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
+  code_hash  text        NOT NULL,
+  used_at    timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_backup_code UNIQUE (user_id, code_hash)
+);
+CREATE INDEX ix_backup_code_unused ON public.two_factor_backup_code(user_id)
+  WHERE used_at IS NULL;
+
+-- Admin support view: lockout status WITHOUT secrets or code hashes.
+-- Admins troubleshooting a lockout never need the secret, so they never see it.
+CREATE VIEW public.two_factor_status_v AS
+SELECT
+  e.user_id, e.method, e.status, e.confirmed_at, e.last_used_at,
+  e.failed_attempts, e.locked_until,
+  (SELECT count(*) FROM public.two_factor_backup_code b
+    WHERE b.user_id = e.user_id AND b.used_at IS NULL) AS unused_backup_codes
+FROM public.two_factor_enrollment e;
 
 -- ============================================================================
 -- 2. CURRICULUM TAXONOMY                                        (tdd §5.3b)

@@ -208,6 +208,21 @@ CREATE POLICY auth_token_owner ON public.auth_token
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
+-- Two-factor (SEC-14): owner-only.
+-- Deliberately NO admin policy on these base tables -- admins troubleshoot
+-- lockouts through two_factor_status_v, which exposes no secrets or code
+-- hashes. RLS is row-level, not column-level, so an admin row policy here
+-- would have handed them the secret column too.
+CREATE POLICY two_factor_enrollment_owner ON public.two_factor_enrollment
+  FOR ALL TO app_backend
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
+CREATE POLICY two_factor_backup_code_owner ON public.two_factor_backup_code
+  FOR ALL TO app_backend
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
 -- ============================================================================
 -- 2. CURRICULUM TAXONOMY — readable by any authenticated user, admin writes
 -- ============================================================================
