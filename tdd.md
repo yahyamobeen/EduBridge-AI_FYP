@@ -1,7 +1,7 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.1.1
+**Version:** 0.2.0
 **Status:** Draft — under section-by-section review
 **Last Updated:** July 19, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.2.0 | 2026-08-01 | EduBridge AI Team | OLTP moved to **Supabase**; **Supabase CLI migrations replace Alembic**; **Row Level Security** designed and implemented (§6.8). Schema: `class_level`, `subject_group`, `content_strategy`, `student_group`, `agent_component`; corrected `uuidv7()`→`gen_random_uuid()` (PG16) and the invalid partitioned-table PK on `audit_log`. Agent routing extended to **four content strategies** including **religious-verbatim** (generation disabled for Quran Translation). SQL now lives in `supabase/migrations/`. |
 
 ---
 
@@ -39,7 +40,7 @@ This document describes the technical design of **EduBridge AI**, a secure, agen
 
 ### 2.1 High-Level Architecture
 
-EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal module boundaries) with a Next.js frontend, MCP servers and model servers as separate processes, and a cross-cutting Secure Skills & MCP Layer. Three data stores: **PostgreSQL** (OLTP source of truth), a **dedicated vector DB** (embeddings), and a **star-schema OLAP** schema (analytics).
+EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal module boundaries) with a Next.js frontend, MCP servers and model servers as separate processes, and a cross-cutting Secure Skills & MCP Layer. Three data stores: **Supabase / managed PostgreSQL** (OLTP source of truth, with Row Level Security), a **dedicated vector DB** (embeddings), and a **star-schema OLAP** schema (analytics) inside the same Supabase instance.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
@@ -69,8 +70,8 @@ EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal modu
      │                    │                        │                    │
      ▼                    ▼                        ▼                    ▼
 ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐  ┌──────────────┐
-│ PostgreSQL  │  │  Vector DB       │  │ OLAP star schema   │  │ Redis        │
-│ OLTP (SoT)  │  │  Chroma/FAISS    │  │ (analytics schema) │  │ cache+RL+queue│
+│ Supabase PG │  │  Vector DB       │  │ OLAP star schema   │  │ Redis        │
+│ OLTP+RLS(SoT)│ │  Chroma/FAISS    │  │ (analytics schema) │  │ cache+RL+queue│
 │ all domains │  │  BGE-M3 1024-dim │  │ facts/dimensions   │  │              │
 └─────────────┘  └──────────────────┘  └────────────────────┘  └──────────────┘
         ▲  object storage (KB docs, textbook figures)
@@ -94,9 +95,10 @@ EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal modu
 | **Backend framework** | FastAPI | ≥0.111 | Modular-monolith API, async |
 | **ASGI server** | Uvicorn (+ Gunicorn workers) | ≥0.30 | Serving |
 | **Language** | Python | ≥3.12 | Backend runtime |
-| **ORM / migrations** | SQLAlchemy 2.0 + Alembic | latest | OLTP schema + migrations |
-| **OLTP database** | PostgreSQL | ≥16 | Source of truth (all domains) |
-| **Analytics (OLAP)** | PostgreSQL (separate `analytics` schema) | ≥16 | Star-schema facts/dimensions |
+| **OLTP database** | **Supabase** (managed PostgreSQL) | PG ≥15 | Source of truth (all domains), with Row Level Security |
+| **Migrations** | **Supabase CLI** (versioned plain SQL in `supabase/migrations/`) | latest | Schema history, reviewable in PRs |
+| **ORM / query layer** | SQLAlchemy 2.0 (hand-written models, no autogenerate) | latest | Typed access from FastAPI; schema authored in SQL |
+| **Analytics (OLAP)** | Same Supabase instance, separate `analytics` schema | PG ≥15 | Star-schema facts/dimensions |
 | **Vector database** | ChromaDB (primary) / FAISS (scale) **[PROPOSED]** | latest | ANN over BGE-M3 embeddings |
 | **Cache / rate-limit / broker** | Redis | ≥7 | Cache, token-bucket, Celery broker |
 | **Async jobs** | Celery (+ Redis broker) | latest | ETL, reports, indexing, mining, self-update, **request-log aggregation** |
@@ -116,7 +118,9 @@ EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal modu
 ### 2.3 Architectural Decisions
 
 - **AD-1 — Modular monolith + monorepo (T3).** One FastAPI app with strict module boundaries (`auth`, `agent`, `retrieval`, `assessment`, `classroom`, `pipeline`, `reporting`, `platform`, `security`); shared domain models; single repo. Rationale: an FYP team ships and reasons faster with one deployable; module boundaries preserve the option to split later. MCP servers and model servers run as **separate processes** (isolation + independent scaling of GPU work).
-- **AD-2 — Data-first, polyglot storage (T6/T7/T8).** PostgreSQL is the **single source of truth**; the vector DB and the OLAP star schema are **derived** stores kept consistent by idempotent jobs (§5.6a). No business truth lives only in a derived store.
+- **AD-2 — Data-first, polyglot storage (T6/T7/T8).** Supabase PostgreSQL is the **single source of truth**; the vector DB and the OLAP star schema are **derived** stores kept consistent by idempotent jobs (§5.6a). No business truth lives only in a derived store.
+- **AD-6 — Supabase as database platform, application-managed auth.** Supabase provides managed PostgreSQL, RLS, and backups. **Supabase Auth (`auth.users`) is deliberately not used** — FastAPI issues its own JWTs and hashes passwords with argon2id (§3.1), keeping the auth design in application code. Consequence: RLS cannot use `auth.uid()`, so authorization context is passed per transaction (§6.8).
+- **AD-7 — SQL-first schema.** The schema is authored as **plain SQL migrations** under `supabase/migrations/` (Supabase CLI), not generated from ORM models. Migrations are readable and reviewable in PRs; SQLAlchemy models are hand-written to match. This replaces Alembic autogeneration.
 - **AD-3 — Self-host Qwen primary + hosted-API fallback (T4).** The agent LLM runs on self-hosted vLLM for privacy/cost; a hosted API is a circuit-breaker fallback for load/quality. Embeddings, rerank, and guardrails are always self-hosted; TTS/avatar hybrid.
 - **AD-4 — Sync vs async boundary.** The request path (chat, quiz attempt, retrieval) is synchronous/streamed; heavy/periodic work (embedding (re)indexing, past-paper mining, weekly reports, OLAP ETL, self-update ingestion) runs on async workers. Nothing on the request path blocks on a batch job.
 - **AD-5 — Security as a cross-cutting layer.** Every tool/skill/MCP call passes through the Secure Skills & MCP Layer (vetting at admission, guardrails at runtime); baseline guardrails + rate-limit ship in P0 (SEC-1/2/3).
@@ -161,6 +165,8 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 - **Anti-forgery of the gate:** `guardian_link` has `CHECK(parent_id≠student_id)`; the service enforces `parent_id.role='parent'` and requires a distinct **out-of-band** verification signal (a parent email/identity separate from the student's session) before `status→verified` — a student cannot self-satisfy the gate.
 - **Single canonical parent↔child link:** `guardian_link` is the only source of truth for "a parent may view a child" and for the gate; the guardian-space path (§3.6) creates/verifies a `guardian_link`, it does not rely on `enrollment`.
 - **Enforcement is at the API + data layer**, not the UI, so it cannot be bypassed by calling the API directly (security gate #4).
+- **RLS context is set per transaction.** Because auth is application-managed, every request transaction issues `SET LOCAL app.current_user_id = '<uuid>'` before any query, which the RLS policies read (§6.8). If it is not set, policies deny everything — fail-closed.
+- **Student registration captures `student_group`** alongside board/class/medium; a database `CHECK` rejects invalid class/group pairs (e.g. a Class-9 student marked `pre_medical`).
 
 **Interfaces:** `AuthService.register()`, `.login()`, `.rotate_refresh()`, `GuardianService.invite()/confirm()/is_verified(student_id)`.
 
@@ -213,8 +219,12 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 **Responsibilities:** cross-lingual retrieval + reranking, Branch A/B routing, grounding context assembly, and the vector-store↔Postgres consistency contract (read side).
 
 **Key design decisions:**
-- **Branch A (non-language subjects):** embed query (BGE-M3) → ANN over the vector DB collection filtered by `board/class/subject/chapter` → rerank (BGE-reranker-v2-m3) → assemble grounded context (English source) → hand to `adaptive_language` for generate-in-Urdu.
-- **Branch B (Urdu Lazmi):** retrieve from the Urdu-notes collection; objective items returned **verbatim**, productive items via template scaffold.
+Routing is driven by the subject's **`content_strategy`** column (four values), not by a hard-coded subject name:
+
+- **`branch_a_english_source`** (Maths, Physics, Chemistry, Biology, Computer Science, Islamiat, Pakistan Studies): embed query (BGE-M3) → ANN over the vector DB collection filtered by `board/class/subject/chapter` + live KB version → rerank (BGE-reranker-v2-m3) → assemble grounded context (English source) → hand to `adaptive_language` for generate-in-Urdu.
+- **`branch_b_urdu_native`** (Urdu): retrieve from the Urdu-notes collection; objective items returned **verbatim**, productive items via template scaffold.
+- **`english_language`** (English): retrieve from the English-subject corpus; grammar/essay/comprehension answered against fixed exam templates.
+- **`religious_verbatim`** (Quran Translation): retrieval **only**. The generation node is skipped entirely; the stored board-approved text is returned word-for-word with its reference. A retrieval miss returns an explicit "not found", never a generated answer (FR-17).
 - Every vector hit carries the **Postgres `curriculum_item`/`urdu_note_item` id**; the actual grounded text is read from Postgres (source of truth), not from the vector payload (avoids drift #2).
 - **Similarity threshold** gates whether to answer, render a visual, or degrade (PRD §20).
 
@@ -400,7 +410,7 @@ Every skill (self or MCP) implements a uniform contract; the declared `capabilit
 
 ### 4.6 Routing, grounding & anti-hallucination
 
-- **Route:** `subject == "Urdu Lazmi" → Branch B`, else **Branch A**.
+- **Route:** read `subject.content_strategy` and dispatch to one of the four paths in §3.4. **`religious_verbatim` disables the generate node** — a hard guard, not a prompt instruction, so the model cannot compose Quranic text under any circumstance.
 - **Grounding rule:** the generator receives only retrieved, Postgres-sourced context; if max rerank score < `τ_sim` **[PROPOSED threshold]**, the graph goes to `degrade` (no free-generation). Objective Urdu items are returned **verbatim**; productive items use a controlled template.
 - **Citations:** answers carry the `curriculum_item`/`slo` ids used, enabling the groundedness KPI (PRD §22).
 - **Indirect-injection defense (LLM01):** retrieved KB text, figure OCR, and tool/`web_search` outputs are **delimited/spotlighted and sanitized** — treated as untrusted *data*, never as instructions — before entering the generator prompt. Guardrails thus cover input **and** grounding content, not just user input and final output.
@@ -414,7 +424,7 @@ The data model leads the design. PostgreSQL (OLTP) is the **single source of tru
 ### 5.1 Data architecture principles
 
 - **Normalization:** 3NF baseline in OLTP; denormalization only in the OLAP layer (§5.6).
-- **Keys:** surrogate PKs `uuid` (UUID v7, time-ordered) for entities; natural **unique constraints** for real-world keys (`user.email`, `join_code.code`, `slo(board,class,subject,chapter,code)`).
+- **Keys:** surrogate PKs `uuid` via **`gen_random_uuid()`** (built into PG 13+); natural **unique constraints** for real-world keys (`app_user.email`, `join_code.code`, `slo(chapter_id,code)`). *`uuidv7()` is only available from PostgreSQL 18 — switch the defaults there for time-ordered keys and better index locality.*
 - **Referential integrity:** every FK declared with an explicit `ON DELETE` rule (`RESTRICT` for curriculum/audit; `CASCADE` only for owned children; `SET NULL` where optional). No application-only relationships.
 - **Enums/domains:** status/category columns use Postgres `ENUM` or lookup tables (no free-text status).
 - **Auditing:** every table has `created_at`, `updated_at` (UTC, trigger-maintained); mutable domain tables carry `created_by`. Sensitive deletes are **soft** (`deleted_at`) where retention/audit requires it.
@@ -429,7 +439,9 @@ user ─1:1─ {student|teacher|parent|admin}_profile
 parent_profile ─M:N─ student_profile          (via guardian_link; status)
 teacher_profile ─1:N─ classroom_space ─M:N─ student_profile (via enrollment)
 classroom_space ─1:N─ join_code ; ─1:N─ announcement
-board ─1:N─ class ─1:N─ subject ─1:N─ chapter ─1:N─ slo
+board ─1:N─ class_level ─1:N─ subject ─1:N─ chapter ─1:N─ slo
+subject ─1:N─ subject_group          (which elective groups take the subject)
+student_profile ──student_group──▶ subject_group  (a student's subject list)
 curriculum_item ─M:N─ slo ; ─N:1─ chapter ; ─1:0..1─ textbook_figure
 kb_document ─1:N─ curriculum_item|urdu_note_item   (versioned by board+year)
 past_paper ─1:N─ question ─M:N─ slo ; question ─1:1─ item_difficulty
@@ -437,7 +449,8 @@ quiz ─1:N─ quiz_attempt ─1:N─ attempt_answer ─N:1─ question
 student_profile ─1:N─ mastery_estimate ─N:1─ slo
 student_profile ─1:N─ coverage_record | exam_readiness_score | review_schedule
 chat_session ─1:N─ message ─1:0..1─ visual_aid
-skill|mcp_server ─1:1─ permission_manifest ; ─1:1─ agent_sbom_entry ; ─1:N─ vetting_result
+agent_component ─1:1─ permission_manifest ; ─1:1─ agent_sbom_entry ; ─1:N─ vetting_result
+question ─1:1─ question_key   (server-only; no RLS policy grants access)
 * ─writes─▶ audit_log
 ```
 
@@ -445,173 +458,40 @@ skill|mcp_server ─1:1─ permission_manifest ; ─1:1─ agent_sbom_entry ; �
 
 Each table lists notable columns, keys, and indexes (full DDL for core tables in §5.4; remaining tables follow the same conventions).
 
-- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class, medium, language_pref)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)`.
-- **(b) Curriculum & KB:** `board`, `class(board_id🔗, level 9..12)`, `subject(class_id🔗, name, is_language)`, `chapter(subject_id🔗, no, title)`, `slo(chapter_id🔗, code, text, UNIQUE(chapter_id,code))`, `kb_document(id, board_id🔗, curriculum_year, source_uri, provenance_status⋈enum, version, integrity_hash, UNIQUE(board_id,curriculum_year,version))`, `curriculum_item(id, kb_document_id🔗, chapter_id🔗, exercise, question, worked_solution, lang)`, `curriculum_item_slo(item_id🔗, slo_id🔗, PK(item_id,slo_id))`, `textbook_figure(id, curriculum_item_id🔗?, chapter_id🔗, caption_ocr, embedding_ref)`, `urdu_note_item(id, kb_document_id🔗, type⋈enum, fields jsonb, source)`, `glossary_term(id, board_id🔗, subject_id🔗, en_term, ur_term, UNIQUE(subject_id,en_term))`.
+- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class_level, **student_group**, medium, language_pref, CHECK class/group pairing)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)`.
+- **(b) Curriculum & KB:** `board`, `class_level(board_id🔗, level 9..12, UNIQUE(board_id,level))`, `subject(class_level_id🔗, name, **content_strategy**⋈enum, UNIQUE(class_level_id,name))` — defined **once per (board,class)**, never per group, `subject_group(subject_id🔗, student_group⋈enum, PK(subject_id,student_group))` — which elective groups take it, `chapter(subject_id🔗, no, title)`, `slo(chapter_id🔗, code, text, effective_from_year, retired_at, UNIQUE(chapter_id,code))` — **soft-retired, never deleted**, `kb_document(id, board_id🔗, curriculum_year, source_uri, provenance_status⋈enum, version, integrity_hash, UNIQUE(board_id,curriculum_year,version))`, `curriculum_item(id, kb_document_id🔗, chapter_id🔗, exercise, question, worked_solution, lang)`, `curriculum_item_slo(item_id🔗, slo_id🔗, PK(item_id,slo_id))`, `textbook_figure(id, curriculum_item_id🔗?, chapter_id🔗, caption_ocr, embedding_ref)`, `urdu_note_item(id, kb_document_id🔗, type⋈enum, fields jsonb, source)`, `glossary_term(id, board_id🔗, subject_id🔗, en_term, ur_term, UNIQUE(subject_id,en_term))`.
 - **(c) Assessment:** `past_paper(id, board_id🔗, class, subject_id🔗, year)`, `question(id, past_paper_id🔗?, stem, choices jsonb, primary_slo_id🔗, UNIQUE)` — **no key column here**, `question_key(question_id🔗🔑, answer_key, rationale)` — **server-only table, never in any client schema/route** (NFR-8 backstop), `question_slo(question_id🔗, slo_id🔗, is_primary, PK(...))`, `item_difficulty(question_id🔗🔑, irt_a, irt_b, irt_c)`, `slo_frequency_cluster(id, slo_id🔗, board_id🔗, freq_score, years)`, `quiz(id, space_id🔗, subject_id🔗, created_by🔗, source⋈enum, time_open, time_close, one_attempt=true, shuffle=true)`, `quiz_question(quiz_id🔗, question_id🔗, PK(...))`, `quiz_attempt(id, quiz_id🔗, student_id🔗, state⋈enum, started_at, submitted_at, score, version, UNIQUE(quiz_id,student_id))`, `attempt_answer(id, attempt_id🔗, question_id🔗, response, correct)`.
 - **(d) Learner analytics (OLTP current-state):** `mastery_estimate(student_id🔗, slo_id🔗, p_mastery, p_transit, p_guess, p_slip, updated_at, version, PK(student_id,slo_id))`, `coverage_record(id, student_id🔗, subject_id🔗, coverage_pct, as_of)`, `exam_readiness_score(id, student_id🔗, subject_id🔗, score, expected_marks, computed_at)`, `review_schedule(id, student_id🔗, slo_id🔗, due_at, interval)`.
 - **(e) Classroom:** `classroom_space(id, owner_id🔗, owner_role, subject_scope, status)`, `join_code(id, space_id🔗, code🔑, revoked, expires_at)`, `enrollment(id, space_id🔗, student_id🔗, joined_at, left_at, UNIQUE(space_id,student_id))`, `announcement(id, space_id🔗, author_id🔗, body, ts)`.
 - **(f) Tutor:** `chat_session(id, student_id🔗, started_at)`, `message(id, session_id🔗, role, content, slo_refs uuid[], ts)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
-- **(g) Security & platform:** `skill(id, name🔑, kind, source, version, status⋈enum)`, `mcp_server(id, name🔑, source, version, status⋈enum)`, `permission_manifest(id, component_id🔗, granted_scopes text[], network text[])`, `agent_sbom_entry(id, component_id🔗, provenance, permissions jsonb, hash, admitted_at)`, `vetting_result(id, component_id🔗, findings jsonb, claim_vs_actual jsonb, verdict⋈enum, ts)`, `audit_log(id, actor_id🔗?, action, target, tool_call jsonb, ts)` — security trail, `api_request_log(id, request_id, actor_id🔗?, method, endpoint, path, status_code, message, latency_ms, ip, ts)` — **operational per-call access log (daily-partitioned; admin daily-logs panel)**, (`rate_limit_bucket` → Redis).
+- **(g) Security & platform:** `agent_component(id, kind⋈enum{skill,mcp_server}, name, source, version, status⋈enum, UNIQUE(kind,name,version))` — **skill and mcp_server unified into one table** so `permission_manifest` can hold a single valid FK (a polymorphic reference to two tables is not expressible), `permission_manifest(id, component_id🔗 UNIQUE, granted_scopes text[], db_scopes text[], network jsonb, resource_limits jsonb)`, `agent_sbom_entry(id, component_id🔗, provenance, permissions jsonb, hash, admitted_at)`, `vetting_result(id, component_id🔗, findings jsonb, claim_vs_actual jsonb, verdict⋈enum, ts)`, `audit_log(id, actor_id🔗?, action, target, tool_call jsonb, ts)` — security trail, `api_request_log(id, request_id, actor_id🔗?, method, endpoint, path, status_code, message, latency_ms, ip, ts)` — **operational per-call access log (daily-partitioned; admin daily-logs panel)**, (`rate_limit_bucket` → Redis).
 
-### 5.4 Physical design & DDL (representative core tables)
+### 5.4 Physical design & DDL
 
-```sql
--- ENUMS
-CREATE TYPE user_role         AS ENUM ('student','teacher','parent','admin');
-CREATE TYPE board_code        AS ENUM ('PCTB','STBB');
-CREATE TYPE guardian_status   AS ENUM ('pending','verified','revoked');
-CREATE TYPE quiz_attempt_state AS ENUM ('not_started','in_progress','submitted','auto_submitted','graded');
-CREATE TYPE kb_provenance     AS ENUM ('pending','verified','quarantined');
-CREATE TYPE kb_lifecycle      AS ENUM ('ingesting','indexed','integrity_verified','live','superseded');
-CREATE TYPE vetting_verdict   AS ENUM ('pending','admitted','blocked');
+> **The authoritative schema lives in `supabase/migrations/` — not in this document.**
+> Duplicating DDL here would guarantee drift. This section describes the *approach*; the SQL is the artefact.
 
--- IDENTITY
-CREATE TABLE app_user (
-  id            uuid PRIMARY KEY DEFAULT uuidv7(),
-  email         citext NOT NULL UNIQUE,
-  password_hash text   NOT NULL,                 -- argon2id
-  role          user_role NOT NULL,
-  status        text   NOT NULL DEFAULT 'active',
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  updated_at    timestamptz NOT NULL DEFAULT now()
-);
+| Migration | Contents |
+|---|---|
+| `20260801120000_initial_schema.sql` | Extensions, enums, all 42 tables, constraints, indexes, triggers, partitions |
+| `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, 54 policies (§6.8) |
+| `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (76 rows) and elective-group mappings |
 
-CREATE TABLE student_profile (
-  user_id     uuid PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
-  board       board_code NOT NULL,
-  class_level int NOT NULL CHECK (class_level BETWEEN 9 AND 12),
-  medium      text NOT NULL CHECK (medium IN ('en','ur')),
-  language_pref text NOT NULL DEFAULT 'en'
-);
+**Conventions applied throughout:**
 
-CREATE TABLE guardian_link (
-  id          uuid PRIMARY KEY DEFAULT uuidv7(),
-  parent_id   uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  student_id  uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  status      guardian_status NOT NULL DEFAULT 'pending',
-  verification_method text,                     -- 'oob_email' | 'manual_review' | 'phone' (anti-forgery)
-  verified_at timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT ck_guardian_not_self CHECK (parent_id <> student_id),
-  UNIQUE (parent_id, student_id)
-);
-CREATE INDEX ix_guardian_student ON guardian_link(student_id) WHERE status = 'verified';
--- Service layer additionally enforces: parent_id.role='parent'; a distinct verified out-of-band
--- signal (not the same email/session as the student) before status can become 'verified' (anti-forgery, §6.7).
+- **Primary keys** — `uuid DEFAULT gen_random_uuid()` (PG 13+). `bigint GENERATED ALWAYS AS IDENTITY` for the high-volume `api_request_log`.
+- **Referential integrity** — every FK declares `ON DELETE`: `RESTRICT` for curriculum and audit references, `CASCADE` for owned children, `SET NULL` for optional actors.
+- **Enums** for every status/category column; no free-text status anywhere.
+- **Check constraints** encode real rules: `class_level BETWEEN 9 AND 12`, `parent_id <> student_id` on the parental gate, class/group pairing, `time_close > time_open`, probability columns bounded `0..1`.
+- **Natural uniqueness** — `app_user.email`, `join_code.code`, `slo(chapter_id,code)`, `quiz_attempt(quiz_id,student_id)` (enforces one attempt), `subject(class_level_id,name)`.
+- **Index strategy** — every FK used in a join or filter; **partial indexes** for hot predicates (`WHERE status='verified'`, `WHERE state='in_progress'` for the auto-submit sweeper, `WHERE left_at IS NULL`); **GIN** on `jsonb` and `uuid[]` (`message.slo_refs`, `question.choices`).
+- **Partitioning** — `audit_log` (monthly) and `api_request_log` (daily) are range-partitioned on `created_at`, each with a `DEFAULT` partition so inserts never fail. Note that a partitioned table's primary key **must include the partition key**, hence `PRIMARY KEY (id, created_at)`. `message` is intentionally left unpartitioned for now so `visual_aid` can keep a simple single-column FK.
+- **Triggers** — a shared `app.set_updated_at()` maintains `updated_at` on every mutable table.
 
--- CURRICULUM (RESTRICT: curriculum is referenced by analytics/attempts)
-CREATE TABLE kb_document (
-  id            uuid PRIMARY KEY DEFAULT uuidv7(),
-  board_id      uuid NOT NULL REFERENCES board(id) ON DELETE RESTRICT,
-  subject_id    uuid REFERENCES subject(id) ON DELETE RESTRICT,   -- scoped to a textbook, NOT the whole board
-  curriculum_year int NOT NULL,
-  version       int NOT NULL DEFAULT 1,
-  source_uri    text NOT NULL,
-  provenance_status kb_provenance NOT NULL DEFAULT 'pending',
-  lifecycle     kb_lifecycle NOT NULL DEFAULT 'ingesting',        -- ingesting→indexed→integrity_verified→live→superseded
-  is_live       boolean NOT NULL DEFAULT false,
-  superseded_at timestamptz,
-  integrity_hash text,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (board_id, subject_id, curriculum_year, version)
-);
--- Exactly one LIVE edition per (board, subject); flipping a new version live supersedes the old.
-CREATE UNIQUE INDEX ux_kb_live ON kb_document(board_id, subject_id) WHERE is_live;
+**Two corrections made against earlier drafts of this document:**
 
-CREATE TABLE slo (
-  id            uuid PRIMARY KEY DEFAULT uuidv7(),
-  chapter_id    uuid NOT NULL REFERENCES chapter(id) ON DELETE RESTRICT,
-  code          text NOT NULL,
-  text          text NOT NULL,
-  effective_from_year int,            -- SCD: curriculum year the SLO was introduced
-  retired_at    timestamptz,          -- soft-retire on syllabus change; NEVER hard-delete
-  UNIQUE (chapter_id, code)
-);
--- SLOs are versioned SCD-style (retire, not delete) so historical mastery/coverage keep their meaning
--- across curriculum years. Analytics filter active SLOs by retired_at IS NULL for current reporting.
-
-CREATE TABLE curriculum_item (
-  id            uuid PRIMARY KEY DEFAULT uuidv7(),
-  kb_document_id uuid NOT NULL REFERENCES kb_document(id) ON DELETE RESTRICT,
-  chapter_id    uuid NOT NULL REFERENCES chapter(id) ON DELETE RESTRICT,
-  exercise      text,
-  question      text NOT NULL,
-  worked_solution text NOT NULL,
-  lang          text NOT NULL DEFAULT 'en',
-  created_at    timestamptz NOT NULL DEFAULT now()
-);
-CREATE TABLE curriculum_item_slo (
-  item_id uuid REFERENCES curriculum_item(id) ON DELETE CASCADE,
-  slo_id  uuid REFERENCES slo(id) ON DELETE RESTRICT,
-  PRIMARY KEY (item_id, slo_id)
-);
-CREATE INDEX ix_citem_chapter ON curriculum_item(chapter_id);
-
--- ASSESSMENT
-CREATE TABLE quiz_attempt (
-  id          uuid PRIMARY KEY DEFAULT uuidv7(),
-  quiz_id     uuid NOT NULL REFERENCES quiz(id) ON DELETE CASCADE,
-  student_id  uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
-  state       quiz_attempt_state NOT NULL DEFAULT 'not_started',
-  started_at  timestamptz,
-  submitted_at timestamptz,
-  score       numeric(5,2),
-  version     int NOT NULL DEFAULT 0,
-  UNIQUE (quiz_id, student_id)                    -- one attempt (NFR-8)
-);
-
-CREATE TABLE attempt_answer (
-  id          uuid PRIMARY KEY DEFAULT uuidv7(),
-  attempt_id  uuid NOT NULL REFERENCES quiz_attempt(id) ON DELETE CASCADE,
-  question_id uuid NOT NULL REFERENCES question(id) ON DELETE RESTRICT,
-  response    text,
-  correct     boolean,
-  UNIQUE (attempt_id, question_id)
-);
-
--- ANALYTICS current-state (snapshots go to OLAP)
-CREATE TABLE mastery_estimate (
-  student_id uuid REFERENCES app_user(id) ON DELETE CASCADE,
-  slo_id     uuid REFERENCES slo(id) ON DELETE RESTRICT,
-  p_mastery  real NOT NULL CHECK (p_mastery BETWEEN 0 AND 1),
-  p_transit  real NOT NULL, p_guess real NOT NULL, p_slip real NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  version    int NOT NULL DEFAULT 0,
-  PRIMARY KEY (student_id, slo_id)
-);
-
--- SECURITY
-CREATE TABLE audit_log (          -- SECURITY audit: tool calls + sensitive data access (tamper-evident)
-  id         uuid PRIMARY KEY DEFAULT uuidv7(),
-  actor_id   uuid REFERENCES app_user(id) ON DELETE SET NULL,
-  action     text NOT NULL,
-  target     text,
-  tool_call  jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
-) PARTITION BY RANGE (created_at);        -- monthly partitions
-
--- OPERATIONAL access log: EVERY API call (endpoint, status, message) for the admin daily-logs panel.
--- Separate from audit_log (different concern, far higher volume, daily-partitioned).
-CREATE TABLE api_request_log (
-  id          bigint GENERATED ALWAYS AS IDENTITY,
-  request_id  uuid  NOT NULL,                       -- correlates with X-Request-Id / audit_log
-  actor_id    uuid  REFERENCES app_user(id) ON DELETE SET NULL,
-  role        user_role,
-  method      text  NOT NULL,                       -- GET/POST/...
-  endpoint    text  NOT NULL,                       -- route template, e.g. /api/tutor/ask
-  path        text  NOT NULL,                       -- concrete path
-  status_code int   NOT NULL,                       -- 200/403/429/...
-  message     text,                                 -- app error code/summary (e.g. RATE_LIMITED, GATE_PENDING)
-  latency_ms  int,
-  ip          inet,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (id, created_at)
-) PARTITION BY RANGE (created_at);                  -- DAILY partitions (high volume; easy per-day reads/retention)
-CREATE INDEX ix_reqlog_day_ep     ON api_request_log(created_at, endpoint, status_code);
-CREATE INDEX ix_reqlog_day_status ON api_request_log(created_at, status_code);
-```
-
-**Index & partition strategy:** index every FK used in a join/filter; **partial indexes** for hot predicates (e.g. verified guardian links, open quizzes); **GIN** on `jsonb`/`uuid[]` (e.g. `message.slo_refs`, `question.choices`); **range-partition** `audit_log`, `message`, and OLAP fact tables by time; `kb_document`/embeddings partitioned logically by `board+year`. `updated_at` maintained by a shared trigger.
+1. `uuidv7()` does not exist before **PostgreSQL 18**; on the targeted version it fails outright. Replaced with `gen_random_uuid()`.
+2. `audit_log` was specified with `id uuid PRIMARY KEY` while partitioned by `created_at` — rejected by PostgreSQL. Corrected to a composite key.
 
 ### 5.5 Vector store design (polyglot)
 
@@ -763,7 +643,38 @@ Least-privilege by default: `net:deny`, `fs:none`, no DB scope unless declared a
 - **AuthZ:** RBAC (§3.1) enforced at API + data layer; subject-scoped teacher, read-only parent, owner-only student, class-gate.
 - **Audit:** `audit_log` records who/what/when for tool calls and data access; minors-safe (no chat content in third-party views).
 
-### 6.8 CI/CD hardening
+### 6.8 Row Level Security (SEC-13) — database-level authorization
+
+RLS is a **second, independent enforcement layer** beneath application authorization. If an API handler forgets a `WHERE student_id = ...`, or a credential leaks, the database still refuses to return another student's rows.
+
+**Context propagation.** Auth is application-managed, so Supabase's `auth.uid()` is unavailable. FastAPI instead sets the acting user per transaction:
+
+```sql
+SET LOCAL app.current_user_id = '<uuid from our JWT>';
+```
+
+`SET LOCAL` is transaction-scoped, which keeps it correct under connection pooling. Policies read it via `app.current_user_id()`; if unset the function returns `NULL` and **every policy denies** — fail-closed.
+
+**Two non-obvious requirements** (getting either wrong makes all policies silently inert):
+
+1. Table **owners bypass RLS by default**, so every table is set to `FORCE ROW LEVEL SECURITY`.
+2. FastAPI connects as a dedicated **`app_backend` role with `NOBYPASSRLS`** — never as `postgres`. Background jobs that legitimately need unrestricted access (OLAP ETL, quiz sweeper, vector reconciliation) use the owner/service role instead.
+
+**Policy model** (54 policies; helper functions in the `app` schema, `SECURITY DEFINER` to avoid recursion):
+
+| Data | Rule |
+|---|---|
+| Own profile / progress / attempts | `student_id = app.current_user_id()` |
+| Parent → child | `app.is_verified_guardian_of(student)` — requires `guardian_link.status='verified'` |
+| Teacher → student | `app.teaches_student_subject(student, subject)` — active enrollment in the teacher's space **and** the subject in `teacher_subject_scope` |
+| Chat (`chat_session`/`message`/`visual_aid`) | **Owner only.** No teacher, parent, or admin read path exists |
+| `question_key` | **No policy at all** — the app role can never read answer keys (NFR-8 database backstop) |
+| `audit_log`, `api_request_log` | Insert-only from the app, admin read; no UPDATE/DELETE policy, so the trail is tamper-evident |
+| Curriculum taxonomy | Readable by any authenticated user; admin writes |
+
+Enabling RLS on every `public` table also closes Supabase's PostgREST exposure of unprotected tables.
+
+### 6.9 CI/CD hardening
 
 GitHub Actions on every PR: unit/integration tests, **Semgrep** static analysis, **OPA policy tests**, the **Secure Skills & MCP scanner**, container build + **sigstore** signing. Protected `main`; only lead merges; secrets encrypted.
 
@@ -818,7 +729,8 @@ Python ≥3.12, `uv`; Node ≥20 (Next.js); Docker + docker-compose; PostgreSQL 
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | — | PostgreSQL (OLTP) DSN |
+| `DATABASE_URL` | — | Supabase Postgres DSN. **Must use the `app_backend` role, not `postgres`** — connecting as the owner bypasses RLS (§6.8) |
+| `SUPABASE_PROJECT_REF` | — | Project ref for `supabase link` / `db push` |
 | `ANALYTICS_SCHEMA` | `analytics` | OLAP schema name |
 | `VECTOR_DB_URL` | — | ChromaDB/FAISS endpoint |
 | `REDIS_URL` | — | cache/rate-limit/broker |
@@ -835,8 +747,11 @@ Python ≥3.12, `uv`; Node ≥20 (Next.js); Docker + docker-compose; PostgreSQL 
 edubridge-ai/
 ├── README.md · CLAUDE.md · docker-compose.yml · .github/workflows/ci.yml
 ├── prd.md · tdd.md
+├── supabase/
+│   ├── README.md                                          # setup + RLS connection pattern
+│   └── migrations/*.sql                                   # AUTHORITATIVE schema (SQL-first)
 ├── backend/
-│   ├── pyproject.toml · uv.lock · alembic/               # migrations
+│   ├── pyproject.toml · uv.lock
 │   └── app/
 │       ├── main.py                                        # FastAPI app factory
 │       ├── core/           (config, security, deps, errors)
@@ -853,7 +768,8 @@ edubridge-ai/
 
 ### 8.4 CI/CD & serving
 - **CI (GitHub Actions):** lint + unit/integration tests + Semgrep + OPA policy tests + Secure Skills/MCP scanner + Docker build + sigstore signing; PRs cannot merge unless green; `main` protected; only lead merges.
-- **CD:** on merge/tag, deploy Dockerized frontend + backend + workers; run Alembic migrations; models served on the GPU host (vLLM for Qwen + hosted fallback; Whisper/BGE/guardrails/Fish-S2/MuseTalk). Secrets as encrypted GitHub Actions secrets.
+- **CD:** on merge/tag, deploy Dockerized frontend + backend + workers; apply schema with **`supabase db push`** (versioned SQL migrations); models served on cloud GPU instances (vLLM for Qwen + hosted fallback; Whisper/BGE/guardrails/Fish-S2/MuseTalk). Secrets as encrypted GitHub Actions secrets.
+- **One-time manual step:** the `app_backend` role is created with `NOLOGIN` and no password (passwords are never committed). Set it out of band with `ALTER ROLE app_backend WITH LOGIN PASSWORD '…'` before pointing `DATABASE_URL` at it.
 
 ---
 
@@ -878,6 +794,11 @@ edubridge-ai/
 | Subject scope | Teacher opens other subject | `FORBIDDEN_SCOPE` |
 | Rate limit | Exceed quota | `429` + `Retry-After` |
 | Vetting | Submit over-privileged skill | Blocked; no AgentSBOM entry |
+| Quran verbatim (FR-17) | Ask for a Quran translation verse | Returned word-for-word with reference; generation node skipped; missing verse → explicit "not found", never composed |
+| Elective group | Class-11 pre-medical student opens subjects | Biology present, Mathematics absent; coverage computed only over group subjects |
+| RLS isolation (SEC-13) | Student A queries with Student B's id | Zero rows — blocked by policy, not just app code |
+| RLS answer keys | App role selects from `question_key` | Zero rows / denied — no policy grants access |
+| RLS fail-closed | Query without `app.current_user_id` set | All queries denied |
 | Self-update | Ingest unsigned source | Quarantined; not in KB |
 
 ### 9.3 AI eval harness
@@ -917,8 +838,9 @@ Proposal `EDUBRIDGE_AI_PROPOSAL.pdf`; `prd.md`; OWASP LLM Top 10 (2025) & Agenti
 
 ## 13. Technical Requirements (consolidated)
 
-- **Stack:** §2.2. **Architecture tree:** §8.3. **DB schema:** §5 (OLTP DDL §5.4, vector §5.5, OLAP §5.6). **API:** §7. **Deployment:** §2.4 + §8.4.
-- **Data stores:** PostgreSQL (OLTP, source of truth) + dedicated vector DB (ChromaDB/FAISS) + `analytics` star schema + Redis.
+- **Stack:** §2.2. **Architecture tree:** §8.3. **DB schema:** authoritative SQL in `supabase/migrations/` (approach in §5.4, vector §5.5, OLAP §5.6). **API:** §7. **Deployment:** §2.4 + §8.4.
+- **Data stores:** **Supabase managed PostgreSQL** (OLTP source of truth, RLS enforced) + dedicated vector DB (ChromaDB/FAISS) + `analytics` star schema + Redis.
+- **Curriculum:** 2 boards × 4 classes × 10 subjects with per-class lists and elective groups → **76 subject definitions**; four content strategies incl. religious-verbatim.
 - **Models (self-host primary):** Qwen (vLLM) + fallback, Whisper, BGE-M3/reranker, Qwen2.5-VL, Prompt Guard 2/Llama Guard 3, Fish S2 Pro, MuseTalk.
 - **Deployment requirements:** GPU host (§2.4 option, [PROPOSED]); Docker; encrypted secrets; TLS 1.3; backups.
 
@@ -946,7 +868,24 @@ This TDD was subjected to an **adversarial critical review** (an independent rev
 | 14 | Low-Med | Guardrails missed retrieved/tool content (indirect injection) | Spotlight/sanitize retrieved + tool outputs before generation | §4.6, §6.4 |
 | 15 | Low | E2E gaps (FR-2/8/9); unbounded `guard_out` loop | Added E2E rows; `guard_out` block → refuse/degrade, max-1 retry | §9.2, §4.2 |
 
-**Gate outcome after fixes:** data-model integrity, three-store consistency, security, flow soundness, and internal consistency now pass; PRD traceability was clean throughout (all FR-1…16, SEC-1…12, NFR-1…8 map to component + API + test). Remaining **[PROPOSED — confirm]** items (deployment target §2.4, vector DB §5.5, async framework, GPU spec, similarity threshold) are open decisions for review, not defects.
+**Gate outcome after fixes:** data-model integrity, three-store consistency, security, flow soundness, and internal consistency now pass; PRD traceability was clean throughout (all FR-1…16, SEC-1…12, NFR-1…8 map to component + API + test).
+
+### 14.1 Changes in v0.2.0 (post-review)
+
+| Change | Driver | Where |
+|---|---|---|
+| OLTP moved to **Supabase**; Supabase CLI migrations replace Alembic | Platform decision | §2.2, AD-6/AD-7, §8 |
+| **Row Level Security** designed and implemented (54 policies, `app_backend` role, session-variable context) | Defense-in-depth for minors' data | §6.8, SEC-13 |
+| Subjects **6 → 10**, per-class lists, **elective groups** (`student_group`) | Real board structure | §5.3a/b, PRD §2.4.1 |
+| Two branches → **four `content_strategy` values** | English and religious content need distinct handling | §3.4, §4.6, PRD §2.4.2 |
+| **Religious-verbatim mode** — generation node disabled for Quran Translation | FR-17; ethical + accuracy requirement | §4.6, §9.2 |
+| `subject_group`, `class_level`, `agent_component`, `question_key` | Normalization; polymorphic FK removal; NFR-8 backstop | §5.2, §5.3 |
+| `uuidv7()` → `gen_random_uuid()`; `audit_log` composite PK | **Both would have failed on PostgreSQL ≤17** | §5.4 |
+| Inline DDL replaced by a pointer to `supabase/migrations/` | Prevent schema drift between doc and code | §5.4 |
+
+**Still open (decisions, not defects):** deployment target §2.4, vector DB choice §5.5, GPU spec, similarity threshold `SIM_THRESHOLD`, and the Class-11 ICS subject list (PRD §2.5).
+
+**Not yet verified:** the migrations have **not been executed against a live database**. First `supabase db push` should be treated as the real test.
 
 ---
 
