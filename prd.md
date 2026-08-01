@@ -2,7 +2,7 @@
 
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform for Secondary & Higher-Secondary Students
 
-**Version:** 0.1.1
+**Version:** 0.2.0
 **Status:** Draft — under section-by-section review
 **Last Updated:** July 19, 2026
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen)
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial PRD draft derived from the approved FYP proposal and the agreed planning blueprint. Adopts supervisor PRD format; extended to engineering depth for TDD derivation. |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Added **TEL-5** endpoint access logging + admin daily-logs view; entity `ApiRequestLog`; RBAC + Admin-dashboard updates (kept in sync with TDD v0.1.1). |
+| 0.2.0 | 2026-08-01 | EduBridge AI Team | **Subject matrix expanded to 10 subjects** with per-class lists and **elective groups** (science/computer, pre-medical/pre-engineering/ICS). Two content branches replaced by **four content strategies**, adding **FR-17 religious-verbatim** (Quran Translation is retrieval-only). Database moved to **Supabase**; **Row Level Security** added as defense-in-depth (SEC-13). Data model updated (`subject_group`, `student_group`, `content_strategy`, `question_key`, `agent_component`). |
 
 > **Reading note.** Priorities are tagged **P0 / P1 / P2** (see §23 Roadmap). Requirements use the IDs `FR-N` (functional), `SEC-N` (security), `NFR-N` (non-functional), and `US-x.x` (user stories). Items marked **[PROPOSED — confirm]** are open decisions to be resolved during review (consolidated in §2.5 and referenced inline).
 
@@ -81,7 +82,7 @@ The proposal defines **seven objectives**; this PRD carries all of them, priorit
 
 **In scope (v1 documented target):**
 
-- **Curriculum matrix:** Both boards — **PCTB (Punjab)** and **STBB (Sindh)** — **Classes 9–12**, all subjects including the Urdu-language subject (**Urdu Lazmi**). Non-language subjects: Biology, Chemistry, Physics, Mathematics, Computer Science. *(Realized coverage per subject/board rolls out with the data-acquisition plan — §12; a constraint, not a scope cut.)*
+- **Curriculum matrix:** Both boards — **PCTB (Punjab)** and **STBB (Sindh)** — **Classes 9–12**, across **10 subjects**: Mathematics, Physics, Chemistry, Biology, Computer Science, English, Urdu, Islamiat, Pakistan Studies, and Quran Translation. Subject lists differ per class and per **elective group** (§2.4.1). This yields **76 subject definitions** (2 boards × 38). *(Realized coverage per subject/board rolls out with the data-acquisition plan — §12; a constraint, not a scope cut.)*
 - **Roles:** Student (primary), Teacher, Parent/Guardian, Admin (§3, §4).
 - **Deployment:** Individual student self-serve (**primary**) **and** institutional/classroom use (secondary), both on the same platform.
 - **Client:** Responsive **web** application (desktop + mobile browser).
@@ -96,9 +97,44 @@ The proposal defines **seven objectives**; this PRD carries all of them, priorit
 - A **native mobile app** — v1 is responsive web only.
 - Unrestricted autonomous multi-step agent behavior — the agent is confined to controlled, permissioned skills.
 
+### 2.4.1 Subject Matrix & Elective Groups
+
+Subject lists are **not uniform across classes**. A student belongs to an **elective group**, and the group determines which subjects apply.
+
+| Level | Groups |
+|---|---|
+| **Matric (9–10)** | `science` (with Biology) · `computer` (with Computer Science) |
+| **FSc (11–12)** | `pre_medical` (Biology, no Maths) · `pre_engineering` (Maths, no Biology) · `ics` (Maths + Computer Science) |
+
+| Class | Group | Subjects |
+|---|---|---|
+| 9 & 10 | science | English, Urdu, Mathematics, Physics, Chemistry, **Biology**, Islamiat, Pakistan Studies, Quran Translation *(9)* |
+| 9 & 10 | computer | English, Urdu, Mathematics, Physics, Chemistry, **Computer Science**, Islamiat, Pakistan Studies, Quran Translation *(9)* |
+| 11 | pre_medical | English, Urdu, Physics, Chemistry, **Biology**, Islamiat, Quran Translation *(7)* |
+| 11 | pre_engineering | English, Urdu, Physics, Chemistry, **Mathematics**, Islamiat, Quran Translation *(7)* |
+| 11 | ics | English, Urdu, Physics, Chemistry, **Mathematics, Computer Science**, Islamiat, Quran Translation *(8)* |
+| 12 | pre_medical | English, Urdu, Physics, Chemistry, **Biology**, Pakistan Studies, Quran Translation *(7)* |
+| 12 | pre_engineering | English, Urdu, Physics, Chemistry, **Mathematics**, Pakistan Studies, Quran Translation *(7)* |
+| 12 | ics | English, Urdu, Physics, Chemistry, **Mathematics, Computer Science**, Pakistan Studies, Quran Translation *(8)* |
+
+**Rules:** Islamiat runs in Classes 9, 10, 11. Pakistan Studies runs in Classes 9, 10, 12. Quran Translation runs in all four years.
+
+Group membership is a first-class attribute of the student profile, because **coverage % and exam-readiness must only be measured against subjects the student actually takes** (§13).
+
+### 2.4.2 Content Strategies
+
+Each subject declares **how the agent is permitted to answer it**. This replaces the proposal's original two-branch split and is enforced by the agent router, not by convention.
+
+| Strategy | Subjects | Behaviour |
+|---|---|---|
+| `branch_a_english_source` | Mathematics, Physics, Chemistry, Biology, Computer Science, **Islamiat**, **Pakistan Studies** | One English-medium source of truth + cross-lingual retrieval; answer **generated in the student's language** with the board glossary. All of these are published in both English and Urdu medium with the same syllabus. |
+| `branch_b_urdu_native` | Urdu | Structured Urdu notes corpus; retrieval-first, objective items word-for-word, productive items via controlled templates. |
+| `english_language` | English | English-language subject — grammar, essay, and comprehension templates. |
+| `religious_verbatim` | **Quran Translation** | **Retrieval only.** The board-approved text is returned word-for-word; the model may format but must **never compose or paraphrase**. If the text is absent from the knowledge base, the system says so rather than answering (see **FR-17**). |
+
 ### 2.5 Open Decisions (to confirm during review — each handled individually)
 
-1. **P0 subject breadth** — P0 targets both boards × all Classes 9–12; confirm whether P0 also targets **all six subjects** or a subject subset first (e.g., Mathematics + one science + Urdu Lazmi to exercise both content branches). **[PROPOSED — confirm]**
+1. **Class 11 ICS subject list** — currently seeded as English, Urdu, Physics, Chemistry, Mathematics, Computer Science, Islamiat, Quran Translation (8 subjects). Traditional ICS often excludes Chemistry — confirm against the official scheme of studies. **[PROPOSED — confirm]**
 2. **KPI thresholds** — adopt proposal NFR targets as KPIs vs. set specific numbers (§22). **[PROPOSED — confirm]**
 3. **Institutional auth model** — institutions attach via classroom join-code only (no separate SSO/tenant) in v1 (§15). **[PROPOSED — confirm]**
 4. **Parental-link enforcement & mechanism** for Classes 9–10 (hard gate vs. grace; invite mechanism; class self-declared vs. verified) (§4.3, §6.1). **[PROPOSED — confirm]**
@@ -208,7 +244,9 @@ Authentication & access; role dashboards (student, teacher, parent, admin); the 
 - **Public MCP registry** — external servers are admitted only through the Secure Skills & MCP Layer (§16).
 
 **5.4 Data Layer.**
-Vector DB (**FAISS/ChromaDB**) for embeddings; **PostgreSQL** for users, roles, progress, quizzes, audit logs; **Redis** for cache + rate-limit buckets; document/object storage for KB documents and indexed textbook figures. KB is **versioned by board + curriculum year** (§12).
+**Supabase (managed PostgreSQL)** is the OLTP source of truth for users, roles, progress, quizzes, and logs, with **Row Level Security** enforced as defense-in-depth (§16, SEC-13). A dedicated **vector DB** (FAISS/ChromaDB) holds embeddings; a separate **star-schema analytics layer** serves reports; **Redis** provides cache + rate-limit buckets; object storage holds KB documents and indexed textbook figures. KB is **versioned by board + curriculum year** (§12).
+
+> Authentication is **application-managed** — FastAPI issues its own JWTs and hashes passwords with argon2id. Supabase Auth is deliberately not used, so Supabase acts purely as the database platform.
 
 **5.5 Cross-cutting — Secure Skills & MCP Layer (OWASP-mapped).**
 Runs across all layers: vetting scanner, permission manifests, least-privilege enforcement, sandboxing (CSP/container), runtime guardrails (input/output), and **AgentSBOM** generation (§16).
@@ -240,7 +278,7 @@ CI/CD via **GitHub Actions**; containerized with **Docker**; the **self-updating
 1. **Input** — student types or speaks a question in Urdu, English, or Roman-Urdu.
 2. **STT & intent** — if spoken, **Whisper** transcribes; **Qwen** detects language and parses the short query into subject, class, board, task.
 3. **Input guardrail** — **Prompt Guard 2 / Llama Guard 3** check input; **Redis** rate limiter blocks abusive rates (LLM10); the Secure Skills & MCP Layer checks any tool call.
-4. **Routing** — Branch A (non-language subjects): cross-lingual retrieval (**BGE-M3**) over the English KB, reranked (**BGE-reranker-v2-m3**). Branch B (Urdu Lazmi): retrieve from the Urdu notes corpus (word-for-word for objective items; template+length for productive items).
+4. **Routing** — the subject's `content_strategy` (§2.4.2) selects the path: `branch_a_english_source` uses cross-lingual retrieval (**BGE-M3**) over the English KB, reranked (**BGE-reranker-v2-m3**); `branch_b_urdu_native` retrieves from the Urdu notes corpus; `english_language` uses the English corpus + exam templates; `religious_verbatim` retrieves only, with generation disabled.
 5. **Generation** — **Qwen** writes the answer grounded in retrieved content, in the student's language (generate-in-Urdu with glossary for A; fill exam template for B).
 6. **Visual decision** — try to retrieve the indexed textbook figure (indexed offline by **Qwen2.5-VL**); else render a typed code-based visual (Mermaid / KaTeX / chart-JSON / function-plot).
 7. **Output guardrail** — **Llama Guard 3** checks output; the visual is shown as typed, **sandboxed** content (LLM05).
@@ -282,6 +320,9 @@ Requirements are grouped by **Epic** (A–K). Each carries the proposal's `FR-ID
 ### Epic C — Urdu-Lazmi Subject *(P0 partial → P2 full)*
 - **FR-8 (P0):** *As a student, I want the tashreeh of a couplet in the standard exam format.* **AC:** retrieved/structured template: intro → meaning → tashreeh → devices → central idea. *Deps:* Urdu notes corpus (§12). *Edge:* couplet not in corpus → no fabrication; return closest + note.
 - **FR-9 (P1):** *As a student, I want an essay or letter of the right length and structure.* **AC:** length is controlled; intro → body → conclusion. *Edge:* topic outside corpus → template scaffold only, flagged.
+
+### Epic C2 — Religious Content (Quran Translation) *(P0)*
+- **FR-17 (P0):** *As a student, I want the Quran translation exactly as it appears in my board-approved textbook, so that what I study and reproduce in the exam is authentic.* **AC:** the stored board-approved text is returned **word-for-word**; the model may format or locate a verse but **generation/paraphrase is disabled** for this subject; a retrieval miss returns an explicit "not found in the knowledge base" rather than an answer; the response cites the source reference. *Role:* Student. *Deps:* §12, §2.4.2. *Edge:* partial/ambiguous verse reference → ask to clarify, never guess. *Rationale:* an invented or paraphrased Quranic translation is an ethical failure, not merely an accuracy one — this subject therefore has stricter handling than any other.
 
 ### Epic D — Multimodal: Visual Aids + Avatar/Voice *(P0)*
 - **FR-5 (P0):** *As a student, I want the avatar to explain a topic out loud in my language so it feels guided.* **AC:** avatar with Fish S2 Pro TTS in Urdu/English; MuseTalk lip-sync. *Edge:* Urdu TTS quality low → ur-PK/local Urdu TTS fallback (§20).
@@ -407,7 +448,7 @@ This is a **product-level** entity model — the seed for the TDD database schem
 
 ### 9.1 Identity & roles
 - **User** — `id, email, password_hash, status, created_at`; has exactly one primary **Role**.
-- **StudentProfile** — `user_id, board (PCTB|STBB), class (9–12), medium (EN|UR), language_pref`.
+- **StudentProfile** — `user_id, board (PCTB|STBB), class (9–12), student_group, medium (EN|UR), language_pref`. `student_group` ∈ {science, computer} for Classes 9–10 and {pre_medical, pre_engineering, ics} for Classes 11–12 (§2.4.1); a constraint rejects mismatched class/group pairs.
 - **TeacherProfile** — `user_id, subject_scope`.
 - **ParentProfile** — `user_id`.
 - **AdminProfile** — `user_id, admin_scope`.
@@ -421,8 +462,9 @@ This is a **product-level** entity model — the seed for the TDD database schem
 - **Announcement** — `id, space_id, author_user_id, body, created_at`.
 
 ### 9.3 Curriculum & knowledge base
-- **Board**, **Class**, **Subject**, **Chapter**, **Exercise** — curriculum taxonomy.
-- **SLO** (Student Learning Outcome) — `id, subject_id, chapter_id, text`; the atomic mastery/coverage unit.
+- **Board**, **ClassLevel**, **Subject**, **Chapter** — curriculum taxonomy. A **Subject** is defined **once per (board, class)** and carries its `content_strategy` (§2.4.2), so shared subjects such as English are never duplicated per group.
+- **SubjectGroup** — `subject_id, student_group`; records which elective groups take each subject (§2.4.1). Drives per-student subject lists, coverage, and exam-readiness.
+- **SLO** (Student Learning Outcome) — `id, chapter_id, code, text, effective_from_year, retired_at`; the atomic mastery/coverage unit. SLOs are **soft-retired, never deleted**, so historical mastery keeps its meaning across curriculum years.
 - **CurriculumItem** — `id, board, class, subject, chapter, exercise, question, worked_solution, slo_ids[]`.
 - **TextbookFigure** — `id, source_ref, caption_ocr, chapter_id, slo_ids[], embedding_ref` (indexed by Qwen2.5-VL).
 - **KBDocument** — `id, board, curriculum_year, source_uri, provenance_status, version, integrity_hash`.
@@ -504,8 +546,12 @@ User 1–1 profile; Parent M–N Student via GuardianLink; Teacher/Parent 1–N 
 No open, structured dataset of Pakistani board curricula exists; building a **multi-board (PCTB/STBB), class- and chapter-indexed** dataset of questions, worked solutions, SLO links, and indexed textbook figures is part of the project's contribution. We **reuse** mature open datasets where they exist and **build-own** the curriculum dataset.
 
 ### 12.2 Two-branch language strategy
-- **Branch A — Non-language subjects (Bio, Chem, Physics, Math, CS):** keep **one English-medium KB** (digital text) as the source of truth; retrieval is **cross-lingual** (BGE-M3) so an Urdu question finds the right English content; the answer is **generated in the student's language**; a **board-aligned Urdu terminology glossary** keeps Urdu wording identical to the student's book. Halves data work; one source of truth.
-- **Branch B — Urdu-language subject (Urdu Lazmi):** build a **structured Urdu notes corpus**, answered **retrieval-first**. Objective items (tashreeh, khulasa, markazi khayal, fixed questions) are returned **word-for-word**; productive items (essay/letter) are built from a **template with controlled length**, using a strong Urdu model (Qwen / UrduLLaMA-Alif) only to fill the scaffold. Prefer notes that are digital and openly available, board-issued, or teacher-reviewed.
+Every subject carries a `content_strategy` (§2.4.2) that the agent router reads to decide **whether generation is permitted at all**.
+
+- **`branch_a_english_source` — dual-medium subjects (Maths, Physics, Chemistry, Biology, Computer Science, Islamiat, Pakistan Studies):** keep **one English-medium KB** (digital text) as the source of truth; retrieval is **cross-lingual** (BGE-M3) so an Urdu question finds the right English content; the answer is **generated in the student's language**; a **board-aligned Urdu terminology glossary** keeps Urdu wording identical to the student's book. These subjects are all published in parallel English and Urdu editions with the same syllabus, so a single source of truth serves both. Halves the data work.
+- **`branch_b_urdu_native` — Urdu:** build a **structured Urdu notes corpus**, answered **retrieval-first**. Objective items (tashreeh, khulasa, markazi khayal, fixed questions) are returned **word-for-word**; productive items (essay/letter) are built from a **template with controlled length**, using a strong Urdu model (Qwen / UrduLLaMA-Alif) only to fill the scaffold. Prefer notes that are digital and openly available, board-issued, or teacher-reviewed.
+- **`english_language` — English:** grammar, essay, letter and comprehension items answered from a structured corpus against fixed exam formats, mirroring the Urdu approach but in English.
+- **`religious_verbatim` — Quran Translation:** **retrieval only.** The board-approved translation is returned **word-for-word**; the model may format or locate a verse but must never compose, paraphrase, or interpolate. A retrieval miss produces an explicit "not found" rather than a generated answer. This is a correctness *and* ethical requirement — see **FR-17** and the risk entry in §24.
 
 ### 12.3 Content schemas
 - **Poetry (per couplet):** couplet, literal meaning, tashreeh, context, poetic devices, central idea, poet, reference.
@@ -583,6 +629,7 @@ Security is a **first-class, built-in** capability (proposal title: "Secure & Ag
 - **SEC-10 (P0) — Data protection & PII:** **AES-256 at rest, TLS 1.3 in transit**; RBAC; **minimal PII** collection; minors' data minimized (§26).
 - **SEC-11 (P1) — Audit logging:** who/what/when for tool calls and data access (§21) with tamper-evident storage.
 - **SEC-12 (P1) — Supply-chain hardening in CI:** static analysis (**Semgrep**), policy-as-code (**OPA/Rego**), and artifact signing (**sigstore/cosign**) in the CI/CD pipeline; the Secure Skills & MCP scanner runs on every PR.
+- **SEC-13 (P0) — Row Level Security (database-level authorization):** every table enforces RLS so the **database itself** filters rows by the acting user, independent of application code. Policies implement the §4.2 RBAC matrix: a student sees only their own data; a parent sees a linked child's data only through a **verified** guardian link; a teacher sees only students enrolled in their space **and** only subjects they are scoped to; chat content is **owner-only** with no teacher/parent/admin read path. Two hard guarantees: **answer keys are unreadable by the application role** (no policy grants access — NFR-8 backstop), and access **fails closed** if the acting user is not established. RLS is defense-in-depth beneath application authorization, not a replacement for it.
 
 ### 16.2 OWASP threat → requirement → acceptance mapping
 
@@ -593,7 +640,8 @@ Security is a **first-class, built-in** capability (proposal title: "Secure & Ag
 | **LLM05 — Improper Output Handling** | SEC-2 | Visual code executes only in sandbox (CSP/DOMPurify); no unsafe HTML/JS reaches the DOM. |
 | **LLM10 — Unbounded Consumption / DoS** | SEC-3, §17 | Over-limit calls get HTTP 429; quotas + concurrency caps enforced. |
 | **Agentic/Skills Top 10 — untrusted/over-privileged skills & MCP** | SEC-4…SEC-8, SEC-12 | Every component vetted, least-privileged, sandboxed, SBOM-recorded; over-privileged/malicious blocked. |
-| **Sensitive-data exposure (minors)** | SEC-10, SEC-11, §26 | Encryption in transit/at rest; RBAC; minimal PII; audited access. |
+| **Sensitive-data exposure (minors)** | SEC-10, SEC-11, SEC-13, §26 | Encryption in transit/at rest; RBAC **plus database-level RLS**; minimal PII; audited access; chat content owner-only. |
+| **Broken access control / IDOR** | SEC-13 | An application bug or leaked credential still cannot return another student's rows — RLS filters at the database. |
 
 ---
 
@@ -707,7 +755,9 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 | Denial-of-service / runaway model use | Medium | High | Redis per-user/IP rate limiting + quotas + concurrency caps (LLM10) | Platform lead | Abnormal request/compute spike |
 | Urdu TTS quality (not top-tier) | Medium | Medium | Validate a sample; ur-PK cloud voice / local Urdu TTS fallback | Multimodal lead | Sample validation fails |
 | Low teacher adoption of classroom/quiz tools | Medium | Medium | Minimal teacher UI (quiz + report viewing only); pilot one section first | Product lead | Low teacher activation in pilot |
-| Student performance data mishandled | Low | High | AES-256 at rest, TLS 1.3 in transit; RBAC; minimal PII collection | Security lead | Access anomaly / audit finding |
+| Student performance data mishandled | Low | High | AES-256 at rest, TLS 1.3 in transit; RBAC **+ database RLS (SEC-13)**; minimal PII collection | Security lead | Access anomaly / audit finding |
+| **Inaccurate or paraphrased religious content** (Quran Translation, Islamiat) | Low | **Critical** | Quran Translation is **retrieval-only, verbatim** with generation disabled (FR-17); explicit "not found" on retrieval miss; board-approved sources only, teacher-reviewed | Content lead | Any generated/paraphrased religious text detected in evaluation |
+| Student measured against subjects they don't take | Medium | Medium | Elective-group model (§2.4.1); coverage and exam-readiness computed only over the student's group subjects | Data lead | Coverage % looks implausible for a group |
 
 **Project-level risk (added):** P0 breadth (both boards × all classes) is data-intensive — the binding constraint is curriculum digitization (proposal §1.7). Schedule/coverage tracked against the data-acquisition plan (§12).
 
@@ -716,7 +766,8 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 ## 25. Dependencies
 
 ### 25.1 External
-- **Frameworks/libraries:** React, Next.js, Tailwind CSS; Python, FastAPI, JWT; LangGraph, MCP SDK; Redis; PostgreSQL; FAISS/ChromaDB; Mermaid.js, KaTeX, Chart.js/Recharts, function-plot/JSXGraph, DOMPurify.
+- **Platform:** **Supabase** (managed PostgreSQL + Row Level Security); Supabase CLI for versioned SQL migrations.
+- **Frameworks/libraries:** React, Next.js, Tailwind CSS; Python, FastAPI, JWT (argon2id); LangGraph, MCP SDK; Redis; Celery; FAISS/ChromaDB; Mermaid.js, KaTeX, Chart.js/Recharts, function-plot/JSXGraph, DOMPurify.
 - **Models:** Qwen2.5/Qwen3 (+Urdu LoRA), Llama 3, Mistral; Whisper; BGE-M3, BGE-reranker-v2-m3; Qwen2.5-VL; Fish Audio S2 Pro; MuseTalk v1.5; Prompt Guard 2, Llama Guard 3.
 - **Security/DevOps:** Semgrep, OPA/Rego, sigstore/cosign, container sandbox; GitHub Actions, Docker.
 - **Data sources:** PCTB/STBB textbooks & curriculum docs; public past papers/MCQs; UrduLLaMA, Alif, roman-urdu-alpaca-qa-mix; Common Voice Urdu.
@@ -760,6 +811,11 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 | LoRA | Low-Rank Adaptation — lightweight fine-tuning |
 | CSP / DOMPurify | Content Security Policy / HTML sanitizer — safe rendering of untrusted output |
 | Generate-in-Urdu | Answer written directly in Urdu grounded in retrieved source (not post-translated) |
+| Elective group | The subject track a student follows — `science`/`computer` at Matric, `pre_medical`/`pre_engineering`/`ics` at FSc — which determines their subject list |
+| Content strategy | Per-subject rule governing how the agent may answer: `branch_a_english_source`, `branch_b_urdu_native`, `english_language`, or `religious_verbatim` |
+| Religious-verbatim | Retrieval-only mode (Quran Translation) where text is returned word-for-word and generation is disabled |
+| RLS (Row Level Security) | PostgreSQL feature where the database itself filters rows per acting user, independent of application code |
+| Supabase | Managed PostgreSQL platform used as the OLTP database (Supabase Auth is not used; auth is application-managed) |
 | Tashreeh / Khulasa / Markazi khayal | Urdu-subject exam forms: explication / summary / central idea |
 | Mazmoon / Khat / Darkhwast | Essay / letter / application (Urdu productive items) |
 | OWASP LLM/Agentic Top 10 | Standard risk lists for LLM and agentic applications |
@@ -772,14 +828,14 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 
 | Objective | Gap | Epic(s) | FR-IDs | NFR/SEC | Tier |
 |---|---|---|---|---|---|
-| O1 Board Curriculum Chatbots | G-1, G-2 | B, C | FR-1, FR-2, FR-7, FR-8, FR-9 | NFR-1/2/7 | P0 (FR-9 P1) |
+| O1 Board Curriculum Chatbots | G-1, G-2 | B, C, C2 | FR-1, FR-2, FR-7, FR-8, FR-9, **FR-17** | NFR-1/2/7 | P0 (FR-9 P1) |
 | O2 Adaptive Quiz Engine | G-4 | E | FR-3, FR-15 | NFR-8 | P1 |
 | O3 Coverage Tracking & Reports | G-5 | F | FR-4, FR-16 | NFR-2 | P1 |
 | O4 Classroom Space | G-6 | G | FR-10, FR-11 | NFR-8 | P1 |
 | O5 Multimodal Layer | G-3 | D | FR-5, FR-6 | SEC-2, NFR-3 | P0 |
 | O6 Self-Updating Pipeline | G-7 | J | FR-12 | SEC-9 | P2 |
 | O7 Secure Skills & MCP Layer | G-8 | H, I | FR-13, FR-14 | SEC-1…12, NFR-4/5 | P1 (baseline P0) |
-| (Platform foundation) | — | A, K | FR-A1/A2/A3, FR-K1 | SEC-10, NFR-6 | P0 |
+| (Platform foundation) | — | A, K | FR-A1/A2/A3, FR-K1 | SEC-10, **SEC-13**, NFR-6 | P0 |
 
 ---
 
@@ -817,12 +873,15 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 | SEC-12 | Supply-chain hardening (CI) | Supply chain | Medium | P1 |
 
 ### Appendix B — Environments & Quick-Start (to be finalized in TDD)
-- **Frontend:** Next.js/React/Tailwind (responsive web). **Backend:** FastAPI (Python). **Data:** PostgreSQL, Redis, FAISS/ChromaDB. **CI/CD:** GitHub Actions + Docker. Local dev + containerized deploy; secrets as encrypted CI secrets. *(Concrete commands/topology specified in `tdd.md`.)*
+- **Frontend:** Next.js/React/Tailwind (responsive web). **Backend:** FastAPI (Python). **Data:** Supabase (managed PostgreSQL + RLS), Redis, FAISS/ChromaDB, star-schema analytics. **Migrations:** Supabase CLI (versioned SQL). **CI/CD:** GitHub Actions + Docker. Secrets as encrypted CI secrets. *(Concrete commands/topology specified in `tdd.md`.)*
 
 ### Appendix C — Testing Checklist (per epic, high level)
 - [ ] A: signup, RBAC, parental gate (9–10 blocked until verified; 11–12 optional)
 - [ ] B: exact-question retrieval, class-adaptive language, generate-in-Urdu + glossary
 - [ ] C: couplet tashreeh template; essay/letter length & structure
+- [ ] C2: Quran Translation returned verbatim; generation disabled; retrieval miss → explicit "not found" (FR-17)
+- [ ] Groups: a Class-11 pre-medical student sees Biology not Mathematics; coverage computed only over group subjects
+- [ ] RLS: student cannot read another student's rows; parent blocked without a verified link; answer keys unreadable by the app role (SEC-13)
 - [ ] D: retrieval-first visual + sandboxed render fallback; avatar TTS + Urdu fallback
 - [ ] E: adaptive difficulty; past-paper-frequency quiz filtered to syllabus
 - [ ] F: weekly coverage report; exam-readiness + study-next ranking
