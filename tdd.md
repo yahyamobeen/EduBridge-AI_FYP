@@ -1,7 +1,7 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Draft — under section-by-section review
 **Last Updated:** July 19, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.0 | 2026-08-01 | EduBridge AI Team | **Two-factor authentication for all roles** (SEC-14 / FR-A4): TOTP primary, email-OTP alternative, hashed single-use backup codes, admin-assisted recovery. Adds `two_factor_enrollment` and `two_factor_backup_code` tables plus two `token_kind` values; login becomes a two-step challenge (§3.1, §6.9). |
 | 0.2.0 | 2026-08-01 | EduBridge AI Team | OLTP moved to **Supabase**; **Supabase CLI migrations replace Alembic**; **Row Level Security** designed and implemented (§6.8). Schema: `class_level`, `subject_group`, `content_strategy`, `student_group`, `agent_component`; corrected `uuidv7()`→`gen_random_uuid()` (PG16) and the invalid partitioned-table PK on `audit_log`. Agent routing extended to **four content strategies** including **religious-verbatim** (generation disabled for Quran Translation). SQL now lives in `supabase/migrations/`. |
 
 ---
@@ -153,6 +154,12 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 |--------|------|------|------|---------|
 | POST | `/api/auth/register` | No | — | Create student (board/class/medium); teacher/parent/admin variants |
 | POST | `/api/auth/login` | No | — | Authenticate → access+refresh JWT |
+| POST | `/api/auth/2fa/enroll` | Yes (challenge) | any | Start enrolment — returns TOTP QR + secret, or triggers email-OTP |
+| POST | `/api/auth/2fa/confirm` | Yes (challenge) | any | Confirm first code; activates 2FA and returns the 10 backup codes **once** |
+| POST | `/api/auth/2fa/verify` | Pending-2FA token | any | Submit TOTP / email-OTP / backup code → full session |
+| POST | `/api/auth/2fa/resend` | Pending-2FA token | any | Re-send an email-OTP (rate-limited) |
+| POST | `/api/auth/2fa/backup-codes` | Yes | any | Regenerate backup codes (invalidates the old set) |
+| POST | `/api/admin/users/{id}/2fa/reset` | Yes | Admin | Identity-verified recovery reset; always audited |
 | POST | `/api/auth/refresh` | Refresh JWT | any | Rotate access token |
 | POST | `/api/auth/logout` | Yes | any | Revoke refresh token |
 | POST | `/api/auth/guardian/invite` | Yes | Student | Invite a parent (email/code) to satisfy the 9–10 gate |
@@ -167,6 +174,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 - **Enforcement is at the API + data layer**, not the UI, so it cannot be bypassed by calling the API directly (security gate #4).
 - **RLS context is set per transaction.** Because auth is application-managed, every request transaction issues `SET LOCAL app.current_user_id = '<uuid>'` before any query, which the RLS policies read (§6.8). If it is not set, policies deny everything — fail-closed.
 - **Student registration captures `student_group`** alongside board/class/medium; a database `CHECK` rejects invalid class/group pairs (e.g. a Class-9 student marked `pre_medical`).
+- **Two-step login (SEC-14).** A correct password does **not** produce a session. It produces a short-lived, single-purpose **pending-2FA token** (≈5 min, cannot call any business endpoint); only a successful `/2fa/verify` exchanges it for access + refresh JWTs. Full design in §6.9.
 
 **Interfaces:** `AuthService.register()`, `.login()`, `.rotate_refresh()`, `GuardianService.invite()/confirm()/is_verified(student_id)`.
 
@@ -458,7 +466,7 @@ question ─1:1─ question_key   (server-only; no RLS policy grants access)
 
 Each table lists notable columns, keys, and indexes (full DDL for core tables in §5.4; remaining tables follow the same conventions).
 
-- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class_level, **student_group**, medium, language_pref, CHECK class/group pairing)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)`.
+- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class_level, **student_group**, medium, language_pref, CHECK class/group pairing)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)` — `token_kind` extended with `two_factor_email_otp` and `two_factor_pending`, `two_factor_enrollment(user_id🔗🔑, method⋈enum{totp,email_otp}, status⋈enum{pending,active,disabled}, totp_secret_encrypted bytea, confirmed_at, last_used_at, last_used_counter, failed_attempts, locked_until)` — one per user; secret **encrypted at rest**, `two_factor_backup_code(id, user_id🔗, code_hash, used_at, UNIQUE(user_id,code_hash))` — 10 per enrolment, **argon2id-hashed**, single-use.
 - **(b) Curriculum & KB:** `board`, `class_level(board_id🔗, level 9..12, UNIQUE(board_id,level))`, `subject(class_level_id🔗, name, **content_strategy**⋈enum, UNIQUE(class_level_id,name))` — defined **once per (board,class)**, never per group, `subject_group(subject_id🔗, student_group⋈enum, PK(subject_id,student_group))` — which elective groups take it, `chapter(subject_id🔗, no, title)`, `slo(chapter_id🔗, code, text, effective_from_year, retired_at, UNIQUE(chapter_id,code))` — **soft-retired, never deleted**, `kb_document(id, board_id🔗, curriculum_year, source_uri, provenance_status⋈enum, version, integrity_hash, UNIQUE(board_id,curriculum_year,version))`, `curriculum_item(id, kb_document_id🔗, chapter_id🔗, exercise, question, worked_solution, lang)`, `curriculum_item_slo(item_id🔗, slo_id🔗, PK(item_id,slo_id))`, `textbook_figure(id, curriculum_item_id🔗?, chapter_id🔗, caption_ocr, embedding_ref)`, `urdu_note_item(id, kb_document_id🔗, type⋈enum, fields jsonb, source)`, `glossary_term(id, board_id🔗, subject_id🔗, en_term, ur_term, UNIQUE(subject_id,en_term))`.
 - **(c) Assessment:** `past_paper(id, board_id🔗, class, subject_id🔗, year)`, `question(id, past_paper_id🔗?, stem, choices jsonb, primary_slo_id🔗, UNIQUE)` — **no key column here**, `question_key(question_id🔗🔑, answer_key, rationale)` — **server-only table, never in any client schema/route** (NFR-8 backstop), `question_slo(question_id🔗, slo_id🔗, is_primary, PK(...))`, `item_difficulty(question_id🔗🔑, irt_a, irt_b, irt_c)`, `slo_frequency_cluster(id, slo_id🔗, board_id🔗, freq_score, years)`, `quiz(id, space_id🔗, subject_id🔗, created_by🔗, source⋈enum, time_open, time_close, one_attempt=true, shuffle=true)`, `quiz_question(quiz_id🔗, question_id🔗, PK(...))`, `quiz_attempt(id, quiz_id🔗, student_id🔗, state⋈enum, started_at, submitted_at, score, version, UNIQUE(quiz_id,student_id))`, `attempt_answer(id, attempt_id🔗, question_id🔗, response, correct)`.
 - **(d) Learner analytics (OLTP current-state):** `mastery_estimate(student_id🔗, slo_id🔗, p_mastery, p_transit, p_guess, p_slip, updated_at, version, PK(student_id,slo_id))`, `coverage_record(id, student_id🔗, subject_id🔗, coverage_pct, as_of)`, `exam_readiness_score(id, student_id🔗, subject_id🔗, score, expected_marks, computed_at)`, `review_schedule(id, student_id🔗, slo_id🔗, due_at, interval)`.
@@ -473,8 +481,8 @@ Each table lists notable columns, keys, and indexes (full DDL for core tables in
 
 | Migration | Contents |
 |---|---|
-| `20260801120000_initial_schema.sql` | Extensions, enums, all 42 tables, constraints, indexes, triggers, partitions |
-| `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, 54 policies (§6.8) |
+| `20260801120000_initial_schema.sql` | Extensions, enums, all 45 tables (incl. two-factor auth), the admin 2FA status view, constraints, indexes, triggers, partitions |
+| `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, 56 policies (§6.8, §6.9) |
 | `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (76 rows) and elective-group mappings |
 
 **Conventions applied throughout:**
@@ -674,7 +682,74 @@ SET LOCAL app.current_user_id = '<uuid from our JWT>';
 
 Enabling RLS on every `public` table also closes Supabase's PostgREST exposure of unprotected tables.
 
-### 6.9 CI/CD hardening
+### 6.9 Two-factor authentication (SEC-14)
+
+Mandatory for **every role**. A password alone is never sufficient for a session.
+
+**Schema** — folded into `supabase/migrations/20260801120000_initial_schema.sql` (safe because no database has had the migrations applied yet); RLS policies live in the policies migration:
+
+```sql
+CREATE TYPE two_factor_method AS ENUM ('totp','email_otp');
+CREATE TYPE two_factor_status AS ENUM ('pending','active','disabled');
+ALTER TYPE token_kind ADD VALUE 'two_factor_email_otp';
+ALTER TYPE token_kind ADD VALUE 'two_factor_pending';
+
+CREATE TABLE public.two_factor_enrollment (
+  user_id               uuid PRIMARY KEY REFERENCES public.app_user(id) ON DELETE CASCADE,
+  method                two_factor_method NOT NULL,
+  status                two_factor_status NOT NULL DEFAULT 'pending',
+  totp_secret_encrypted bytea,        -- AES-256; NULL when method = 'email_otp'
+  confirmed_at          timestamptz,
+  last_used_at          timestamptz,
+  last_used_counter     bigint,       -- replay guard: reject a code already spent
+  failed_attempts       smallint NOT NULL DEFAULT 0,
+  locked_until          timestamptz,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_totp_has_secret
+    CHECK (method <> 'totp' OR totp_secret_encrypted IS NOT NULL)
+);
+
+CREATE TABLE public.two_factor_backup_code (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
+  code_hash  text NOT NULL,           -- argon2id; plaintext shown once, never stored
+  used_at    timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT uq_backup_code UNIQUE (user_id, code_hash)
+);
+CREATE INDEX ix_backup_code_unused
+  ON public.two_factor_backup_code(user_id) WHERE used_at IS NULL;
+```
+
+RLS: both tables are **owner-only** (`user_id = app.current_user_id()`), with admin read limited to `status`/`locked_until` for support — never to secrets or code hashes.
+
+**Enrolment.** After email verification, the user picks TOTP (QR + manual secret) or email-OTP, confirms one live code (`status → active`), and is shown **10 backup codes exactly once**. Access is withheld until `status = 'active'`.
+
+**Login (two-step).**
+```
+password ok ──▶ pending-2FA token (≈5 min, no business scope)
+                     │
+                     ▼  /2fa/verify  (TOTP | email-OTP | backup code)
+                 access + refresh JWT
+```
+
+**Verification rules.**
+- TOTP: RFC 6238, 6 digits, 30 s period, **±1 window** tolerated for clock skew.
+- **Replay guard:** `last_used_counter` rejects a code already consumed in its window.
+- Backup codes: constant-time hash comparison; consumed by setting `used_at`.
+- Email-OTP: 6 digits, ≤10 min TTL, single-use, stored hashed in `auth_token`.
+- **Rate limiting:** a 6-digit code is only 10⁶ combinations, so verification is throttled per user and per IP; `failed_attempts` drives a **temporary** `locked_until`, never a permanent lock.
+- Every attempt — success or failure — writes to `audit_log`.
+
+**Recovery ladder** (deliberate, to protect students without smartphones — NFR-2):
+1. Alternate method (email-OTP if TOTP unavailable)
+2. Backup code
+3. Admin-assisted reset (`/api/admin/users/{id}/2fa/reset`) with identity verification, fully audited
+
+**Secret handling.** The TOTP secret is encrypted with an application-held key (not stored in the database) and is returned **only** in the enrolment response — never re-readable afterwards. Backup codes exist in plaintext only in the single response that issues them.
+
+### 6.10 CI/CD hardening
 
 GitHub Actions on every PR: unit/integration tests, **Semgrep** static analysis, **OPA policy tests**, the **Secure Skills & MCP scanner**, container build + **sigstore** signing. Protected `main`; only lead merges; secrets encrypted.
 
@@ -709,6 +784,10 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | bad input |
 | 401 | `UNAUTHENTICATED` | missing/expired token |
+| 401 | `TWO_FACTOR_REQUIRED` | Password accepted; a 2FA challenge must be completed (pending-2FA token issued) |
+| 403 | `TWO_FACTOR_ENROLLMENT_REQUIRED` | Account has no active second factor; enrolment must be completed first |
+| 401 | `TWO_FACTOR_INVALID` | Wrong or expired TOTP / email-OTP / backup code |
+| 423 | `TWO_FACTOR_LOCKED` | Too many failed attempts; retry after `locked_until` |
 | 403 | `GATE_PENDING` | Class 9–10 parental link not verified |
 | 403 | `FORBIDDEN_SCOPE` | role/subject/ownership violation |
 | 409 | `ATTEMPT_EXISTS` | second quiz attempt blocked |
@@ -799,6 +878,14 @@ edubridge-ai/
 | RLS isolation (SEC-13) | Student A queries with Student B's id | Zero rows — blocked by policy, not just app code |
 | RLS answer keys | App role selects from `question_key` | Zero rows / denied — no policy grants access |
 | RLS fail-closed | Query without `app.current_user_id` set | All queries denied |
+| 2FA enforced (SEC-14) | Correct password, no 2FA challenge | `401 TWO_FACTOR_REQUIRED`; pending token cannot call business endpoints |
+| 2FA enrolment gate | New verified user tries to use the app | `403 TWO_FACTOR_ENROLLMENT_REQUIRED` until enrolment completes |
+| 2FA methods | Verify by TOTP, by email-OTP, by backup code | All three grant a session; email-OTP works without a smartphone |
+| 2FA replay | Re-submit a TOTP code already used | Rejected by the replay guard |
+| 2FA backup code | Reuse a consumed backup code | Rejected; code is single-use |
+| 2FA lockout | Repeated wrong codes | `423 TWO_FACTOR_LOCKED`, temporary; unlocks after `locked_until` |
+| 2FA secret exposure | Read enrolment via API after setup | Secret never returned; only status is visible |
+| 2FA admin reset | Admin resets a locked-out user | Succeeds with identity verification and writes to `audit_log` |
 | Self-update | Ingest unsigned source | Quarantined; not in KB |
 
 ### 9.3 AI eval harness
@@ -882,6 +969,19 @@ This TDD was subjected to an **adversarial critical review** (an independent rev
 | `subject_group`, `class_level`, `agent_component`, `question_key` | Normalization; polymorphic FK removal; NFR-8 backstop | §5.2, §5.3 |
 | `uuidv7()` → `gen_random_uuid()`; `audit_log` composite PK | **Both would have failed on PostgreSQL ≤17** | §5.4 |
 | Inline DDL replaced by a pointer to `supabase/migrations/` | Prevent schema drift between doc and code | §5.4 |
+
+### 14.2 Changes in v0.3.0
+
+| Change | Driver | Where |
+|---|---|---|
+| **2FA mandatory for all roles** — TOTP primary, email-OTP alternative, hashed single-use backup codes | SEC-14 / FR-A4 | §3.1, §6.9 |
+| Login split into **two steps**; a password yields only a short-lived pending-2FA token | Stolen passwords must not yield sessions | §3.1, §6.9 |
+| New tables `two_factor_enrollment`, `two_factor_backup_code`; two new `token_kind` values | Schema for SEC-14 (Track D migration) | §5.3a, §6.9 |
+| Replay guard, ±1 window skew tolerance, throttling, **temporary** lockout | 6-digit codes are brute-forceable | §6.9 |
+| **Recovery ladder** — alternate method → backup code → audited admin reset | Class 9–10 students may lack a smartphone (NFR-2 tension) | §6.9, PRD §24 |
+| 4 new error codes (`TWO_FACTOR_*`) | Explicit client handling | §7.3 |
+
+**Open question on 2FA:** whether to offer "remember this device" (e.g. 30 days) to reduce friction for young students. It weakens the control on shared devices — which is exactly the cohort in question — so it is **not** designed in. **[PROPOSED — confirm]**
 
 **Still open (decisions, not defects):** deployment target §2.4, vector DB choice §5.5, GPU spec, similarity threshold `SIM_THRESHOLD`, and the Class-11 ICS subject list (PRD §2.5).
 
