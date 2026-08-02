@@ -132,8 +132,7 @@ def require_subject_scope(subject_id: UUID):
     def _dep(ctx: Annotated[AuthContext, Depends(authenticated)]) -> AuthContext:
         row = ctx.session.execute(
             text(
-                "SELECT 1 FROM teacher_subject_scope "
-                "WHERE teacher_id = :tid AND subject_id = :sid"
+                "SELECT 1 FROM teacher_subject_scope WHERE teacher_id = :tid AND subject_id = :sid"
             ),
             {"tid": ctx.user_id, "sid": subject_id},
         ).one_or_none()

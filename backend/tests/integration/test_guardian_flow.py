@@ -65,8 +65,7 @@ def _link(db, *, parent_id, student_id, status="pending"):
     else:
         db.execute(
             text(
-                "INSERT INTO guardian_link (parent_id, student_id, status) "
-                "VALUES (:p, :s, :status)"
+                "INSERT INTO guardian_link (parent_id, student_id, status) VALUES (:p, :s, :status)"
             ),
             {"p": parent_id, "s": student_id, "status": status},
         )

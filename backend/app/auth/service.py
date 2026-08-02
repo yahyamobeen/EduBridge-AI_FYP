@@ -460,10 +460,7 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
         raise guardian_not_found()
 
     already_verified = db.execute(
-        text(
-            "SELECT 1 FROM guardian_link "
-            "WHERE student_id = :sid AND status = 'verified' LIMIT 1"
-        ),
+        text("SELECT 1 FROM guardian_link WHERE student_id = :sid AND status = 'verified' LIMIT 1"),
         {"sid": student_id},
     ).one_or_none()
     if already_verified is not None:
