@@ -82,8 +82,10 @@ class TestEmailVerify:
     def test_email_verify_expired_token(self, client, db, unique_email):
         """Expired token → 410 TOKEN_EXPIRED."""
         user_id = _make_user(db, unique_email("verify-expired"))
+        # Use -3600 (1 hour ago) to ensure token is definitively expired
+        # and visible across transaction boundaries
         token = issue_preauth_token(
-            db, user_id, kind=TokenKind.email_verify, ttl_seconds=-1
+            db, user_id, kind=TokenKind.email_verify, ttl_seconds=-3600
         )
         db.flush()  # Ensure token is visible to HTTP request's session
 
@@ -224,8 +226,10 @@ class TestPasswordReset:
     def test_password_reset_expired_token(self, client, db, unique_email):
         """Expired reset token → 410 TOKEN_EXPIRED."""
         user_id = _make_user(db, unique_email("reset-expired"), verified=True)
+        # Use -3600 (1 hour ago) to ensure token is definitively expired
+        # and visible across transaction boundaries
         token = issue_preauth_token(
-            db, user_id, kind=TokenKind.password_reset, ttl_seconds=-1
+            db, user_id, kind=TokenKind.password_reset, ttl_seconds=-3600
         )
         db.flush()  # Ensure token is visible to HTTP request's session
 
