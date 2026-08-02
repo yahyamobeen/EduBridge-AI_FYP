@@ -191,3 +191,103 @@ class MeResponse(BaseModel):
     two_factor: TwoFactorOut
     profile: ProfileOut | None
     guardian: GuardianOut
+
+
+# ============================================================================
+# KAN-10b — 2FA Enrolment, Challenge, Email Verification, Password Reset
+# ============================================================================
+
+
+# --- 2FA Enrolment (A) -------------------------------------------------------
+
+class TwoFactorEnrollRequest(BaseModel):
+    method: Literal["totp", "email_otp"]
+    enrollment_token: str
+
+
+class TwoFactorEnrollResponseTOTP(BaseModel):
+    method: Literal["totp"]
+    secret: str
+    otpauth_uri: str
+    qr_svg: str
+
+
+class TwoFactorEnrollResponseEmailOTP(BaseModel):
+    method: Literal["email_otp"]
+    sent_to: str
+    expires_in: int
+
+
+TwoFactorEnrollResponse = TwoFactorEnrollResponseTOTP | TwoFactorEnrollResponseEmailOTP
+
+
+class TwoFactorConfirmRequest(BaseModel):
+    code: str
+    enrollment_token: str
+
+
+class TwoFactorConfirmResponse(BaseModel):
+    two_factor: TwoFactorOut
+    backup_codes: list[str]
+    onboarding_state: str
+    access_token: str
+    expires_in: int
+
+
+# --- 2FA Challenge (B) -------------------------------------------------------
+
+class TwoFactorVerifyRequest(BaseModel):
+    pending_token: str
+    code: str
+    type: Literal["totp", "email_otp", "backup_code"]
+
+
+class TwoFactorVerifyResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"  # noqa: S105
+    expires_in: int
+    onboarding_state: str
+
+
+class TwoFactorResendRequest(BaseModel):
+    pending_token: str
+
+
+class TwoFactorResendResponse(BaseModel):
+    sent_to: str
+    expires_in: int
+
+
+# --- Email Verification (C) --------------------------------------------------
+
+class EmailVerifyRequest(BaseModel):
+    token: str
+
+
+class EmailVerifyResponse(BaseModel):
+    email_verified: bool
+    onboarding_state: str
+    access_token: str
+    expires_in: int
+    enrollment_token: str
+
+
+class EmailResendRequest(BaseModel):
+    email: EmailStr
+
+
+# --- Password Reset (D) ------------------------------------------------------
+
+class PasswordForgotRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+# --- Backup Code Regeneration (E) --------------------------------------------
+
+class BackupCodesRegenerateResponse(BaseModel):
+    backup_codes: list[str]

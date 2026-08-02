@@ -40,6 +40,19 @@ LOGIN_LIMIT = Limit(max_requests=10, window_seconds=60)
 REGISTER_LIMIT = Limit(max_requests=5, window_seconds=300)
 REFRESH_LIMIT = Limit(max_requests=30, window_seconds=60)
 
+# KAN-10b: pre-auth endpoints for 2FA, email verification, password reset.
+# Rate limits are per-IP (tdd.md §3.9). These exist to stop credential
+# stuffing on 6-digit OTP codes and brute-force on verification tokens.
+TWO_FA_ENROLL_LIMIT = Limit(max_requests=3, window_seconds=300)
+TWO_FA_CONFIRM_LIMIT = Limit(max_requests=5, window_seconds=300)
+TWO_FA_VERIFY_LIMIT = Limit(max_requests=10, window_seconds=300)
+TWO_FA_RESEND_LIMIT = Limit(max_requests=5, window_seconds=300)
+EMAIL_VERIFY_LIMIT = Limit(max_requests=10, window_seconds=300)
+EMAIL_RESEND_LIMIT = Limit(max_requests=3, window_seconds=300)
+PASSWORD_FORGOT_LIMIT = Limit(max_requests=3, window_seconds=300)
+PASSWORD_RESET_LIMIT = Limit(max_requests=5, window_seconds=300)
+BACKUP_CODES_REGENERATE_LIMIT = Limit(max_requests=3, window_seconds=300)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 

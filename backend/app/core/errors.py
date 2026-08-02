@@ -57,6 +57,34 @@ def rate_limited(message: str = "Too many requests. Please slow down.") -> AppEr
     return AppError(code="RATE_LIMITED", message=message, status_code=429)
 
 
+def two_factor_invalid() -> AppError:
+    return AppError(
+        code="TWO_FACTOR_INVALID", message="Invalid or expired code.", status_code=401
+    )
+
+
+def pending_token_expired() -> AppError:
+    return AppError(
+        code="PENDING_TOKEN_EXPIRED",
+        message="Challenge expired. Please sign in again.",
+        status_code=401,
+    )
+
+
+def invalid_token(message: str = "Invalid or unknown token.") -> AppError:
+    return AppError(code="INVALID_TOKEN", message=message, status_code=400)
+
+
+def token_expired(message: str = "This link has expired.") -> AppError:
+    return AppError(code="TOKEN_EXPIRED", message=message, status_code=410)
+
+
+def forbidden_scope(
+    message: str = "You do not have permission for this action.",
+) -> AppError:
+    return AppError(code="FORBIDDEN_SCOPE", message=message, status_code=403)
+
+
 def error_envelope(
     *, code: str, message: str, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:
