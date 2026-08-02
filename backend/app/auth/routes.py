@@ -154,10 +154,9 @@ def two_factor_enroll_endpoint(
     request: Request,
     payload: TwoFactorEnrollRequest,
     db: Session = Depends(get_db),
-) -> TwoFactorEnrollResponse:
+):
     enforce(request, bucket="2fa_enroll", limit=TWO_FA_ENROLL_LIMIT)
-    result = two_factor_enroll(db, payload)
-    return TwoFactorEnrollResponse(**result)
+    return two_factor_enroll(db, payload)
 
 
 @router.post("/auth/2fa/confirm", response_model=TwoFactorConfirmResponse)

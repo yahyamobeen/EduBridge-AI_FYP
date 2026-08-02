@@ -14,6 +14,8 @@ from app.auth.tokens import (
     RefreshTokenReuseError,
     find_token,
     issue_challenge_token,
+    issue_preauth_token,
+    issue_refresh_token,
     revoke_refresh_family,
     revoke_user_tokens,
     rotate_refresh_token,
@@ -21,6 +23,7 @@ from app.auth.tokens import (
 from app.core.config import get_settings
 from app.core.db import set_current_user_id
 from app.core.errors import (
+    AppError,
     email_already_registered,
     forbidden_scope,
     invalid_token,
@@ -435,10 +438,26 @@ def two_factor_enroll(db: Session, payload) -> dict:
     if not token_row:
         raise pending_token_expired()
 
+    # The SQL function does NOT check expiry or revocation — enforce it here
+    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
+        raise pending_token_expired()
+
     user_id = token_row.user_id
 
     # Bind user to transaction
     set_current_user_id(db, user_id)
+
+    # Reject if 2FA is already active (cannot re-enroll)
+    enrollment_check = db.execute(
+        text("SELECT status FROM two_factor_enrollment WHERE user_id = :uid"),
+        {"uid": user_id},
+    ).first()
+    if enrollment_check and str(enrollment_check.status) == "active":
+        raise AppError(
+            status_code=400,
+            code="VALIDATION_ERROR",
+            message="2FA is already active. Cannot re-enroll.",
+        )
 
     if payload.method == "totp":
         # Generate TOTP secret
@@ -490,7 +509,7 @@ def two_factor_enroll(db: Session, payload) -> dict:
         ).first()
 
         # Store OTP (revokes prior OTPs, inserts new one)
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at = datetime.now(UTC) + timedelta(minutes=10)
         db.execute(
             text("SELECT app.issue_email_otp(:uid, :hash, :expires)"),
             {"uid": user_id, "hash": otp_hash, "expires": expires_at},
@@ -527,6 +546,10 @@ def two_factor_confirm(db: Session, payload) -> dict:
     ).first()
 
     if not token_row:
+        raise pending_token_expired()
+
+    # The SQL function does NOT check expiry or revocation — enforce it here
+    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
         raise pending_token_expired()
 
     user_id = token_row.user_id
@@ -671,6 +694,10 @@ def two_factor_verify(db: Session, payload) -> dict:
     if not token_row:
         raise pending_token_expired()
 
+    # The SQL function does NOT check expiry or revocation — enforce it here
+    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
+        raise pending_token_expired()
+
     user_id = token_row.user_id
 
     # Bind user to transaction
@@ -690,7 +717,7 @@ def two_factor_verify(db: Session, payload) -> dict:
 
     # Check lockout
     locked_until = enrollment_data.locked_until
-    if locked_until and locked_until > datetime.now(timezone.utc):
+    if locked_until and locked_until > datetime.now(UTC):
         raise two_factor_locked(locked_until.isoformat())
 
     method = str(enrollment_data.method)
@@ -728,12 +755,25 @@ def two_factor_verify(db: Session, payload) -> dict:
             verified = True
 
     elif payload.type == "backup_code":
-        code_hash = hash_token(payload.code.upper())
-        result = db.execute(
-            text("SELECT app.consume_backup_code(:uid, :hash)"),
-            {"uid": user_id, "hash": code_hash},
-        ).scalar()
-        verified = result == 1
+        from app.auth.backup_codes import verify_backup_code
+
+        # Backup codes are argon2id-hashed, so we must retrieve all unused
+        # hashes and compare with verify_backup_code (not a simple hash
+        # lookup like HMAC tokens). This is deliberate: argon2id is
+        # non-deterministic, so the same code produces different hashes.
+        unused_rows = db.execute(
+            text("SELECT code_hash FROM app.get_unused_backup_codes(:uid)"),
+            {"uid": user_id},
+        ).fetchall()
+
+        for row in unused_rows:
+            if verify_backup_code(payload.code, row.code_hash):
+                db.execute(
+                    text("SELECT app.consume_backup_code(:uid, :hash)"),
+                    {"uid": user_id, "hash": row.code_hash},
+                )
+                verified = True
+                break
 
     if not verified:
         # Increment failed_attempts
@@ -744,7 +784,7 @@ def two_factor_verify(db: Session, payload) -> dict:
         locked_until = None
         for threshold, lockout_seconds in settings.two_factor_lockout_thresholds:
             if failed_attempts >= threshold:
-                locked_until = datetime.now(timezone.utc) + timedelta(seconds=lockout_seconds)
+                locked_until = datetime.now(UTC) + timedelta(seconds=lockout_seconds)
 
         db.execute(
             text("SELECT app.verify_2fa_failure(:uid, :failed, :locked)"),
@@ -754,10 +794,10 @@ def two_factor_verify(db: Session, payload) -> dict:
         # Audit log
         db.execute(
             text("""
-                INSERT INTO audit_log (user_id, action, ip_address)
-                VALUES (:uid, '2fa_verify_failed', :ip)
+                INSERT INTO audit_log (actor_id, action, target)
+                VALUES (:uid, '2fa_verify_failed', 'two_factor_enrollment')
             """),
-            {"uid": user_id, "ip": None},
+            {"uid": user_id},
         )
 
         raise two_factor_invalid()
@@ -820,7 +860,7 @@ def two_factor_verify(db: Session, payload) -> dict:
 
     return {
         "access_token": access_token,
-        "token_type": "Bearer",
+        "token_type": "bearer",
         "expires_in": expires_in,
         "onboarding_state": onboarding_state,
         "refresh_token": refresh_plain,
@@ -846,6 +886,10 @@ def two_factor_resend(db: Session, payload) -> dict:
     ).first()
 
     if not token_row:
+        raise pending_token_expired()
+
+    # The SQL function does NOT check expiry or revocation — enforce it here
+    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
         raise pending_token_expired()
 
     user_id = token_row.user_id
@@ -882,7 +926,7 @@ def two_factor_resend(db: Session, payload) -> dict:
     ).first()
 
     # Store OTP (revokes prior OTPs, inserts new one)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    expires_at = datetime.now(UTC) + timedelta(minutes=10)
     db.execute(
         text("SELECT app.issue_email_otp(:uid, :hash, :expires)"),
         {"uid": user_id, "hash": otp_hash, "expires": expires_at},
@@ -915,16 +959,14 @@ def verify_email(db: Session, payload) -> dict:
     ).first()
 
     if not result:
-        # Check if token exists but is expired
-        token_check = db.execute(
-            text("""
-                SELECT id, user_id, expires_at FROM auth_token
-                WHERE token_hash = :hash AND kind = 'email_verify'
-            """),
-            {"hash": hash_token(payload.token)},
+        # Distinguish expired from invalid using the SECURITY DEFINER function
+        # (direct SELECT on auth_token returns zero rows under RLS with no user bound)
+        status_row = db.execute(
+            text("SELECT * FROM app.check_token_status(:hash, :kind)"),
+            {"hash": hash_token(payload.token), "kind": "email_verify"},
         ).first()
 
-        if token_check and token_check.expires_at < datetime.now(timezone.utc):
+        if status_row and status_row.token_expired:
             raise token_expired()
         else:
             raise invalid_token()
@@ -1015,7 +1057,7 @@ def resend_email_verification(db: Session, payload) -> None:
     """
     # Look up user (constant-time: dummy hash if not found)
     user_row = db.execute(
-        text("SELECT id, email, email_verified_at FROM app.lookup_user_for_login(:email)"),
+        text("SELECT id, email_verified_at FROM app.lookup_user_for_login(:email)"),
         {"email": payload.email},
     ).first()
 
@@ -1025,7 +1067,7 @@ def resend_email_verification(db: Session, payload) -> None:
     if user_row and not user_row.email_verified_at:
         # Issue new email_verify token
         settings = get_settings()
-        verify_plain = issue_challenge_token(
+        verify_plain = issue_preauth_token(
             db,
             user_row.id,
             kind=TokenKind.email_verify,
@@ -1038,7 +1080,7 @@ def resend_email_verification(db: Session, payload) -> None:
 
         url = build_verification_url(verify_plain)
         subject, html = verification_email(url)
-        get_email_sender().send(user_row.email, subject, html)
+        get_email_sender().send(payload.email, subject, html)
 
 
 def forgot_password(db: Session, payload) -> None:
@@ -1050,7 +1092,7 @@ def forgot_password(db: Session, payload) -> None:
     """
     # Look up user (constant-time: dummy hash if not found)
     user_row = db.execute(
-        text("SELECT id, email, email_verified_at FROM app.lookup_user_for_login(:email)"),
+        text("SELECT id, email_verified_at FROM app.lookup_user_for_login(:email)"),
         {"email": payload.email},
     ).first()
 
@@ -1059,7 +1101,7 @@ def forgot_password(db: Session, payload) -> None:
 
     if user_row and user_row.email_verified_at:
         # Issue password_reset token
-        reset_plain = issue_challenge_token(
+        reset_plain = issue_preauth_token(
             db,
             user_row.id,
             kind=TokenKind.password_reset,
@@ -1072,7 +1114,7 @@ def forgot_password(db: Session, payload) -> None:
 
         url = build_password_reset_url(reset_plain)
         subject, html = password_reset_email(url)
-        get_email_sender().send(user_row.email, subject, html)
+        get_email_sender().send(payload.email, subject, html)
 
 
 def reset_password(db: Session, payload) -> None:
@@ -1092,27 +1134,20 @@ def reset_password(db: Session, payload) -> None:
     ).scalar()
 
     if not result:
-        # Check if token exists but is expired
-        token_check = db.execute(
-            text("""
-                SELECT id FROM auth_token
-                WHERE token_hash = :hash AND kind = 'password_reset'
-            """),
-            {"hash": hash_token(payload.token)},
+        # Distinguish expired from invalid using the SECURITY DEFINER function
+        # (direct SELECT on auth_token returns zero rows under RLS with no user bound)
+        status_row = db.execute(
+            text("SELECT * FROM app.check_token_status(:hash, :kind)"),
+            {"hash": hash_token(payload.token), "kind": "password_reset"},
         ).first()
 
-        if token_check:
-            token_row = db.execute(
-                text("SELECT expires_at FROM auth_token WHERE id = :id"),
-                {"id": token_check.id},
-            ).first()
-            if token_row.expires_at < datetime.now(timezone.utc):
-                raise token_expired()
+        if status_row and status_row.token_expired:
+            raise token_expired()
 
         raise invalid_token()
 
 
-def two_factor_regenerate_backup_codes(db: Session, user_id: uuid.UUID) -> dict:
+def two_factor_regenerate_backup_codes(db: Session, user_id: UUID) -> dict:
     """
     POST /auth/2fa/backup-codes
 
@@ -1147,10 +1182,10 @@ def two_factor_regenerate_backup_codes(db: Session, user_id: uuid.UUID) -> dict:
     # Audit log
     db.execute(
         text("""
-            INSERT INTO audit_log (user_id, action, ip_address)
-            VALUES (:uid, 'backup_codes_regenerated', :ip)
+            INSERT INTO audit_log (actor_id, action, target)
+            VALUES (:uid, 'backup_codes_regenerated', 'two_factor_backup_code')
         """),
-        {"uid": user_id, "ip": None},
+        {"uid": user_id},
     )
 
     return {"backup_codes": codes}

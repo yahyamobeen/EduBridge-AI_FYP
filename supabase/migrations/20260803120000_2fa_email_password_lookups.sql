@@ -532,6 +532,40 @@ AS $$
 $$;
 
 
+-- ----------------------------------------------------------------------------
+-- 16. Check token status (pre-auth)
+--
+-- Used by /email/verify and /password/reset to distinguish between an expired
+-- token (410 TOKEN_EXPIRED) and an unknown/invalid token (400 INVALID_TOKEN)
+-- when the main consume function returns zero rows.
+--
+-- Without this, a direct SELECT on auth_token would return zero rows under RLS
+-- (no user bound), making it impossible to distinguish "token never existed"
+-- from "token exists but is expired".
+-- ----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION app.check_token_status(
+  p_token_hash text,
+  p_kind       token_kind
+)
+RETURNS TABLE (
+  token_found boolean,
+  token_expired boolean,
+  token_user_id uuid
+)
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT
+    true AS token_found,
+    (t.expires_at <= now()) AS token_expired,
+    t.user_id AS token_user_id
+  FROM public.auth_token t
+  WHERE t.token_hash = p_token_hash
+    AND t.kind = p_kind;
+$$;
+
+
 -- ============================================================================
 -- Permissions: revoke from PUBLIC, grant to app_backend.
 -- ============================================================================
@@ -551,6 +585,7 @@ REVOKE ALL ON FUNCTION app.consume_token_and_verify_email(text)             FROM
 REVOKE ALL ON FUNCTION app.consume_password_reset_token(text, text)         FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.lookup_user_email(uuid)                          FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.issue_token_for_email(uuid, token_kind, text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_token_status(text, token_kind)              FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION app.lookup_challenge_token(text, token_kind)         TO app_backend;
 GRANT EXECUTE ON FUNCTION app.upsert_2fa_enrollment(uuid, two_factor_method, bytea) TO app_backend;
@@ -567,3 +602,4 @@ GRANT EXECUTE ON FUNCTION app.consume_token_and_verify_email(text)             T
 GRANT EXECUTE ON FUNCTION app.consume_password_reset_token(text, text)         TO app_backend;
 GRANT EXECUTE ON FUNCTION app.lookup_user_email(uuid)                          TO app_backend;
 GRANT EXECUTE ON FUNCTION app.issue_token_for_email(uuid, token_kind, text, timestamptz) TO app_backend;
+GRANT EXECUTE ON FUNCTION app.check_token_status(text, token_kind)              TO app_backend;

@@ -187,3 +187,33 @@ def issue_challenge_token(
     plain = generate_opaque_token()
     _insert_token(session, user_id, kind, hash_token(plain), now + timedelta(seconds=ttl_seconds))
     return plain
+
+
+def issue_preauth_token(
+    session: Session,
+    user_id: UUID,
+    *,
+    kind: TokenKind,
+    ttl_seconds: int,
+    now: datetime | None = None,
+) -> str:
+    """
+    Issue a pre-authentication token for email verification or password reset.
+
+    Unlike ``issue_challenge_token`` (which is restricted to 2FA kinds), this
+    function accepts ``email_verify`` and ``password_reset`` kinds. These tokens
+    are single-use, short-lived, and consumed by their respective SECURITY
+    DEFINER functions (``consume_token_and_verify_email``,
+    ``consume_password_reset_token``).
+
+    The separation exists on purpose: a ``password_reset`` token presented at
+    ``/2fa/verify`` would be nonsensical, and the kind guard in
+    ``issue_challenge_token`` is what prevents that confusion at issuance time.
+    """
+    if kind not in (TokenKind.email_verify, TokenKind.password_reset):
+        raise ValueError(f"{kind} is not a pre-auth token kind; use issue_challenge_token for 2FA")
+
+    now = now or datetime.now(UTC)
+    plain = generate_opaque_token()
+    _insert_token(session, user_id, kind, hash_token(plain), now + timedelta(seconds=ttl_seconds))
+    return plain
