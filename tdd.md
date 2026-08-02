@@ -1,9 +1,9 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.3.0
+**Version:** 0.3.2
 **Status:** Draft — under section-by-section review
-**Last Updated:** July 19, 2026
+**Last Updated:** August 2, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen) · **Supervisor:** Dr. Muhammad Arif Butt (FCIT, University of the Punjab)
 **Source of truth:** `prd.md` (this TDD implements it) · **Upstream:** `EDUBRIDGE_AI_PROPOSAL.pdf`
@@ -18,6 +18,8 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.2 | 2026-08-02 | EduBridge AI Team | **Subscriptions + onboarding state.** New `subscription`, `subscription_plan`, `oauth_identity` tables (§5.3a, §5.4) with RLS (§6.8); `onboarding_state` documented as a **derived** field gaining `plan_selection_pending` (§3.1) — the first **non-monotonic** state in the system (§5.8). `guardian/confirm` becomes **authenticated** (§3.1) — the parent signs up first. `email/verify` and `2fa/confirm` now issue tokens, and the 2FA enrolment endpoints take `enrollment_token` in the **body** (§3.1, §7.3). Frontend design specified in depth (§3.10): API client, in-memory access token, `NAV_BY_ROLE`, RTL rule, `qr_svg` handling (§6.11). Teacher tutor access removed to match `/api/tutor/ask` scoping (§3.2, `prd.md` §4.2). Frontend test matrix added (§9.5). |
+| 0.3.1 | 2026-08-01 | EduBridge AI Team | Login returns **`200` + `status` discriminator** rather than `401 TWO_FACTOR_REQUIRED` (§3.1, §6.9, §7.3, §9.2); the two affected codes removed from the error catalogue. |
 | 0.3.0 | 2026-08-01 | EduBridge AI Team | **Two-factor authentication for all roles** (SEC-14 / FR-A4): TOTP primary, email-OTP alternative, hashed single-use backup codes, admin-assisted recovery. Adds `two_factor_enrollment` and `two_factor_backup_code` tables plus two `token_kind` values; login becomes a two-step challenge (§3.1, §6.9). |
 | 0.2.0 | 2026-08-01 | EduBridge AI Team | OLTP moved to **Supabase**; **Supabase CLI migrations replace Alembic**; **Row Level Security** designed and implemented (§6.8). Schema: `class_level`, `subject_group`, `content_strategy`, `student_group`, `agent_component`; corrected `uuidv7()`→`gen_random_uuid()` (PG16) and the invalid partitioned-table PK on `audit_log`. Agent routing extended to **four content strategies** including **religious-verbatim** (generation disabled for Quran Translation). SQL now lives in `supabase/migrations/`. |
 
@@ -110,7 +112,9 @@ EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal modu
 | **Figure indexing** | Qwen2.5-VL (offline batch) | — | Index textbook figures |
 | **Guardrails** | Prompt Guard 2 / Llama Guard 3 | — | Input/output safety (LLM01/05) |
 | **TTS / avatar** | Fish Audio S2 Pro / MuseTalk v1.5 | — | Voice + lip-sync avatar |
-| **Frontend** | Next.js + React + Tailwind; next-intl | Next ≥14 | Responsive web UI, i18n/RTL |
+| **Frontend** | Next.js (App Router) + React + Tailwind; next-intl | Next ≥14 | Responsive web UI, i18n/RTL |
+| **Frontend data / forms** | TanStack Query; react-hook-form + zod | latest | Cached identity checks on metered connections; multi-step signup with cross-field rules |
+| **Frontend testing** | Vitest + React Testing Library; **Playwright** | latest | Unit/component; E2E (§9.5) |
 | **Safe rendering** | DOMPurify + sandboxed iframe + CSP; KaTeX, Mermaid, Chart.js/Recharts, function-plot | latest | Typed visual aids (LLM05) |
 | **Auth** | JWT (access+refresh, python-jose); argon2/bcrypt (passlib) | latest | AuthN; strong password hashing |
 | **Security tooling** | Semgrep, OPA/Rego, sigstore/cosign, container sandbox | latest | Vetting, policy, signing, isolation |
@@ -152,31 +156,59 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 
 | Method | Path | Auth | Role | Purpose |
 |--------|------|------|------|---------|
-| POST | `/api/auth/register` | No | — | Create student (board/class/medium); teacher/parent/admin variants |
-| POST | `/api/auth/login` | No | — | Authenticate → access+refresh JWT |
-| POST | `/api/auth/2fa/enroll` | Yes (challenge) | any | Start enrolment — returns TOTP QR + secret, or triggers email-OTP |
-| POST | `/api/auth/2fa/confirm` | Yes (challenge) | any | Confirm first code; activates 2FA and returns the 10 backup codes **once** |
+| GET | `/api/reference/enums` | No | — | Boards, class levels, **groups keyed by class**, mediums, languages. Signup reads its options from here rather than hard-coding them |
+| POST | `/api/auth/register` | No | — | Create student (board/class/**group**/medium/language); teacher/parent variants. **Issues no session** — the account starts at `email_verification_pending` |
+| POST | `/api/auth/login` | No | — | Authenticate → `200` + `status` discriminator (never a session directly) |
+| POST | `/api/auth/email/verify` | No (token) | any | Verify address → **returns `access_token` + `enrollment_token`** (v0.3.2) |
+| POST | `/api/auth/email/resend` | No | any | Re-send the verification email (rate-limited) |
+| POST | `/api/auth/password/forgot` | No | any | Begin reset. Response is identical whether or not the address exists |
+| POST | `/api/auth/password/reset` | No (token) | any | Complete reset with a new password |
+| POST | `/api/auth/2fa/enroll` | **`enrollment_token` in body** | any | Start enrolment — returns TOTP `qr_svg` + secret, or triggers email-OTP |
+| POST | `/api/auth/2fa/confirm` | **`enrollment_token` in body** | any | Confirm first code; activates 2FA, returns the 10 backup codes **once** and an **`access_token`** (v0.3.2) |
 | POST | `/api/auth/2fa/verify` | Pending-2FA token | any | Submit TOTP / email-OTP / backup code → full session |
 | POST | `/api/auth/2fa/resend` | Pending-2FA token | any | Re-send an email-OTP (rate-limited) |
 | POST | `/api/auth/2fa/backup-codes` | Yes | any | Regenerate backup codes (invalidates the old set) |
 | POST | `/api/admin/users/{id}/2fa/reset` | Yes | Admin | Identity-verified recovery reset; always audited |
 | POST | `/api/auth/refresh` | Refresh JWT | any | Rotate access token |
 | POST | `/api/auth/logout` | Yes | any | Revoke refresh token |
-| POST | `/api/auth/guardian/invite` | Yes | Student | Invite a parent (email/code) to satisfy the 9–10 gate |
-| POST | `/api/auth/guardian/confirm` | No (token) | Parent | Parent confirms link → `guardian_link.status=verified` |
-| GET | `/api/auth/me` | Yes | any | Current identity + gate status |
+| POST | `/api/auth/guardian/invite` | Yes | Student | Invite a parent **by email address** to satisfy the 9–10 gate |
+| POST | `/api/auth/guardian/confirm` | **Yes (parent)** | Parent | Parent confirms link → `guardian_link.status=verified` (v0.3.2 — see below) |
+| GET | `/api/auth/guardian/status` | Yes | Student | Poll link state while the gate is pending |
+| GET | `/api/auth/me` | Yes | any | Current identity + **`onboarding_state`** |
 
 **Key design decisions:**
 - Passwords hashed with **argon2id** (never MD5 — the supervisor's template's MD5 is the explicit anti-pattern we avoid). Refresh tokens stored hashed, rotated, revocable.
 - RBAC via FastAPI dependencies: `require_role(...)`, `require_subject_scope()`, `require_guardian_verified()`. The gate dependency blocks **every student learning/assessment endpoint** for a Class 9–10 student whose `guardian_link` is not `verified` — `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, and `/api/reports/*` (returns `403 GATE_PENDING`). An authz-matrix test asserts the gate on each such route (§9.4).
-- **Anti-forgery of the gate:** `guardian_link` has `CHECK(parent_id≠student_id)`; the service enforces `parent_id.role='parent'` and requires a distinct **out-of-band** verification signal (a parent email/identity separate from the student's session) before `status→verified` — a student cannot self-satisfy the gate.
+- **Anti-forgery of the gate (mechanism fixed in v0.3.2):** the link is created by a **student-initiated email invite** — the student supplies a parent's address, the parent **signs up**, and confirms the link from their own authenticated account. `guardian_link` has `CHECK(parent_id≠student_id)` and the service enforces `parent_id.role='parent'`.
+  - `guardian/confirm` is therefore **authenticated**, not token-only as it was through v0.3.1. Requiring a real parent account before the link verifies is what makes the signal out of band: confirmation happens in a mailbox *and* an account the student does not control.
+  - A **redeemable code** was considered and rejected. Any code the student types has, by definition, passed through the student — so it is not out-of-band, and a student could register a throwaway "parent", generate a code and clear their own gate. That is precisely the forgery this control exists to stop (§14 finding 3).
 - **Single canonical parent↔child link:** `guardian_link` is the only source of truth for "a parent may view a child" and for the gate; the guardian-space path (§3.6) creates/verifies a `guardian_link`, it does not rely on `enrollment`.
 - **Enforcement is at the API + data layer**, not the UI, so it cannot be bypassed by calling the API directly (security gate #4).
 - **RLS context is set per transaction.** Because auth is application-managed, every request transaction issues `SET LOCAL app.current_user_id = '<uuid>'` before any query, which the RLS policies read (§6.8). If it is not set, policies deny everything — fail-closed.
 - **Student registration captures `student_group`** alongside board/class/medium; a database `CHECK` rejects invalid class/group pairs (e.g. a Class-9 student marked `pre_medical`).
-- **Two-step login (SEC-14).** A correct password does **not** produce a session. It produces a short-lived, single-purpose **pending-2FA token** (≈5 min, cannot call any business endpoint); only a successful `/2fa/verify` exchanges it for access + refresh JWTs. Full design in §6.9.
+- **Two-step login (SEC-14).** A correct password does **not** produce a session. `POST /api/auth/login` returns **`200` with a `status` discriminator** — the request succeeded, it is simply incomplete — carrying a short-lived, single-purpose **pending-2FA token** (≈5 min, cannot call any business endpoint). Only a successful `/2fa/verify` exchanges it for access + refresh JWTs. A **wrong** password is a genuine failure and returns `401 UNAUTHENTICATED`. Full design in §6.9.
 
-**Interfaces:** `AuthService.register()`, `.login()`, `.rotate_refresh()`, `GuardianService.invite()/confirm()/is_verified(student_id)`.
+- **`onboarding_state` is derived, never stored.** `GET /api/auth/me` computes it per request; there is no column and no enum, so adding a state needs no migration. Precedence is fixed and evaluated in order:
+
+  | Order | Condition | State |
+  |---|---|---|
+  | 1 | `app_user.email_verified_at IS NULL` | `email_verification_pending` |
+  | 2 | `two_factor_enrollment.status <> 'active'` | `two_factor_enrollment_pending` |
+  | 3 | student, class 9–10, `guardian_link.status <> 'verified'` | `guardian_link_pending` |
+  | 4 | student, `subscription.status NOT IN ('trialing','active')` **or no record** | `plan_selection_pending` |
+  | 5 | otherwise | `active` |
+
+  Clients route on this single field. They must not reconstruct it from the underlying booleans — that is how the four tracks drift apart.
+
+- **Onboarding is not monotonic (v0.3.2).** Rule 4 can fire *after* a user has been `active`: a student's trial lapses and they return to `plan_selection_pending`. Any consumer that evaluates the state once at session start and then caches `active` will strand that user on a page they no longer have rights to. The state must be re-evaluated on every identity check. This is the only backward transition in the system (§5.8).
+
+- **Rule 4 fails closed.** *No* subscription row means no access — never "still trialing". A failed insert at registration must not silently grant indefinite free access (`prd.md` MON-2).
+
+- **The token issued by `email/verify` is scoped (v0.3.2).** Returning a session before the second factor exists would make email verification alone a complete login and render 2FA bypassable. That token must be accepted **only** by the onboarding endpoints and must be rejected by every business route. It is a narrower credential that happens to share the access-token shape, not a general session.
+
+- **`enrollment_token` travels in the request body**, matching how `/2fa/verify` already carries `pending_token`, rather than in an `Authorization` header. One convention for short-lived, single-purpose tokens; the header is reserved for real sessions.
+
+**Interfaces:** `AuthService.register()`, `.login()`, `.rotate_refresh()`, `.onboarding_state(user)`, `GuardianService.invite()/confirm()/is_verified(student_id)`.
 
 ### 3.2 Agent Orchestrator — `backend/app/agent/` **[P0]**
 
@@ -313,12 +345,58 @@ Routing is driven by the subject's **`content_strategy`** column (four values), 
 
 ### 3.10 Frontend — `frontend/` (Next.js) **[P0→P1]**
 
-**Responsibilities:** role dashboards, tutor chat (text+voice, streaming), sandboxed visual renderer, avatar/audio player, classroom/quiz UIs, i18n (EN/UR/Roman-Urdu) with **RTL**.
+**Responsibilities:** auth & onboarding screens, role dashboards, tutor chat (text+voice, streaming), sandboxed visual renderer, avatar/audio player, classroom/quiz UIs, i18n (EN/UR/Roman-Urdu) with **RTL**.
+
+**Stack:** Next.js (App Router) · TypeScript `strict` + `noUncheckedIndexedAccess` · Tailwind · `next-intl` ·
+TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing Library (unit/component) ·
+**Playwright** (E2E, consistent with §9.1).
 
 **Key design decisions:**
+
 - **Sandboxed visual renderer** component: renders the typed visual spec inside an `<iframe sandbox>` with a strict CSP; any string is passed through **DOMPurify**. This is the frontend half of LLM05.
-- `next-intl` for locales; RTL layout for Urdu; accepts Urdu script + Roman-Urdu input.
-- Auth tokens in httpOnly cookies; role-gated routes; the parental-gate state drives an onboarding wall for Class 9–10.
+
+- **Token handling.** The **access token lives in memory only** — never `localStorage`, `sessionStorage`, a
+  readable cookie, or a URL. The **refresh token is an httpOnly cookie** the server sets and JavaScript never
+  reads. *(Corrects v0.3.1, which said "auth tokens in httpOnly cookies" — that would have put the access
+  token somewhere the client must read it from, which is not achievable with httpOnly.)*
+  - Refresh is **single-flight**: N concurrent 401s trigger one refresh, not N.
+  - Refresh fires **proactively at ~80 % of `expires_in`**, so a student mid-form is not interrupted.
+  - The 401→refresh→retry path is **allow-listed by error code**. `TWO_FACTOR_INVALID` and
+    `PENDING_TOKEN_EXPIRED` are also `401`s but mean "wrong code" — retrying them would resubmit a bad code
+    and consume a lockout attempt.
+
+- **Routing is driven by `onboarding_state` alone** (§3.1), re-evaluated on every identity check because the
+  state is non-monotonic. The client never infers progress from `class_level` or a set of booleans — which is
+  also why a Class 11–12 student has no code path that can render the parental gate.
+
+- **Navigation is derived per role from the `prd.md` §4.2 matrix**, through a single `NAV_BY_ROLE` map. A role
+  never renders a control it lacks the right to use, even disabled.
+
+  | Student | Teacher | Parent |
+  |---|---|---|
+  | Dashboard · Subjects · AI Tutor · Practice · Quizzes · Progress · **My Classes** · Study Planner | Dashboard · My Spaces · Quizzes · Reports *(subject-scoped)* · Class Roster · SLO Mapping · Announcements | Dashboard · My Child · Progress · How to Help |
+
+  Three points this encodes, each of which a shared component tree makes easy to get wrong:
+  **(a)** the parent surface is strictly read-only and exposes **no** tutor, chat-replay or planner-write
+  control — `GET /api/tutor/sessions/{id}` is student-owner-only, so a "replay this session" affordance
+  would advertise a capability RLS and the matrix both deny;
+  **(b)** the teacher surface has **no** tutor entry, matching `/api/tutor/ask` (§3.2);
+  **(c)** the student surface must expose **My Classes**, because `prd.md` §4.2 guarantees a student can see
+  who can view them and leave any space at any time — a right with no UI is not a right.
+
+- **i18n and RTL.** `next-intl` with a `[locale]` route segment. **`ur` is the only RTL locale; `roman_ur` is
+  Latin script and stays LTR.** Mirroring uses **logical** spacing and alignment properties throughout, so a
+  new screen is correct by construction rather than by remembering; directional icons flip, non-directional
+  ones do not; one-time codes, backup codes and countdown numerals are pinned LTR inside RTL pages
+  (`prd.md` I18N-4).
+
+- **Mock layer.** The frontend is built before the backend exists, against handlers matching these contracts
+  field-for-field, switched by a single env var. Mock response types are derived from the same definitions
+  the live client uses, so drift is a type error rather than a runtime surprise.
+
+- **Budget (`prd.md` A11Y-2).** Fonts self-hosted and the Urdu face loaded only for `ur`; Tailwind compiled
+  at build time; reference data cached rather than refetched per form step; target LCP under 3 s on a
+  mid-tier Android over Slow 3G.
 
 ### 3.11 Data Flows
 
@@ -466,7 +544,7 @@ question ─1:1─ question_key   (server-only; no RLS policy grants access)
 
 Each table lists notable columns, keys, and indexes (full DDL for core tables in §5.4; remaining tables follow the same conventions).
 
-- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class_level, **student_group**, medium, language_pref, CHECK class/group pairing)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)` — `token_kind` extended with `two_factor_email_otp` and `two_factor_pending`, `two_factor_enrollment(user_id🔗🔑, method⋈enum{totp,email_otp}, status⋈enum{pending,active,disabled}, totp_secret_encrypted bytea, confirmed_at, last_used_at, last_used_counter, failed_attempts, locked_until)` — one per user; secret **encrypted at rest**, `two_factor_backup_code(id, user_id🔗, code_hash, used_at, UNIQUE(user_id,code_hash))` — 10 per enrolment, **argon2id-hashed**, single-use.
+- **(a) Identity & RBAC:** `app_user(id, email🔑, password_hash, role⋈enum, status, ts)` *(table name `app_user`; "user" is reserved in Postgres)*, `student_profile(user_id🔗, board, class_level, **student_group**, medium, language_pref, CHECK class/group pairing)`, `teacher_profile(user_id🔗)`, `teacher_subject_scope(teacher_id🔗, subject_id🔗, PK(teacher_id,subject_id))` — **explicit M:N**: report scoping joins through this (a subject is per board×class, §b), `parent_profile(user_id🔗)`, `admin_profile(user_id🔗, scope)`, `guardian_link(parent_id🔗, student_id🔗, status⋈enum, verification_method, verified_at, CHECK(parent_id≠student_id), UNIQUE(parent_id,student_id))`, `auth_token(id, user_id🔗, kind, hash, revoked, expires_at)` — `token_kind` extended with `two_factor_email_otp` and `two_factor_pending`, `two_factor_enrollment(user_id🔗🔑, method⋈enum{totp,email_otp}, status⋈enum{pending,active,disabled}, totp_secret_encrypted bytea, confirmed_at, last_used_at, last_used_counter, failed_attempts, locked_until)` — one per user; secret **encrypted at rest**, `two_factor_backup_code(id, user_id🔗, code_hash, used_at, UNIQUE(user_id,code_hash))` — 10 per enrolment, **argon2id-hashed**, single-use, **8 alphanumeric characters compared case-insensitively**, `subscription_plan(code🔑, name, price_minor, currency, billing_interval, is_active)` — reference data, one row in v1; prices in **minor units** so money is never floating point; `billing_interval` is prefixed because `interval` is a Postgres type name, `subscription(id, user_id🔗, plan_code🔗, status⋈enum{trialing,active,past_due,canceled,expired}, trial_ends_at, current_period_end, UNIQUE(user_id), CHECK(status<>'active' OR current_period_end IS NOT NULL))` — **one per user**; `trial_ends_at` defaults to 14 days **in the schema**, which is the single definition of trial length, `oauth_identity(id, user_id🔗, provider⋈enum{google,microsoft}, provider_user_id, UNIQUE(provider,provider_user_id), UNIQUE(user_id,provider))` — reserved for the deferred FR-A6; `provider_user_id` is the provider's opaque subject claim, not an email, because emails change and are reusable.
 - **(b) Curriculum & KB:** `board`, `class_level(board_id🔗, level 9..12, UNIQUE(board_id,level))`, `subject(class_level_id🔗, name, **content_strategy**⋈enum, UNIQUE(class_level_id,name))` — defined **once per (board,class)**, never per group, `subject_group(subject_id🔗, student_group⋈enum, PK(subject_id,student_group))` — which elective groups take it, `chapter(subject_id🔗, no, title)`, `slo(chapter_id🔗, code, text, effective_from_year, retired_at, UNIQUE(chapter_id,code))` — **soft-retired, never deleted**, `kb_document(id, board_id🔗, curriculum_year, source_uri, provenance_status⋈enum, version, integrity_hash, UNIQUE(board_id,curriculum_year,version))`, `curriculum_item(id, kb_document_id🔗, chapter_id🔗, exercise, question, worked_solution, lang)`, `curriculum_item_slo(item_id🔗, slo_id🔗, PK(item_id,slo_id))`, `textbook_figure(id, curriculum_item_id🔗?, chapter_id🔗, caption_ocr, embedding_ref)`, `urdu_note_item(id, kb_document_id🔗, type⋈enum, fields jsonb, source)`, `glossary_term(id, board_id🔗, subject_id🔗, en_term, ur_term, UNIQUE(subject_id,en_term))`.
 - **(c) Assessment:** `past_paper(id, board_id🔗, class, subject_id🔗, year)`, `question(id, past_paper_id🔗?, stem, choices jsonb, primary_slo_id🔗, UNIQUE)` — **no key column here**, `question_key(question_id🔗🔑, answer_key, rationale)` — **server-only table, never in any client schema/route** (NFR-8 backstop), `question_slo(question_id🔗, slo_id🔗, is_primary, PK(...))`, `item_difficulty(question_id🔗🔑, irt_a, irt_b, irt_c)`, `slo_frequency_cluster(id, slo_id🔗, board_id🔗, freq_score, years)`, `quiz(id, space_id🔗, subject_id🔗, created_by🔗, source⋈enum, time_open, time_close, one_attempt=true, shuffle=true)`, `quiz_question(quiz_id🔗, question_id🔗, PK(...))`, `quiz_attempt(id, quiz_id🔗, student_id🔗, state⋈enum, started_at, submitted_at, score, version, UNIQUE(quiz_id,student_id))`, `attempt_answer(id, attempt_id🔗, question_id🔗, response, correct)`.
 - **(d) Learner analytics (OLTP current-state):** `mastery_estimate(student_id🔗, slo_id🔗, p_mastery, p_transit, p_guess, p_slip, updated_at, version, PK(student_id,slo_id))`, `coverage_record(id, student_id🔗, subject_id🔗, coverage_pct, as_of)`, `exam_readiness_score(id, student_id🔗, subject_id🔗, score, expected_marks, computed_at)`, `review_schedule(id, student_id🔗, slo_id🔗, due_at, interval)`.
@@ -482,8 +560,9 @@ Each table lists notable columns, keys, and indexes (full DDL for core tables in
 | Migration | Contents |
 |---|---|
 | `20260801120000_initial_schema.sql` | Extensions, enums, all 45 tables (incl. two-factor auth), the admin 2FA status view, constraints, indexes, triggers, partitions |
-| `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, 56 policies (§6.8, §6.9) |
-| `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (76 rows) and elective-group mappings |
+| `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, **68 policies** — 56 written out plus 12 generated in a `DO` loop over the reference tables (§6.8, §6.9) |
+| `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (76 rows) and 160 elective-group mappings |
+| `20260802120000_subscriptions_and_oauth.sql` | `subscription_plan`, `subscription`, `oauth_identity`; two enums; the Rs. 999 `standard` plan seed; grants and RLS (§6.8) |
 
 **Conventions applied throughout:**
 
@@ -561,7 +640,9 @@ A dedicated `analytics` schema (separate from OLTP), refreshed by ETL jobs; all 
 | Entity | States | Guards |
 |---|---|---|
 | `quiz_attempt.state` | not_started→in_progress→(submitted\|auto_submitted)→graded | one attempt; within `[time_open,time_close]`; keys server-side; **a Celery-beat sweeper auto-submits+grades `in_progress` attempts past `time_close`** (fixes abandoned attempts, §3.9) |
-| `guardian_link.status` | pending→(verified\|revoked) | 9–10 tutor access requires `verified` |
+| `guardian_link.status` | pending→(verified\|revoked) | 9–10 tutor access requires `verified`; only an authenticated **parent** account can verify (§3.1) |
+| `subscription.status` | trialing→(active\|expired); active→(past_due→(active\|canceled))\|canceled; expired→active | learning access requires `trialing` or `active`; **absence of a row is not a state** — it is no access (`prd.md` MON-2) |
+| *`onboarding_state`* **(derived, no column)** | email_verification_pending→two_factor_enrollment_pending→[guardian_link_pending]→active **⇄** plan_selection_pending | computed per request by the precedence table in §3.1. **The only non-monotonic machine here** — a lapsed trial returns an active student to plan selection, so consumers must re-evaluate rather than cache |
 | `join_code` | active→(revoked\|expired) | joining creates `enrollment` (consent) |
 | `enrollment` | joined→(left\|removed) | viewer read-only over student |
 | `kb_document` | provenance: pending→(verified\|quarantined); lifecycle: ingesting→indexed→integrity_verified→live→superseded | ingest only if provenance `verified`; serve only `live`; one live edition per (board,subject) |
@@ -668,7 +749,7 @@ SET LOCAL app.current_user_id = '<uuid from our JWT>';
 1. Table **owners bypass RLS by default**, so every table is set to `FORCE ROW LEVEL SECURITY`.
 2. FastAPI connects as a dedicated **`app_backend` role with `NOBYPASSRLS`** — never as `postgres`. Background jobs that legitimately need unrestricted access (OLAP ETL, quiz sweeper, vector reconciliation) use the owner/service role instead.
 
-**Policy model** (54 policies; helper functions in the `app` schema, `SECURITY DEFINER` to avoid recursion):
+**Policy model** — **73 policies**: 68 from the initial policies migration (56 written out plus 12 generated in a `DO` loop over the reference tables) and 5 added with subscriptions/OAuth. Helper functions live in the `app` schema and are `SECURITY DEFINER` to avoid recursing through the very policies that call them.
 
 | Data | Rule |
 |---|---|
@@ -679,6 +760,9 @@ SET LOCAL app.current_user_id = '<uuid from our JWT>';
 | `question_key` | **No policy at all** — the app role can never read answer keys (NFR-8 database backstop) |
 | `audit_log`, `api_request_log` | Insert-only from the app, admin read; no UPDATE/DELETE policy, so the trail is tamper-evident |
 | Curriculum taxonomy | Readable by any authenticated user; admin writes |
+| `subscription_plan` | Readable by any authenticated user (the plan screen renders during onboarding, so a session always exists); admin writes |
+| `subscription` | **Owner only**, plus **admin `SELECT` only**. Admins get read for provisioning and billing support, deliberately not `FOR ALL` — an admin must not be able to grant a paid subscription outside the payment path. **No parent policy:** parents pay for nothing in v1, and adding guardian read here would widen `prd.md` §4.2 without a requirement behind it |
+| `oauth_identity` | **Owner only.** No admin path — `provider_user_id` is an identifying external subject and no support workflow needs it |
 
 Enabling RLS on every `public` table also closes Supabase's PostgREST exposure of unprotected tables.
 
@@ -728,11 +812,25 @@ RLS: both tables are **owner-only** (`user_id = app.current_user_id()`), with ad
 
 **Login (two-step).**
 ```
-password ok ──▶ pending-2FA token (≈5 min, no business scope)
+password ok ──▶ 200 {status:"two_factor_required", pending_token} (≈5 min, no business scope)
                      │
                      ▼  /2fa/verify  (TOTP | email-OTP | backup code)
                  access + refresh JWT
 ```
+
+**Login response shape.** A correct password always returns `200` with one of three
+`status` values — never a session:
+
+| `status` | Also returns | Client action |
+|---|---|---|
+| `email_verification_required` | masked email | Send to "verify your email" screen |
+| `two_factor_enrollment_required` | `enrollment_token`, `expires_in` | Send to 2FA enrolment |
+| `two_factor_required` | `pending_token`, `method`, `expires_in` | Send to 2FA challenge |
+
+A **wrong** password returns `401 UNAUTHENTICATED`, worded so it never reveals whether the
+email exists. Using `200` here is deliberate: the request succeeded and the credentials were
+valid, so a `4xx` would force clients to distinguish "wrong password" from "next step needed"
+by parsing an error code — fragile, and easy to render as a spurious failure.
 
 **Verification rules.**
 - TOTP: RFC 6238, 6 digits, 30 s period, **±1 window** tolerated for clock skew.
@@ -752,6 +850,29 @@ password ok ──▶ pending-2FA token (≈5 min, no business scope)
 ### 6.10 CI/CD hardening
 
 GitHub Actions on every PR: unit/integration tests, **Semgrep** static analysis, **OPA policy tests**, the **Secure Skills & MCP scanner**, container build + **sigstore** signing. Protected `main`; only lead merges; secrets encrypted.
+
+A separate `frontend.yml` workflow runs typecheck, lint, unit/component tests, build and Playwright E2E on any change under `frontend/`. It runs against the mock layer, so it needs no backend and stays green while the backend tracks are still in progress.
+
+### 6.11 Client-side security (frontend)
+
+- **`qr_svg` is server-supplied markup and must not be injected as HTML.** The 2FA enrolment response carries
+  a rendered SVG; interpolating it into the DOM would execute any `<script>` it contained. It is rendered as
+  a **base64 `data:` URI inside an `<img>`**, where SVG is processed in a restricted mode that runs no
+  scripts and issues no external requests. This is stricter than the DOMPurify path used for agent-generated
+  visuals (§3.10) and is appropriate because the asset has a fixed, known shape.
+- **Token storage** — access token in memory, refresh token in an httpOnly cookie; never `localStorage`,
+  `sessionStorage`, a readable cookie, or a query string (§3.10).
+- **No secrets in client-visible configuration.** Anything prefixed `NEXT_PUBLIC_` is compiled into the
+  bundle and is therefore public by definition.
+- **Response headers** set at the edge: `Content-Security-Policy` without `unsafe-inline` scripts,
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Credential-manager compatibility** — correct `autocomplete` values (`username`, `current-password`,
+  `new-password`, `one-time-code`). This is a security control, not polish: the target cohort shares devices
+  (`prd.md` §3.1), and fields a password manager cannot fill push users toward weak, memorable, reused
+  passwords.
+- **No account enumeration** — registration, login and password-reset responses must not reveal whether an
+  address exists, by body, status code, or timing.
 
 ---
 
@@ -775,6 +896,8 @@ Auth (§3.1), Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Reports (§3.6), plus
 | POST | `/api/admin/security/skills/{id}/vet` | Yes | Admin | Re-run vetting; admit/block |
 | GET | `/api/admin/rate-limits` / PUT | Yes | Admin | View/configure quotas (FR-14) |
 | GET | `/api/admin/logs/endpoints?date=YYYY-MM-DD` | Yes | Admin | **Per-day endpoint call logs** — method, endpoint, status code, message + daily counts/error-rate/p95 (admin panel); drill-down + aggregate |
+| GET | `/api/subscription` | Yes | Student | Current plan, `status`, `trial_ends_at`, `current_period_end` (FR-A5) |
+| POST | `/api/subscription/select` | Yes | Student | Choose the plan; clears `plan_selection_pending` once the subscription is active |
 
 ### 7.3 Error model
 
@@ -782,20 +905,34 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 
 | HTTP | Code | Meaning |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | bad input |
-| 401 | `UNAUTHENTICATED` | missing/expired token |
-| 401 | `TWO_FACTOR_REQUIRED` | Password accepted; a 2FA challenge must be completed (pending-2FA token issued) |
-| 403 | `TWO_FACTOR_ENROLLMENT_REQUIRED` | Account has no active second factor; enrolment must be completed first |
+| 400 | `VALIDATION_ERROR` | bad input; `details.fields` carries per-field messages |
+| 400 | `INVALID_TOKEN` | malformed or unknown verification / reset / invite token |
+| 410 | `TOKEN_EXPIRED` | token was valid but has lapsed; offer a resend |
+| 401 | `UNAUTHENTICATED` | missing/expired token — **also the only response meaning "wrong password"** |
 | 401 | `TWO_FACTOR_INVALID` | Wrong or expired TOTP / email-OTP / backup code |
-| 423 | `TWO_FACTOR_LOCKED` | Too many failed attempts; retry after `locked_until` |
+| 401 | `PENDING_TOKEN_EXPIRED` | the short-lived 2FA challenge token lapsed; restart at login |
+| 423 | `TWO_FACTOR_LOCKED` | Too many failed attempts; retry after `details.locked_until` |
 | 403 | `GATE_PENDING` | Class 9–10 parental link not verified |
+| 403 | `SUBSCRIPTION_REQUIRED` | trial lapsed, no active subscription (FR-A5) |
 | 403 | `FORBIDDEN_SCOPE` | role/subject/ownership violation |
+| 409 | `EMAIL_ALREADY_REGISTERED` | address already has an account |
+| 409 | `GUARDIAN_ALREADY_LINKED` | this parent↔student link already exists |
 | 409 | `ATTEMPT_EXISTS` | second quiz attempt blocked |
+| 422 | `INVALID_CLASS_GROUP` | elective group is not valid for the chosen class |
+| 422 | `SELF_LINK_FORBIDDEN` | student used their own address as the parent's |
 | 422 | `NOT_GROUNDED` | no confident curriculum answer (degrade) |
 | 429 | `RATE_LIMITED` | over limit; `Retry-After` header |
 | 503 | `MODEL_UNAVAILABLE` | fallback path engaged |
 
 Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
+
+**Clients branch on `code`, never on `message`** — messages are localized and will change. An unrecognised
+code must still render a usable state rather than a blank screen (`prd.md` §20).
+
+**`SUBSCRIPTION_REQUIRED` deliberately mirrors `GATE_PENDING`** — both are `403`s meaning "authenticated, but
+an onboarding precondition is unmet", and both are handled by the client the same way: redirect to the step
+`onboarding_state` names. `402 Payment Required` was considered and rejected as a needless second pattern for
+a case the gate convention already covers.
 
 ---
 
@@ -878,8 +1015,8 @@ edubridge-ai/
 | RLS isolation (SEC-13) | Student A queries with Student B's id | Zero rows — blocked by policy, not just app code |
 | RLS answer keys | App role selects from `question_key` | Zero rows / denied — no policy grants access |
 | RLS fail-closed | Query without `app.current_user_id` set | All queries denied |
-| 2FA enforced (SEC-14) | Correct password, no 2FA challenge | `401 TWO_FACTOR_REQUIRED`; pending token cannot call business endpoints |
-| 2FA enrolment gate | New verified user tries to use the app | `403 TWO_FACTOR_ENROLLMENT_REQUIRED` until enrolment completes |
+| 2FA enforced (SEC-14) | Correct password, no 2FA challenge | `200 {status:"two_factor_required"}` + pending token; **no session issued**; pending token cannot call business endpoints |
+| 2FA enrolment gate | Verified user with no active factor logs in | `200 {status:"two_factor_enrollment_required"}` + enrollment token; no session until enrolment completes |
 | 2FA methods | Verify by TOTP, by email-OTP, by backup code | All three grant a session; email-OTP works without a smartphone |
 | 2FA replay | Re-submit a TOTP code already used | Rejected by the replay guard |
 | 2FA backup code | Reuse a consumed backup code | Rejected; code is single-use |
@@ -893,6 +1030,24 @@ edubridge-ai/
 
 ### 9.4 Security tests
 Guardrail-bypass attempts (LLM01/05), rate-limit 429 (LLM10), quiz-tamper (keys server-side), authz matrix (teacher cross-subject, parent write, 9–10 gate bypass, cross-student read), provenance quarantine (LLM04), OPA manifest enforcement.
+
+### 9.5 Frontend test matrix
+
+Runs entirely against the mock layer, so it is green before any backend endpoint exists.
+
+| Level | Coverage |
+|---|---|
+| **Unit** (Vitest) | `onboarding_state` → route for all five states × four roles · error-envelope parsing · the 401 retry allow-list (must **exclude** `TWO_FACTOR_INVALID` and `PENDING_TOKEN_EXPIRED`) · RTL locale predicate · class→group lookup across the string/number key boundary |
+| **Component** (RTL) | Elective group clears when class changes · login advances on each `status` and errors only on `401` · 2FA method switching across TOTP / email-OTP / backup code · backup-code acknowledgement gates Continue · every error code renders its designed state · `NAV_BY_ROLE` renders exactly the permitted items per role |
+| **E2E** (Playwright) | Class-9 journey end to end including parent signup and confirmation · Class-11 never sees the gate · a lapsed trial redirects a live session to plan selection · 401 → refresh → retry · locale switch en↔ur asserting document direction |
+
+**The highest-value regression test is the parent navigation assertion** — that the parent surface renders no
+tutor, chat-replay, planner-write or assessment control. That is the `prd.md` §4.2 boundary expressed as
+code, and a shared component tree makes it the single easiest thing to reintroduce by copying.
+
+**Accessibility and budget gates** (`prd.md` A11Y-1/A11Y-2), enforced in CI rather than by review: automated
+a11y scan clean on every route; keyboard-only traversal of signup → login → 2FA; every screen at 360 px;
+first-load JS within budget.
 
 ---
 
@@ -962,7 +1117,7 @@ This TDD was subjected to an **adversarial critical review** (an independent rev
 | Change | Driver | Where |
 |---|---|---|
 | OLTP moved to **Supabase**; Supabase CLI migrations replace Alembic | Platform decision | §2.2, AD-6/AD-7, §8 |
-| **Row Level Security** designed and implemented (54 policies, `app_backend` role, session-variable context) | Defense-in-depth for minors' data | §6.8, SEC-13 |
+| **Row Level Security** designed and implemented (68 policies, `app_backend` role, session-variable context) | Defense-in-depth for minors' data | §6.8, SEC-13 |
 | Subjects **6 → 10**, per-class lists, **elective groups** (`student_group`) | Real board structure | §5.3a/b, PRD §2.4.1 |
 | Two branches → **four `content_strategy` values** | English and religious content need distinct handling | §3.4, §4.6, PRD §2.4.2 |
 | **Religious-verbatim mode** — generation node disabled for Quran Translation | FR-17; ethical + accuracy requirement | §4.6, §9.2 |
@@ -984,6 +1139,45 @@ This TDD was subjected to an **adversarial critical review** (an independent rev
 **Open question on 2FA:** whether to offer "remember this device" (e.g. 30 days) to reduce friction for young students. It weakens the control on shared devices — which is exactly the cohort in question — so it is **not** designed in. **[PROPOSED — confirm]**
 
 **Still open (decisions, not defects):** deployment target §2.4, vector DB choice §5.5, GPU spec, similarity threshold `SIM_THRESHOLD`, and the Class-11 ICS subject list (PRD §2.5).
+
+### 14.3 Changes in v0.3.2
+
+Seventeen decisions, taken while auditing the supplied UI mockups against this document and `prd.md`. The
+audit is what surfaced most of them: the mockups implemented a parental gate running the wrong way, an
+unspecified subscription flow, no 2FA enrolment screen at all, and one student sidebar pasted into all three
+role dashboards.
+
+| # | Change | Driver | Where |
+|---|---|---|---|
+| 1 | Parental gate fixed as a **student-initiated email invite**; code redemption rejected | A code the student types is not out-of-band, reopening §14 finding 3 | §3.1, PRD §4.3 |
+| 2 | `guardian/confirm` becomes **authenticated** — the parent signs up first | Only a distinct, separately authenticated account makes the signal out-of-band | §3.1 |
+| 3 | Access is **paid**: one tier, Rs. 999/month, **no free tier** | Product decision | PRD §2.6 |
+| 4 | **14-day trial**, defined once in the schema default | One source of truth for trial length | §5.3a, §5.4 |
+| 5 | `onboarding_state` gains **`plan_selection_pending`** (students, after the gate) | FR-A5 | §3.1 |
+| 6 | `onboarding_state` documented as **derived**, with an explicit precedence table | It has no column; four tracks were about to reimplement it differently | §3.1 |
+| 7 | Onboarding is **non-monotonic** — a lapsed trial returns an active student to plan selection | The obvious "check once then trust" guard strands the user | §3.1, §5.8 |
+| 8 | Missing subscription row **fails closed** | A failed insert must not grant indefinite free access | §3.1, PRD MON-2 |
+| 9 | `email/verify` returns `access_token` + `enrollment_token`, **scoped to onboarding routes** | Otherwise email verification alone becomes a full login and 2FA is bypassable | §3.1 |
+| 10 | `2fa/confirm` returns `access_token`; both enrolment endpoints take `enrollment_token` **in the body** | Matches how `/2fa/verify` already carries `pending_token`; avoids an immediate second login | §3.1, §7.3 |
+| 11 | **Teacher tutor access removed** | `prd.md` §4.2 said "✅ own testing" while `/api/tutor/ask` has always been student-scoped | §3.2, PRD §4.2 |
+| 12 | Navigation derived per role from one `NAV_BY_ROLE` map | The mockups gave parents a tutor-session replay button, which RLS and the matrix both deny | §3.10, §9.5 |
+| 13 | Student navigation gains **My Classes** | `prd.md` §4.2 grants a right to leave any space; there was no UI for it | §3.10 |
+| 14 | `qr_svg` rendered as a data-URI `<img>`, never injected as HTML | Server-supplied markup would otherwise execute scripts | §6.11 |
+| 15 | Access token **in memory**, refresh in httpOnly cookie | v0.3.1 said "tokens in httpOnly cookies", which the client cannot read | §3.10, §6.11 |
+| 16 | Three tables + 5 RLS policies; admin gets **read-only** on `subscription` | An admin must not grant paid access outside the payment path | §5.3a, §6.8 |
+| 17 | Seven error codes added; RTL rule and frontend test matrix specified | Codes existed in the contract but were never catalogued | §7.3, §9.5, PRD I18N-4 |
+
+**Corrections to earlier versions found during this pass:** the RLS policy count was stated inconsistently —
+54 in §6.8 and §14.1, 56 in §5.4. The applied total is **68** (56 written out plus 12 generated in a `DO`
+loop), and **73** after this migration; all three places now agree. The endpoint table in §3.1 was also
+missing the email-verification and password-reset endpoints entirely, which are now listed.
+
+`oauth_identity` raises one question this document does **not** settle: `app_user.password_hash` is
+`NOT NULL`, but an SSO-only account has no password. Either it becomes nullable with a guard ensuring an
+identity row exists, or every account must set a password. **[PROPOSED — confirm]** before FR-A6 is built.
+
+**Deferred, documented, not built:** social sign-in (FR-A6) and payment checkout. The schema for both is in
+place so it is stable when they are implemented; nothing writes to `oauth_identity` in v1.
 
 **Not yet verified:** the migrations have **not been executed against a live database**. First `supabase db push` should be treated as the real test.
 

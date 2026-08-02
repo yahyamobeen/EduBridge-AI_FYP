@@ -52,5 +52,10 @@ Thumbs.db
 .vscode/
 *.swp
 
+# ---- Supabase CLI local state (per-developer, not source) ----
+supabase/.temp/
+supabase/.branches/
+
+
 # ---- Claude Code local settings ----
 .claude/settings.local.json
