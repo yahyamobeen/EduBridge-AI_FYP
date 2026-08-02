@@ -1069,7 +1069,7 @@ Runs entirely against the mock layer, so it is green before any backend endpoint
 
 | Level | Coverage |
 |---|---|
-| **Unit** (Vitest) | `onboarding_state` → route for all five states × four roles · error-envelope parsing · the 401 retry allow-list (must **exclude** `TWO_FACTOR_INVALID` and `PENDING_TOKEN_EXPIRED`) · RTL locale predicate · class→group lookup across the string/number key boundary · design-token assertions pinning the resolved `DESIGN.md` conflicts |
+| **Unit** (Vitest) | `onboarding_state` → route for all five states × four roles · error-envelope parsing · the 401 retry allow-list (must **exclude** `TWO_FACTOR_INVALID` and `PENDING_TOKEN_EXPIRED`) · RTL locale predicate · BCP-47 validity of every routing locale · class→group lookup where the record is keyed by string and the class levels are numbers · design-token assertions pinning the resolved `DESIGN.md` conflicts |
 | **Component** (React Testing Library) | Elective group clears when class changes · login advances on each `status` and errors only on `401` · 2FA method switching across TOTP / email-OTP / backup code · backup-code acknowledgement gates Continue · every error code renders its designed state · `NAV_BY_ROLE` renders exactly the permitted items per role |
 | **Flow** (component-level, multi-screen, against mocks) | Class-9 journey through signup → verification → 2FA → gate → dashboard · Class-11 never reaches the gate · a lapsed trial redirects an active session to plan selection · 401 → refresh → retry |
 
@@ -1205,6 +1205,15 @@ role dashboards.
 | 15 | Access token **in memory**, refresh in httpOnly cookie | v0.3.1 said "tokens in httpOnly cookies", which the client cannot read | §3.10, §6.11 |
 | 16 | Three tables + 5 RLS policies; admin gets **read-only** on `subscription` | An admin must not grant paid access outside the payment path | §5.3a, §6.8 |
 | 17 | Seven error codes added; RTL rule and frontend test matrix specified | Codes existed in the contract but were never catalogued | §7.3, §9.5, PRD I18N-4 |
+
+**Corrected during Phase 3 — the class/group key hazard was described wrongly.** Earlier versions of this
+document, `prd.md` and the frontend plan all claimed `groups_by_class[9]` returns `undefined` because the
+record is keyed by string. That is false: JavaScript coerces the key, so `[9]` and `['9']` are the same
+lookup, and a test written to assert the wrong behaviour is what exposed it. The hazard is real but sits
+elsewhere — **comparison, in either direction, where no coercion happens**:
+`Object.keys(groups_by_class).includes(9)` is `false`, a `Set` of those keys never matches a number, and
+`class_levels.includes('9')` is `false` going the other way. Signup must normalise with `String()` before
+any comparison or collection lookup. All three documents now say so.
 
 **Found during Phase 2 implementation — `roman_ur` is not a usable web locale.** The contract's language
 value was carried straight into routing, and it broke: `Intl` rejects the tag with `RangeError`, and

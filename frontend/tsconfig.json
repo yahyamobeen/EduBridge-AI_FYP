@@ -5,9 +5,9 @@
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
-    /* Turns `groups_by_class[9]` -> undefined into a compile error rather than
-       an empty dropdown. The enums endpoint keys groups by STRING while
-       class_levels are NUMBERS, which is the likeliest bug in signup. */
+    /* Forces every lookup into a record to handle the missing case, so an
+       unknown class level surfaces as a compile error instead of rendering an
+       empty group dropdown at runtime. */
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
