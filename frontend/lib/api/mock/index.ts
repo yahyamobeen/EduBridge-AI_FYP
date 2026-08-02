@@ -354,7 +354,8 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
       // everything else does not.
       if (
         !users.some(
-          (u) => u.role === 'parent' && u.email.toLowerCase() === req.parent_email.toLowerCase(),
+          (u) =>
+            u.role === 'parent' && u.email.toLowerCase() === req.parent_email.toLowerCase(),
         ) &&
         !req.parent_email.toLowerCase().endsWith('@parent.test')
       ) {
