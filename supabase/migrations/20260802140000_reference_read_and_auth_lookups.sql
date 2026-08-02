@@ -19,8 +19,20 @@
 --
 -- ORDERING NOTE
 --   This file must be applied AFTER 20260802120000_subscriptions_and_oauth.sql,
---   which is already applied to the project but lives on the frontend branch.
---   Apply from a tree that contains both, i.e. after the branches merge.
+--   which creates the three subscription tables the FORCE statements below
+--   reference.
+--
+-- RE-RUNNABLE ON PURPOSE
+--   Every statement here is idempotent, so a partial application can simply be
+--   re-run. Postgres has no CREATE POLICY IF NOT EXISTS, so each policy is
+--   dropped first; the rest are already CREATE OR REPLACE, ALTER ... FORCE, or
+--   GRANT, all of which tolerate repetition.
+--
+--   This is not defensive decoration. The Supabase CLI does not wrap a
+--   migration file in a single transaction, so a failure part-way leaves the
+--   statements before it committed and the migration unrecorded — and the
+--   obvious retry then dies on "policy already exists". The first version of
+--   this file hit exactly that.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -32,6 +44,13 @@
 -- A `FOR ALL` policy here would quietly hand it that power. Curriculum writes
 -- belong to the ingestion pipeline running as the service role.
 -- ----------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS board_read         ON public.board;
+DROP POLICY IF EXISTS class_level_read   ON public.class_level;
+DROP POLICY IF EXISTS subject_read       ON public.subject;
+DROP POLICY IF EXISTS subject_group_read ON public.subject_group;
+DROP POLICY IF EXISTS chapter_read       ON public.chapter;
+DROP POLICY IF EXISTS slo_read           ON public.slo;
 
 CREATE POLICY board_read ON public.board
   FOR SELECT TO app_backend USING (true);
