@@ -51,6 +51,30 @@ class Settings(BaseSettings):
     enrollment_token_ttl_seconds: int = 900
     pending_token_ttl_seconds: int = 300
 
+    # TOTP secret encryption key for two_factor_enrollment.totp_secret_encrypted.
+    # The key lives in application config, NOT in the database, so a database
+    # dump alone does not yield usable secrets (tdd.md §6.9).
+    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
+
+    # Email delivery (tdd.md §3.1, KAN-10b).
+    # "logging" writes structured JSON to the logger (development/CI).
+    # "resend" sends via the Resend API (production).
+    email_provider: str = Field(default="logging", validation_alias="EMAIL_PROVIDER")
+    resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
+    email_from: str = Field(default="onboarding@resend.dev", validation_alias="EMAIL_FROM")
+    app_base_url: str = Field(default="http://localhost:3000", validation_alias="APP_BASE_URL")
+
+    # 2FA lockout thresholds (tdd.md §6.9, D7).
+    # List of (failed_attempts_threshold, lockout_seconds) pairs, evaluated in
+    # order. The HIGHEST threshold whose failed_attempts count is met or
+    # exceeded determines the lockout duration.
+    two_factor_lockout_thresholds: list[tuple[int, int]] = [
+        (3, 300),
+        (6, 900),
+        (10, 3600),
+    ]
+
     # No wildcard default. Combined with credentialed requests a wildcard does
     # NOT send `*` — Starlette echoes the caller's origin instead — so any site
     # could make authenticated cross-origin calls, and the refresh cookie is a
