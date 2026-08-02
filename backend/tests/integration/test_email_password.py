@@ -85,6 +85,7 @@ class TestEmailVerify:
         token = issue_preauth_token(
             db, user_id, kind=TokenKind.email_verify, ttl_seconds=-1
         )
+        db.flush()  # Ensure token is visible to HTTP request's session
 
         resp = client.post(
             "/api/auth/email/verify",
@@ -226,6 +227,7 @@ class TestPasswordReset:
         token = issue_preauth_token(
             db, user_id, kind=TokenKind.password_reset, ttl_seconds=-1
         )
+        db.flush()  # Ensure token is visible to HTTP request's session
 
         resp = client.post(
             "/api/auth/password/reset",

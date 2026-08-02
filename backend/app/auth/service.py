@@ -698,29 +698,29 @@ def two_factor_verify(db: Session, payload) -> dict:
     if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
         raise pending_token_expired()
 
-    user_id = token_row.user_id
-
-    # Bind user to transaction
-    set_current_user_id(db, user_id)
-
     # Get enrollment data
-    enrollment_data = db.execute(
+    enrollment_row = db.execute(
         text("SELECT * FROM app.start_2fa_challenge(:hash, :kind)"),
         {
             "hash": hash_token(payload.pending_token),
             "kind": TokenKind.two_factor_pending.value,
         },
-    ).first()
+    ).mappings().first()
 
-    if not enrollment_data:
+    if not enrollment_row:
         raise pending_token_expired()
 
+    user_id = enrollment_row["token_user_id"]
+
+    # Bind user to transaction
+    set_current_user_id(db, user_id)
+
     # Check lockout
-    locked_until = enrollment_data.locked_until
+    locked_until = enrollment_row["locked_until"]
     if locked_until and locked_until > datetime.now(UTC):
         raise two_factor_locked(locked_until.isoformat())
 
-    method = str(enrollment_data.method)
+    method = str(enrollment_row["method"])
 
     # Verify code based on type
     verified = False
@@ -730,11 +730,11 @@ def two_factor_verify(db: Session, payload) -> dict:
         if method != "totp":
             raise two_factor_invalid()
         from app.auth.totp import decrypt_secret, verify_totp_code
-        secret = decrypt_secret(enrollment_data.totp_secret_encrypted)
+        secret = decrypt_secret(enrollment_row["totp_secret_encrypted"])
         counter = verify_totp_code(
             secret,
             payload.code,
-            last_counter=enrollment_data.last_used_counter,
+            last_counter=enrollment_row["last_used_counter"],
         )
         verified = counter is not None
 
@@ -750,7 +750,7 @@ def two_factor_verify(db: Session, payload) -> dict:
             # Revoke the OTP
             db.execute(
                 text("UPDATE auth_token SET revoked = true WHERE id = :id"),
-                {"id": otp_row.id},
+                {"id": otp_row[0]},
             )
             verified = True
 
@@ -767,17 +767,17 @@ def two_factor_verify(db: Session, payload) -> dict:
         ).fetchall()
 
         for row in unused_rows:
-            if verify_backup_code(payload.code, row.code_hash):
+            if verify_backup_code(payload.code, row[0]):
                 db.execute(
                     text("SELECT app.consume_backup_code(:uid, :hash)"),
-                    {"uid": user_id, "hash": row.code_hash},
+                    {"uid": user_id, "hash": row[0]},
                 )
                 verified = True
                 break
 
     if not verified:
         # Increment failed_attempts
-        failed_attempts = enrollment_data.failed_attempts + 1
+        failed_attempts = enrollment_row["failed_attempts"] + 1
 
         # Compute lockout
         settings = get_settings()
@@ -800,6 +800,8 @@ def two_factor_verify(db: Session, payload) -> dict:
             {"uid": user_id},
         )
 
+        # Commit BEFORE raising so the lockout persists (same pattern as refresh reuse)
+        db.commit()
         raise two_factor_invalid()
 
     # Success: reset failed_attempts, update last_used
@@ -964,9 +966,9 @@ def verify_email(db: Session, payload) -> dict:
         status_row = db.execute(
             text("SELECT * FROM app.check_token_status(:hash, :kind)"),
             {"hash": hash_token(payload.token), "kind": "email_verify"},
-        ).first()
+        ).mappings().first()
 
-        if status_row and status_row.token_expired:
+        if status_row and status_row["token_expired"]:
             raise token_expired()
         else:
             raise invalid_token()
@@ -1139,9 +1141,9 @@ def reset_password(db: Session, payload) -> None:
         status_row = db.execute(
             text("SELECT * FROM app.check_token_status(:hash, :kind)"),
             {"hash": hash_token(payload.token), "kind": "password_reset"},
-        ).first()
+        ).mappings().first()
 
-        if status_row and status_row.token_expired:
+        if status_row and status_row["token_expired"]:
             raise token_expired()
 
         raise invalid_token()
