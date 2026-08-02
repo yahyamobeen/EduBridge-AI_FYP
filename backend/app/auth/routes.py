@@ -133,6 +133,10 @@ def enums_endpoint(db: Session = Depends(get_db)) -> EnumsResponse:
 # Guardian gate (RBAC-002). Role-gated (NOT guardian-gated — a gated student
 # must be able to reach these). invite/status are student-only; confirm is
 # parent-only, so a student can never confirm their own gate through the API.
+#
+# All three pass `subject=` to the limiter so the bucket is per-USER. These are
+# authenticated, and a shared school-lab or carrier-NAT address would otherwise
+# make one student's polling spend the whole cohort's allowance (ratelimit.py).
 # ---------------------------------------------------------------------------
 
 
@@ -142,7 +146,12 @@ def guardian_invite_endpoint(
     payload: GuardianInviteRequest,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> GuardianInviteResponse:
-    enforce(request, bucket="guardian_invite", limit=GUARDIAN_INVITE_LIMIT)
+    enforce(
+        request,
+        bucket="guardian_invite",
+        limit=GUARDIAN_INVITE_LIMIT,
+        subject=str(ctx.user_id),
+    )
     return GuardianInviteResponse(**guardian_invite(ctx.session, ctx.user_id, payload))
 
 
@@ -151,7 +160,12 @@ def guardian_status_endpoint(
     request: Request,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> GuardianStatusResponse:
-    enforce(request, bucket="guardian_status", limit=GUARDIAN_STATUS_LIMIT)
+    enforce(
+        request,
+        bucket="guardian_status",
+        limit=GUARDIAN_STATUS_LIMIT,
+        subject=str(ctx.user_id),
+    )
     return GuardianStatusResponse(**guardian_status(ctx.session, ctx.user_id))
 
 
@@ -161,5 +175,10 @@ def guardian_confirm_endpoint(
     payload: GuardianConfirmRequest,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.parent.value))],
 ) -> GuardianConfirmResponse:
-    enforce(request, bucket="guardian_confirm", limit=GUARDIAN_CONFIRM_LIMIT)
+    enforce(
+        request,
+        bucket="guardian_confirm",
+        limit=GUARDIAN_CONFIRM_LIMIT,
+        subject=str(ctx.user_id),
+    )
     return GuardianConfirmResponse(**guardian_confirm(ctx.session, ctx.user_id, payload))

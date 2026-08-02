@@ -11,6 +11,7 @@ subject-scope dependencies are exercised the same way, and the guardian
 endpoints themselves via the real client.
 """
 
+from typing import Annotated
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,7 +40,10 @@ GATED_PATHS = [
 ]
 
 
-def _create_user(db, email, *, role="student", class_level=9) -> str:
+def _create_user(db, email, *, role="student", class_level=9, profile=True) -> str:
+    """`profile=False` builds a student with NO student_profile row — the shape
+    the gate has to fail closed on, because an unknown class level is
+    indistinguishable from an unreadable one."""
     user_id = uuid4()
     set_current_user_id(db, user_id)
     db.execute(
@@ -49,6 +53,9 @@ def _create_user(db, email, *, role="student", class_level=9) -> str:
         ),
         {"id": user_id, "email": email, "role": role},
     )
+    if not profile:
+        db.flush()
+        return str(user_id)
     if role == "student":
         db.execute(
             text(
@@ -66,17 +73,23 @@ def _create_user(db, email, *, role="student", class_level=9) -> str:
     return str(user_id)
 
 
-def _verified_link(db, *, parent_id, student_id):
-    set_current_user_id(db, UUID(parent_id))
-    db.execute(
-        text(
-            "INSERT INTO guardian_link (parent_id, student_id, status, "
-            "verification_method, verified_at) "
-            "VALUES (:p, :s, 'verified', 'oob_email', now())"
-        ),
-        {"p": parent_id, "s": student_id},
-    )
-    db.flush()
+def _subject_scope_app() -> FastAPI:
+    """
+    The subject-scope dependency mounted the way a real classroom route mounts
+    it: `Depends(require_subject_scope)` on a path that DECLARES `{subject_id}`,
+    so FastAPI resolves the id per request. It used to be a factory taking the
+    id as a closure argument, which could not see a path parameter at all — and
+    the test that appeared to wire one up was in fact binding the enclosing
+    function's local variable, so it passed while proving nothing.
+    """
+    app = FastAPI()
+    register_exception_handlers(app)
+
+    @app.get("/api/teacher/subjects/{subject_id}/students")
+    def _roster(ctx: Annotated[AuthContext, Depends(require_subject_scope)]):
+        return {"ok": True}
+
+    return app
 
 
 def _auth(user_id: str) -> dict:
@@ -129,10 +142,10 @@ class TestGuardianGateOnLearningEndpoints:
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "GATE_PENDING"
 
-    def test_verified_guardian_opens_every_gated_path(self, db, unique_email):
+    def test_verified_guardian_opens_every_gated_path(self, db, unique_email, make_link):
         student = _create_user(db, unique_email("mx"), role="student", class_level=9)
         parent = _create_user(db, unique_email("mx"), role="parent")
-        _verified_link(db, parent_id=parent, student_id=student)
+        make_link(parent_id=parent, student_id=student, status="verified")
         client = _gate_client()
 
         for path in GATED_PATHS:
@@ -148,6 +161,23 @@ class TestGuardianGateOnLearningEndpoints:
             resp = client.get(path, headers=_auth(student))
             assert resp.status_code == 200, (path, resp.text)
 
+    def test_a_student_with_no_profile_is_gated_not_waved_through(self, db, unique_email):
+        """
+        FAIL CLOSED. No `student_profile` row means the class level is unknown,
+        and under RLS an unreadable row looks exactly like an absent one. The
+        gate used to treat unknown as "not 9-10" and let the request through —
+        serving a possibly-14-year-old because a read came back empty. It now
+        holds, and `me()` reports `guardian_link_pending` to match, so the
+        student lands on a screen that can actually resolve it.
+        """
+        student = _create_user(db, unique_email("mx"), role="student", profile=False)
+        client = _gate_client()
+
+        for path in GATED_PATHS:
+            resp = client.get(path, headers=_auth(student))
+            assert resp.status_code == 403, (path, resp.text)
+            assert resp.json()["error"]["code"] == "GATE_PENDING", path
+
     @pytest.mark.parametrize("role", ["teacher", "parent", "admin"])
     def test_non_students_are_never_gated(self, role, db, unique_email):
         user = _create_user(db, unique_email("mx"), role=role)
@@ -157,19 +187,11 @@ class TestGuardianGateOnLearningEndpoints:
             resp = client.get(path, headers=_auth(user))
             assert resp.status_code == 200, (path, resp.text)
 
-    def test_a_revoked_link_holds_the_gate(self, db, unique_email):
+    def test_a_revoked_link_holds_the_gate(self, db, unique_email, make_link):
         """`revoked` is not `verified`: consent withdrawn means the gate closes."""
         student = _create_user(db, unique_email("mx"), role="student", class_level=9)
         parent = _create_user(db, unique_email("mx"), role="parent")
-        set_current_user_id(db, UUID(parent))
-        db.execute(
-            text(
-                "INSERT INTO guardian_link (parent_id, student_id, status) "
-                "VALUES (:p, :s, 'revoked')"
-            ),
-            {"p": parent, "s": student},
-        )
-        db.flush()
+        make_link(parent_id=parent, student_id=student, status="revoked")
         client = _gate_client()
 
         resp = client.get("/api/tutor/ask", headers=_auth(student))
@@ -191,17 +213,7 @@ class TestTeacherSubjectScope:
         )
         db.flush()
 
-        app = FastAPI()
-        register_exception_handlers(app)
-
-        @app.get("/api/teacher/subjects/{subject_id}/students")
-        def _roster(
-            subject_id: UUID,
-            ctx: AuthContext = Depends(require_subject_scope(subject_id)),
-        ):
-            return {"ok": True}
-
-        resp = TestClient(app).get(
+        resp = TestClient(_subject_scope_app()).get(
             f"/api/teacher/subjects/{subject_id}/students", headers=_auth(teacher)
         )
         assert resp.status_code == 200
@@ -210,17 +222,7 @@ class TestTeacherSubjectScope:
         teacher = _create_user(db, unique_email("mx"), role="teacher")
         subject_id = db.execute(text("SELECT id FROM subject ORDER BY name LIMIT 1")).scalar_one()
 
-        app = FastAPI()
-        register_exception_handlers(app)
-
-        @app.get("/api/teacher/subjects/{subject_id}/students")
-        def _roster(
-            subject_id: UUID,
-            ctx: AuthContext = Depends(require_subject_scope(subject_id)),
-        ):
-            return {"ok": True}
-
-        resp = TestClient(app).get(
+        resp = TestClient(_subject_scope_app()).get(
             f"/api/teacher/subjects/{subject_id}/students", headers=_auth(teacher)
         )
         assert resp.status_code == 403
@@ -230,21 +232,38 @@ class TestTeacherSubjectScope:
         student = _create_user(db, unique_email("mx"), role="student", class_level=11)
         subject_id = db.execute(text("SELECT id FROM subject ORDER BY name LIMIT 1")).scalar_one()
 
-        app = FastAPI()
-        register_exception_handlers(app)
-
-        @app.get("/api/teacher/subjects/{subject_id}/students")
-        def _roster(
-            subject_id: UUID,
-            ctx: AuthContext = Depends(require_subject_scope(subject_id)),
-        ):
-            return {"ok": True}
-
-        resp = TestClient(app).get(
+        resp = TestClient(_subject_scope_app()).get(
             f"/api/teacher/subjects/{subject_id}/students", headers=_auth(student)
         )
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "FORBIDDEN_SCOPE"
+
+    def test_the_scope_is_read_from_the_path_not_from_a_closure(self, db, unique_email):
+        """
+        The bug this dependency had: written as a factory it took the subject id
+        at route-definition time, so every request checked the SAME id no matter
+        what the URL said. A teacher scoped to subject A would have passed a
+        request for subject B. Two subjects, one scope row, opposite answers.
+        """
+        teacher = _create_user(db, unique_email("mx"), role="teacher")
+        scoped, other = (
+            db.execute(text("SELECT id FROM subject ORDER BY name LIMIT 2")).scalars().all()
+        )
+        admin = _create_user(db, unique_email("mx"), role="admin")
+        set_current_user_id(db, UUID(admin))
+        db.execute(
+            text("INSERT INTO teacher_subject_scope (teacher_id, subject_id) VALUES (:t, :s)"),
+            {"t": teacher, "s": scoped},
+        )
+        db.flush()
+
+        client = TestClient(_subject_scope_app())
+        allowed = client.get(f"/api/teacher/subjects/{scoped}/students", headers=_auth(teacher))
+        refused = client.get(f"/api/teacher/subjects/{other}/students", headers=_auth(teacher))
+
+        assert allowed.status_code == 200, allowed.text
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["error"]["code"] == "FORBIDDEN_SCOPE"
 
 
 class TestGuardianEndpointsAreRoleGatedNotGuardianGated:

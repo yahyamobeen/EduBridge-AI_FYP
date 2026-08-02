@@ -232,7 +232,7 @@ class TestParentReadsProgressButNeverChat:
     the boundary is explicit.
     """
 
-    def test_verified_parent_reads_progress_but_zero_chat_rows(self, db, unique_email):
+    def test_verified_parent_reads_progress_but_zero_chat_rows(self, db, unique_email, make_link):
         from uuid import uuid4
 
         student_id = _make_user(db, unique_email("par"), verified=True)
@@ -258,15 +258,10 @@ class TestParentReadsProgressButNeverChat:
         parent_id = _make_user(db, unique_email("par"), role="parent")
         set_current_user_id(db, parent_id)
         db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:id)"), {"id": parent_id})
-        db.execute(
-            text(
-                "INSERT INTO guardian_link (parent_id, student_id, status, "
-                "verification_method, verified_at) "
-                "VALUES (:p, :s, 'verified', 'oob_email', now())"
-            ),
-            {"p": parent_id, "s": student_id},
-        )
         db.flush()
+        # Through the real confirm path: since 20260803090000 a verified link
+        # cannot be inserted or updated into existence directly.
+        make_link(parent_id=parent_id, student_id=student_id, status="verified")
 
         set_current_user_id(db, parent_id)
         progress = db.execute(

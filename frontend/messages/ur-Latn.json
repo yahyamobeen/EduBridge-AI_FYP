@@ -320,7 +320,8 @@
       "changeEmail": "Ghalat pate par bhej diya?",
       "verifiedTitle": "Sarparast munsalik ho gaye",
       "verifiedBody": "Aap ke waldain ne rabt ki manzoori de di hai. Aap ka account tayyar hai.",
-      "continue": "Aage barhein"
+      "continue": "Aage barhein",
+      "notFoundError": "Is address par abhi koi parent account mojood nahi. Un se pehle sign up karne ko kahen, phir invitation dobara bhejein."
     },
     "guardianConfirm": {
       "title": "Apne bache ke account ki manzoori dein",
@@ -342,7 +343,8 @@
       "invalidTitle": "Naqis dawat",
       "invalidBody": "Ye dawati link durust nahi, is ki miyaad khatam ho chuki hai ya pehle istemal ho chuka hai. Apne bache se naya link bhejne ko kahein.",
       "selfLinkError": "Koi account apna sarparast nahi ban sakta.",
-      "notAParentError": "Sirf parent account is rabt ki manzoori de sakta hai."
+      "notAParentError": "Sirf parent account is rabt ki manzoori de sakta hai.",
+      "confirmedBodyNoName": "Aap ab apne bachay ke account se link ho chuke hain."
     }
   },
   "landing": {

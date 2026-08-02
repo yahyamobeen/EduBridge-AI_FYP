@@ -466,33 +466,36 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     if already_verified is not None:
         raise guardian_already_linked()
 
-    # Reuse an existing (pending/revoked) link rather than hitting the
-    # uq_guardian_pair unique constraint; a re-invite flips it back to pending.
-    existing = (
-        db.execute(
-            text("SELECT id FROM guardian_link WHERE student_id = :sid AND parent_id = :pid"),
-            {"sid": student_id, "pid": parent_id},
-        )
-        .mappings()
-        .one_or_none()
+    # Create the link if it is missing, then reset it to pending. Two statements
+    # rather than a read-then-branch, so two invites racing cannot both decide
+    # the row is absent and collide on uq_guardian_pair.
+    #
+    # The INSERT runs under `guardian_link_create` as the student. The RESET does
+    # NOT run under RLS as the student, because `guardian_link_update` is
+    # PARENT-ONLY in the applied database: a student's UPDATE matches zero rows
+    # and raises nothing, which is how re-inviting after a revoke used to return
+    # `invite_sent: true` while leaving the link `revoked` and un-confirmable.
+    # Widening that policy is not the fix — a student who can UPDATE their own
+    # link can set `verified` and clear their own gate. `reinvite_guardian_link`
+    # is the narrow privileged path and can only ever write `pending`
+    # (migration 20260803090000).
+    db.execute(
+        text(
+            "INSERT INTO guardian_link (parent_id, student_id, status) "
+            "VALUES (:pid, :sid, 'pending') "
+            "ON CONFLICT (parent_id, student_id) DO NOTHING"
+        ),
+        {"pid": parent_id, "sid": student_id},
     )
-    if existing is None:
-        db.execute(
-            text(
-                "INSERT INTO guardian_link (parent_id, student_id, status) "
-                "VALUES (:pid, :sid, 'pending')"
-            ),
-            {"pid": parent_id, "sid": student_id},
-        )
-    else:
-        db.execute(
-            text(
-                "UPDATE guardian_link "
-                "SET status = 'pending', verification_method = NULL, verified_at = NULL "
-                "WHERE id = :id"
-            ),
-            {"id": existing["id"]},
-        )
+    reset_to = db.execute(
+        text("SELECT app.reinvite_guardian_link(:sid, :pid)"),
+        {"sid": student_id, "pid": parent_id},
+    ).scalar_one()
+    if reset_to != "pending":
+        # NULL means nothing was reset, which after the INSERT above can only be
+        # a link that turned `verified` between the check and here. Fail loudly:
+        # an invitation that is already superseded must not be reported as sent.
+        raise guardian_already_linked()
 
     # Only the newest invite is live: revoking BEFORE issuance means a stale
     # email link cannot be redeemed after a resend. Both are owner-scoped writes

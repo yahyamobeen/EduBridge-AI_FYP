@@ -16,9 +16,20 @@ class TestGuardianRequired:
         assert guardian_required(is_student=True, class_level=9) is True
         assert guardian_required(is_student=True, class_level=10) is True
 
-    @pytest.mark.parametrize("class_level", [11, 12, None])
-    def test_class_11_12_and_missing_level_never_require(self, class_level):
+    @pytest.mark.parametrize("class_level", [11, 12])
+    def test_class_11_12_never_require(self, class_level):
         assert guardian_required(is_student=True, class_level=class_level) is False
+
+    def test_an_unknown_class_level_requires_a_guardian(self):
+        """
+        FAIL CLOSED. `None` means the `student_profile` row was missing or
+        unreadable, and under RLS an unreadable row is indistinguishable from an
+        absent one. Treating unknown as "not 9-10" served a possibly-14-year-old
+        because a read came back empty. It must agree with
+        `is_guardian_gate_pending` below: if the gate holds, `me()` has to report
+        `guardian_link_pending` so there is a screen on which to fix it.
+        """
+        assert guardian_required(is_student=True, class_level=None) is True
 
     @pytest.mark.parametrize("class_level", [9, 10, 11, 12, None])
     def test_non_students_never_require(self, class_level):
@@ -43,14 +54,28 @@ class TestIsGuardianGatePending:
             is False
         )
 
-    @pytest.mark.parametrize("class_level", [11, 12, None])
+    @pytest.mark.parametrize("class_level", [11, 12])
     @pytest.mark.parametrize("status", [None, "pending", "revoked"])
-    def test_class_11_12_and_missing_level_never_gated(self, class_level, status):
+    def test_class_11_12_never_gated(self, class_level, status):
         # Even a fully unverified 11-12 student is never held behind the gate.
         assert (
             is_guardian_gate_pending(
                 is_student=True, class_level=class_level, guardian_status=status
             )
+            is False
+        )
+
+    @pytest.mark.parametrize("status", [None, "pending", "revoked"])
+    def test_an_unknown_class_level_holds_the_gate(self, status):
+        assert (
+            is_guardian_gate_pending(is_student=True, class_level=None, guardian_status=status)
+            is True
+        )
+
+    def test_an_unknown_class_level_is_still_opened_by_a_verified_link(self):
+        """Fail-closed, not fail-stuck: linking a guardian resolves it."""
+        assert (
+            is_guardian_gate_pending(is_student=True, class_level=None, guardian_status="verified")
             is False
         )
 

@@ -194,7 +194,13 @@ class GuardianConfirmRequest(BaseModel):
 
 class GuardianConfirmResponse(BaseModel):
     status: Literal["verified"]
-    student_name: str
+    # Nullable because `app_user.full_name` is (initial_schema.sql L103) and
+    # `MeResponse` already types it that way. Declared as `str` this raised a
+    # ResponseValidationError -> 500 on the SUCCESS path for any student without
+    # a name, and the generator dependency then rolled the verification back, so
+    # the parent retried into the same 500 forever. The client renders neutral
+    # copy instead of a name.
+    student_name: str | None = None
 
 
 class GuardianStatusResponse(BaseModel):

@@ -120,27 +120,39 @@ def require_role(*roles: str):
     return _dep
 
 
-def require_subject_scope(subject_id: UUID):
+def require_subject_scope(
+    subject_id: UUID,
+    ctx: Annotated[AuthContext, Depends(authenticated)],
+) -> AuthContext:
     """
     Teacher-only. The acting teacher must have a `teacher_subject_scope` row for
     the subject — readable under `tss_read` (teacher_id = current user). Zero
     rows means the teacher does not teach this subject: 403 FORBIDDEN_SCOPE.
-    Built now and exported for the classroom routes to wire (scope D); no
-    classroom endpoint exists in this repo yet.
+    Exported for the classroom routes to wire (scope D); no classroom endpoint
+    exists in this repo yet.
+
+    USE IT AS `Depends(require_subject_scope)` ON A ROUTE THAT DECLARES
+    `{subject_id}` IN ITS PATH. FastAPI resolves `subject_id` from the request,
+    which is the entire point: this was previously a factory taking the id as a
+    closure argument, fixed when the route was DEFINED, so it could never see a
+    per-request path parameter. Written as a factory it also read as though it
+    worked —
+
+        @app.get("/subjects/{subject_id}/roster")
+        def roster(subject_id: UUID, ctx = Depends(require_subject_scope(subject_id))):
+
+    — because Python evaluates default arguments in the ENCLOSING scope at `def`
+    time, so `subject_id` there is whatever module-level name happens to exist,
+    never the path parameter. A route with no `{subject_id}` segment will make
+    FastAPI demand it as a query parameter instead, which fails visibly.
     """
-
-    def _dep(ctx: Annotated[AuthContext, Depends(authenticated)]) -> AuthContext:
-        row = ctx.session.execute(
-            text(
-                "SELECT 1 FROM teacher_subject_scope WHERE teacher_id = :tid AND subject_id = :sid"
-            ),
-            {"tid": ctx.user_id, "sid": subject_id},
-        ).one_or_none()
-        if row is None:
-            raise forbidden_scope()
-        return ctx
-
-    return _dep
+    row = ctx.session.execute(
+        text("SELECT 1 FROM teacher_subject_scope WHERE teacher_id = :tid AND subject_id = :sid"),
+        {"tid": ctx.user_id, "sid": subject_id},
+    ).one_or_none()
+    if row is None:
+        raise forbidden_scope()
+    return ctx
 
 
 def require_guardian_verified(

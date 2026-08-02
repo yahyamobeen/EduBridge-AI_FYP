@@ -17,23 +17,33 @@ student-owner-only anyway.
 
 def guardian_required(*, is_student: bool, class_level: int | None) -> bool:
     """
-    Whether the gate applies at all. Classes 9-10 only (prd.md §4.3); everyone
-    else — teachers, parents, admins, and 11-12 students — is never required to
-    link a guardian, regardless of guardian status.
+    Whether the gate applies at all. Classes 9-10 (prd.md §4.3); teachers,
+    parents, admins and 11-12 students are never required to link a guardian,
+    regardless of guardian status.
+
+    A student whose class level is UNKNOWN is treated as required. `None` here
+    means the `student_profile` row was missing or unreadable, which under Row
+    Level Security is also what a forgotten binding looks like — and the whole
+    point of this gate is that we do not serve a 14-year-old as though they were
+    18 because a read came back empty. It stays consistent with
+    `is_guardian_gate_pending` deliberately: the two must agree, or a student
+    would be blocked from every learning endpoint while `onboarding_state`
+    reported `active` and offered no screen on which to fix it.
     """
-    return is_student and class_level in (9, 10)
+    if not is_student:
+        return False
+    return class_level is None or class_level in (9, 10)
 
 
 def is_guardian_gate_pending(
     *, is_student: bool, class_level: int | None, guardian_status: str | None
 ) -> bool:
     """
-    The gate itself. Fails CLOSED: anything that is not a verified link —
-    `null`, `pending`, `revoked` — holds the gate. Only `verified` opens it.
-    Non-students and 11-12 students are never gated.
+    The gate itself. Fails CLOSED in both directions: an unknown class level
+    holds the gate (see `guardian_required`), and anything that is not a
+    verified link — `null`, `pending`, `revoked` — holds it too. Only a
+    `verified` link on a student the gate applies to opens it.
     """
-    if not is_student:
-        return False
-    if class_level not in (9, 10):
+    if not guardian_required(is_student=is_student, class_level=class_level):
         return False
     return guardian_status != "verified"

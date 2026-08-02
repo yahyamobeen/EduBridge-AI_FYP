@@ -16,7 +16,9 @@ owner-scoped) — see the same note in test_rls.py.
 
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.auth.security import create_access_token
 from app.auth.tokens import issue_guardian_invite_token
@@ -48,28 +50,6 @@ def _create_user(db, email, *, role="student", class_level=9, full_name="Test Us
         db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:id)"), {"id": user_id})
     db.flush()
     return str(user_id)
-
-
-def _link(db, *, parent_id, student_id, status="pending"):
-    """Create a guardian_link as the parent (a participant, so RLS allows it)."""
-    set_current_user_id(db, UUID(parent_id))
-    if status == "verified":
-        db.execute(
-            text(
-                "INSERT INTO guardian_link (parent_id, student_id, status, "
-                "verification_method, verified_at) "
-                "VALUES (:p, :s, 'verified', 'oob_email', now())"
-            ),
-            {"p": parent_id, "s": student_id},
-        )
-    else:
-        db.execute(
-            text(
-                "INSERT INTO guardian_link (parent_id, student_id, status) VALUES (:p, :s, :status)"
-            ),
-            {"p": parent_id, "s": student_id, "status": status},
-        )
-    db.flush()
 
 
 def _auth(user_id: str) -> dict:
@@ -148,10 +128,10 @@ class TestInvite:
         assert resp.status_code == 422
         assert resp.json()["error"]["code"] == "GUARDIAN_NOT_FOUND"
 
-    def test_invite_with_a_verified_link_is_409(self, client, db, unique_email):
+    def test_invite_with_a_verified_link_is_409(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="verified")
+        make_link(parent_id=parent, student_id=student, status="verified")
 
         parent_email = db.execute(
             text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
@@ -178,7 +158,7 @@ class TestInvite:
         assert resp.status_code == 403
         assert resp.json()["error"]["code"] == "FORBIDDEN_SCOPE"
 
-    def test_reinvite_invalidates_older_tokens(self, client, db, unique_email):
+    def test_reinvite_invalidates_older_tokens(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
         parent_email = db.execute(
@@ -186,7 +166,7 @@ class TestInvite:
         ).scalar()
 
         # A pending link with a token issued directly (the "old email").
-        _link(db, parent_id=parent, student_id=student, status="pending")
+        make_link(parent_id=parent, student_id=student, status="pending")
         old_token = issue_guardian_invite_token(db, UUID(student))
         db.flush()
 
@@ -206,14 +186,95 @@ class TestInvite:
         assert confirm.status_code == 400
         assert confirm.json()["error"]["code"] == "INVALID_TOKEN"
 
+    def test_reinvite_after_a_revoke_actually_resets_the_link(
+        self, client, db, unique_email, make_link
+    ):
+        """
+        REGRESSION. The re-invite reset was an UPDATE issued as the student, and
+        `guardian_link_update` is parent-only — so it matched zero rows and
+        raised nothing. The endpoint answered `{"invite_sent": true, "status":
+        "pending"}` while the link stayed `revoked`, `GET /guardian/status`
+        contradicted it on the very next poll, and the parent's fresh
+        invitation was then refused by `app.confirm_guardian_link`, which only
+        transitions `pending`. The student had no route back through the API.
 
-class TestConfirm:
-    def test_confirm_flips_the_link_and_consumes_the_token(self, client, db, unique_email):
+        The reset now goes through `app.reinvite_guardian_link`, so all three
+        views agree and the invitation is confirmable.
+        """
         student = _create_user(
             db, unique_email("gate"), role="student", class_level=9, full_name="Ayesha"
         )
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="pending")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+        make_link(parent_id=parent, student_id=student, status="revoked")
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": parent_email},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "pending"
+
+        # The response, the status endpoint and the row must not disagree.
+        assert client.get("/api/auth/guardian/status", headers=_auth(student)).json()["status"] == (
+            "pending"
+        )
+        set_current_user_id(db, UUID(student))
+        assert (
+            db.execute(
+                text("SELECT status FROM guardian_link WHERE student_id = :s"), {"s": student}
+            ).scalar_one()
+            == "pending"
+        )
+
+        # And the invitation the parent receives is now actually confirmable.
+        token = issue_guardian_invite_token(db, UUID(student))
+        db.flush()
+        confirm = client.post(
+            "/api/auth/guardian/confirm",
+            headers=_auth(parent),
+            json={"invite_token": token},
+        )
+        assert confirm.status_code == 200, confirm.text
+        assert confirm.json()["student_name"] == "Ayesha"
+
+    def test_reinvite_to_the_same_parent_stays_pending(self, client, db, unique_email, make_link):
+        """The ordinary resend: an existing pending link is reset, not duplicated."""
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+        make_link(parent_id=parent, student_id=student, status="pending")
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": parent_email},
+        )
+
+        assert resp.status_code == 200, resp.text
+        set_current_user_id(db, UUID(student))
+        assert (
+            db.execute(
+                text("SELECT count(*) FROM guardian_link WHERE student_id = :s"), {"s": student}
+            ).scalar_one()
+            == 1
+        )
+
+
+class TestConfirm:
+    def test_confirm_flips_the_link_and_consumes_the_token(
+        self, client, db, unique_email, make_link
+    ):
+        student = _create_user(
+            db, unique_email("gate"), role="student", class_level=9, full_name="Ayesha"
+        )
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        make_link(parent_id=parent, student_id=student, status="pending")
         token = issue_guardian_invite_token(db, UUID(student))
         db.flush()
 
@@ -244,10 +305,10 @@ class TestConfirm:
         assert replay.status_code == 400
         assert replay.json()["error"]["code"] == "INVALID_TOKEN"
 
-    def test_unknown_token_is_invalid(self, client, db, unique_email):
+    def test_unknown_token_is_invalid(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="pending")
+        make_link(parent_id=parent, student_id=student, status="pending")
 
         resp = client.post(
             "/api/auth/guardian/confirm",
@@ -258,11 +319,11 @@ class TestConfirm:
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "INVALID_TOKEN"
 
-    def test_a_token_only_confirms_the_linked_parent(self, client, db, unique_email):
+    def test_a_token_only_confirms_the_linked_parent(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         linked_parent = _create_user(db, unique_email("gate"), role="parent")
         other_parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=linked_parent, student_id=student, status="pending")
+        make_link(parent_id=linked_parent, student_id=student, status="pending")
         token = issue_guardian_invite_token(db, UUID(student))
         db.flush()
 
@@ -275,10 +336,10 @@ class TestConfirm:
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "INVALID_TOKEN"
 
-    def test_confirm_of_an_already_verified_link_is_409(self, client, db, unique_email):
+    def test_confirm_of_an_already_verified_link_is_409(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="verified")
+        make_link(parent_id=parent, student_id=student, status="verified")
         token = issue_guardian_invite_token(db, UUID(student))
         db.flush()
 
@@ -291,10 +352,10 @@ class TestConfirm:
         assert resp.status_code == 409
         assert resp.json()["error"]["code"] == "GUARDIAN_ALREADY_LINKED"
 
-    def test_a_revoked_link_cannot_be_confirmed(self, client, db, unique_email):
+    def test_a_revoked_link_cannot_be_confirmed(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="revoked")
+        make_link(parent_id=parent, student_id=student, status="revoked")
         token = issue_guardian_invite_token(db, UUID(student))
         db.flush()
 
@@ -357,10 +418,10 @@ class TestStatus:
         assert body["parent_email"] == f"{parent_email[0]}***@{parent_email.split('@')[1]}"
         assert body["invited_at"] is not None
 
-    def test_status_passes_revoked_through_unchanged(self, client, db, unique_email):
+    def test_status_passes_revoked_through_unchanged(self, client, db, unique_email, make_link):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         parent = _create_user(db, unique_email("gate"), role="parent")
-        _link(db, parent_id=parent, student_id=student, status="revoked")
+        make_link(parent_id=parent, student_id=student, status="revoked")
 
         resp = client.get("/api/auth/guardian/status", headers=_auth(student))
 
@@ -428,9 +489,6 @@ class TestFullFlow:
 class TestSelfLinkBlockedAtSchema:
     def test_a_student_cannot_create_a_self_link(self, db, unique_email):
         """ck_guardian_not_self AND the RLS WITH CHECK both reject it."""
-        import pytest
-        from sqlalchemy.exc import DBAPIError, ProgrammingError
-
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)
         set_current_user_id(db, UUID(student))
 
@@ -442,4 +500,90 @@ class TestSelfLinkBlockedAtSchema:
                 ),
                 {"id": student},
             )
-            db.flush()
+
+
+class TestVerificationCannotBeForged:
+    """
+    Migration 20260803090000. `rls_policies.sql` claims of guardian_link that
+    "neither may forge a verified status"; before that migration the policies
+    did not enforce it and a direct INSERT of a verified row was ALLOWED. These
+    are the negative tests that claim needed: after this, `verified` is
+    reachable only through `app.confirm_guardian_link`, which demands a valid
+    one-time invite token.
+    """
+
+    def test_a_student_cannot_insert_an_already_verified_link(self, db, unique_email):
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        set_current_user_id(db, UUID(student))
+
+        with pytest.raises((ProgrammingError, DBAPIError)):
+            db.execute(
+                text(
+                    "INSERT INTO guardian_link (parent_id, student_id, status, "
+                    "verification_method, verified_at) "
+                    "VALUES (:p, :s, 'verified', 'oob_email', now())"
+                ),
+                {"p": parent, "s": student},
+            )
+
+    def test_a_parent_cannot_insert_an_already_verified_link(self, db, unique_email):
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        set_current_user_id(db, UUID(parent))
+
+        with pytest.raises((ProgrammingError, DBAPIError)):
+            db.execute(
+                text(
+                    "INSERT INTO guardian_link (parent_id, student_id, status, "
+                    "verification_method, verified_at) "
+                    "VALUES (:p, :s, 'verified', 'oob_email', now())"
+                ),
+                {"p": parent, "s": student},
+            )
+
+    def test_a_student_cannot_update_their_own_link_at_all(self, db, unique_email, make_link):
+        """
+        `guardian_link_update` is parent-only, so the student's UPDATE matches
+        zero rows. It does NOT raise — which is exactly why `guardian_invite`
+        must not depend on it (see the re-invite regression below).
+        """
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        make_link(parent_id=parent, student_id=student, status="pending")
+
+        set_current_user_id(db, UUID(student))
+        affected = db.execute(
+            text(
+                "UPDATE guardian_link SET status = 'verified', "
+                "verification_method = 'oob_email', verified_at = now() "
+                "WHERE student_id = :s"
+            ),
+            {"s": student},
+        ).rowcount
+
+        assert affected == 0
+        set_current_user_id(db, UUID(student))
+        assert (
+            db.execute(
+                text("SELECT status FROM guardian_link WHERE student_id = :s"), {"s": student}
+            ).scalar_one()
+            == "pending"
+        )
+
+    def test_a_parent_cannot_update_a_link_to_verified(self, db, unique_email, make_link):
+        """A parent may withdraw consent, never grant it outside the token path."""
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        make_link(parent_id=parent, student_id=student, status="pending")
+
+        set_current_user_id(db, UUID(parent))
+        with pytest.raises((ProgrammingError, DBAPIError)):
+            db.execute(
+                text(
+                    "UPDATE guardian_link SET status = 'verified', "
+                    "verification_method = 'oob_email', verified_at = now() "
+                    "WHERE student_id = :s"
+                ),
+                {"s": student},
+            )
