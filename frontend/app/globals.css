@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Prevents iOS Safari inflating text in landscape, which breaks the
+       360px layouts prd.md A11Y-2 targets. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background font-body text-on-background antialiased;
+  }
+
+  /* Urdu is the only RTL locale; roman_ur is Latin script and stays LTR
+     (prd.md I18N-4). The Naskh face and its taller line box apply only here. */
+  html[lang='ur'] body {
+    @apply font-urdu text-urdu-text-md;
+  }
+
+  /* Visible focus is a keyboard-navigation requirement (prd.md A11Y-1), not a
+     default we can let a reset remove. */
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-primary;
+  }
+}
+
+@layer utilities {
+  /* Digits must not reorder inside an RTL page: one-time codes, backup codes
+     and countdown timers are inherently left-to-right (prd.md I18N-4). */
+  .force-ltr {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+}

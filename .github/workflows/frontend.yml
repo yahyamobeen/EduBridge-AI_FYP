@@ -1,0 +1,55 @@
+name: frontend
+
+# Runs entirely against the mock layer (NEXT_PUBLIC_API_MODE=mock), so this
+# workflow stays green while the three backend tracks are still in progress.
+# End-to-end browser tests are owned by the backend track, not here.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend.yml'
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_API_MODE: mock
+      # Keeps CI output free of Next's first-run telemetry notice.
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `ci` not `install`: fails on a lockfile that disagrees with
+      # package.json rather than silently resolving something different.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Unit and component tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

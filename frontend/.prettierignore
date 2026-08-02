@@ -1,0 +1,9 @@
+.next/
+node_modules/
+coverage/
+next-env.d.ts
+*.tsbuildinfo
+package-lock.json
+
+# Hand-formatted prose with deliberate line breaks and tables.
+PLAN.md

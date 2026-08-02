@@ -112,9 +112,18 @@ EduBridge AI is a **modular monolith** (one FastAPI backend, clear internal modu
 | **Figure indexing** | Qwen2.5-VL (offline batch) | — | Index textbook figures |
 | **Guardrails** | Prompt Guard 2 / Llama Guard 3 | — | Input/output safety (LLM01/05) |
 | **TTS / avatar** | Fish Audio S2 Pro / MuseTalk v1.5 | — | Voice + lip-sync avatar |
-| **Frontend** | Next.js (App Router) + React + Tailwind; next-intl | Next ≥14 | Responsive web UI, i18n/RTL |
+| **Frontend** | Next.js (App Router) + React + Tailwind **v3**; next-intl | Next 16, React 19, TS 6 | Responsive web UI, i18n/RTL |
 | **Frontend data / forms** | TanStack Query; react-hook-form + zod | latest | Cached identity checks on metered connections; multi-step signup with cross-field rules |
-| **Frontend testing** | Vitest + React Testing Library; **Playwright** | latest | Unit/component; E2E (§9.5) |
+| **Frontend testing** | Vitest + React Testing Library + jsdom | latest | Unit and component only — E2E is the backend track's (§9.5) |
+
+**Two version notes recorded while scaffolding**, both of which change how the project is driven:
+
+- **`next lint` no longer exists.** Next 16 removed the subcommand, so linting runs ESLint directly
+  (`eslint .`) against a flat `eslint.config.mjs`. `eslint-config-next` 16 exports flat-config arrays, so no
+  `FlatCompat` shim is needed.
+- **Tailwind is pinned to v3, not v4.** The `DESIGN.md` tokens are a JS object that maps straight onto v3's
+  `theme.extend`, and all 15 mockups are v3-shaped. v4's CSS-first `@theme` would mean re-deriving the token
+  set by hand for no gain at this stage.
 | **Safe rendering** | DOMPurify + sandboxed iframe + CSP; KaTeX, Mermaid, Chart.js/Recharts, function-plot | latest | Typed visual aids (LLM05) |
 | **Auth** | JWT (access+refresh, python-jose); argon2/bcrypt (passlib) | latest | AuthN; strong password hashing |
 | **Security tooling** | Semgrep, OPA/Rego, sigstore/cosign, container sandbox | latest | Vetting, policy, signing, isolation |
@@ -851,7 +860,15 @@ by parsing an error code — fragile, and easy to render as a spurious failure.
 
 GitHub Actions on every PR: unit/integration tests, **Semgrep** static analysis, **OPA policy tests**, the **Secure Skills & MCP scanner**, container build + **sigstore** signing. Protected `main`; only lead merges; secrets encrypted.
 
-A separate `frontend.yml` workflow runs typecheck, lint, unit/component tests, build and Playwright E2E on any change under `frontend/`. It runs against the mock layer, so it needs no backend and stays green while the backend tracks are still in progress.
+A separate `frontend.yml` workflow runs typecheck, lint, format check, unit/component tests and build on any change under `frontend/`. It runs against the mock layer, so it needs no backend and stays green while the backend tracks are still in progress. It uses `npm ci` rather than `npm install`, so a lockfile that disagrees with `package.json` fails the build instead of silently resolving something different. No browser E2E job — that suite belongs to the backend track (§9.5).
+
+**Dependency overrides (frontend).** Next 16.2.12 pins `postcss` to exactly `8.4.31` and `sharp` to
+`^0.34.5`; both carry high-severity advisories. `npm audit fix --force` "resolves" this by installing
+**next@9.3.3** — a seven-major downgrade, which is not a fix and must never be run here. Instead
+`package.json` carries `overrides` lifting both to patched lines, which takes the audit to zero without
+touching the framework version. Typecheck, lint, tests and build were re-verified after applying them.
+These overrides should be **removed** once Next ships a release pinning patched versions — a stale override
+silently holds a transitive dependency back.
 
 ### 6.11 Client-side security (frontend)
 
@@ -1037,9 +1054,16 @@ Runs entirely against the mock layer, so it is green before any backend endpoint
 
 | Level | Coverage |
 |---|---|
-| **Unit** (Vitest) | `onboarding_state` → route for all five states × four roles · error-envelope parsing · the 401 retry allow-list (must **exclude** `TWO_FACTOR_INVALID` and `PENDING_TOKEN_EXPIRED`) · RTL locale predicate · class→group lookup across the string/number key boundary |
-| **Component** (RTL) | Elective group clears when class changes · login advances on each `status` and errors only on `401` · 2FA method switching across TOTP / email-OTP / backup code · backup-code acknowledgement gates Continue · every error code renders its designed state · `NAV_BY_ROLE` renders exactly the permitted items per role |
-| **E2E** (Playwright) | Class-9 journey end to end including parent signup and confirmation · Class-11 never sees the gate · a lapsed trial redirects a live session to plan selection · 401 → refresh → retry · locale switch en↔ur asserting document direction |
+| **Unit** (Vitest) | `onboarding_state` → route for all five states × four roles · error-envelope parsing · the 401 retry allow-list (must **exclude** `TWO_FACTOR_INVALID` and `PENDING_TOKEN_EXPIRED`) · RTL locale predicate · class→group lookup across the string/number key boundary · design-token assertions pinning the resolved `DESIGN.md` conflicts |
+| **Component** (React Testing Library) | Elective group clears when class changes · login advances on each `status` and errors only on `401` · 2FA method switching across TOTP / email-OTP / backup code · backup-code acknowledgement gates Continue · every error code renders its designed state · `NAV_BY_ROLE` renders exactly the permitted items per role |
+| **Flow** (component-level, multi-screen, against mocks) | Class-9 journey through signup → verification → 2FA → gate → dashboard · Class-11 never reaches the gate · a lapsed trial redirects an active session to plan selection · 401 → refresh → retry |
+
+**E2E browser tests are owned by the backend track, not the frontend** (§9.1). That is a deliberate split,
+and it has a cost the frontend has to cover: browser-level E2E cannot run until the backend exists, so it
+gives no signal during the frontend phases. The **Flow** row above exists to fill that gap — those are
+component-level tests that mount several screens in sequence against the mock layer, so the journeys that
+matter are still guarded while the backend is being built. Without that row, the multi-screen behaviour
+(which is where onboarding bugs actually live) would go untested for the whole sprint.
 
 **The highest-value regression test is the parent navigation assertion** — that the parent surface renders no
 tutor, chat-replay, planner-write or assessment control. That is the `prd.md` §4.2 boundary expressed as
@@ -1166,6 +1190,11 @@ role dashboards.
 | 15 | Access token **in memory**, refresh in httpOnly cookie | v0.3.1 said "tokens in httpOnly cookies", which the client cannot read | §3.10, §6.11 |
 | 16 | Three tables + 5 RLS policies; admin gets **read-only** on `subscription` | An admin must not grant paid access outside the payment path | §5.3a, §6.8 |
 | 17 | Seven error codes added; RTL rule and frontend test matrix specified | Codes existed in the contract but were never catalogued | §7.3, §9.5, PRD I18N-4 |
+
+**Amended during Phase 1 implementation:** browser E2E was moved out of the frontend and into the backend
+track. The frontend keeps unit and component levels and adds a **Flow** level — multi-screen component tests
+against the mock layer — because browser E2E cannot run until the backend exists and would otherwise leave
+the onboarding journeys untested for the whole sprint (§9.5).
 
 **Corrections to earlier versions found during this pass:** the RLS policy count was stated inconsistently —
 54 in §6.8 and §14.1, 56 in §5.4. The applied total is **68** (56 written out plus 12 generated in a `DO`
