@@ -104,6 +104,12 @@
     background-size: 24px 24px;
   }
 
+  /* The login prototype's `.bg-pattern`: same 24px grid, primary-fixed dots. */
+  .dot-pattern-primary {
+    background-image: radial-gradient(#dbe1ff 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
   .parallax {
     transform: translateY(var(--parallax-offset, 0px));
     transition: transform 0.1s linear;

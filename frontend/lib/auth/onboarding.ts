@@ -21,19 +21,27 @@ export function dashboardFor(role: Role): string {
   return DASHBOARD_BY_ROLE[role]
 }
 
+const ONBOARDING_ROUTES: Record<Exclude<OnboardingState, 'active'>, string> = {
+  email_verification_pending: '/onboarding/email',
+  two_factor_enrollment_pending: '/onboarding/2fa',
+  guardian_link_pending: '/onboarding/guardian',
+  plan_selection_pending: '/onboarding/plan',
+}
+
 export function routeForOnboardingState(state: OnboardingState, role: Role): string {
-  switch (state) {
-    case 'email_verification_pending':
-      return '/onboarding/email'
-    case 'two_factor_enrollment_pending':
-      return '/onboarding/2fa'
-    case 'guardian_link_pending':
-      return '/onboarding/guardian'
-    case 'plan_selection_pending':
-      return '/onboarding/plan'
-    case 'active':
-      return dashboardFor(role)
-  }
+  return state === 'active' ? dashboardFor(role) : ONBOARDING_ROUTES[state]
+}
+
+/**
+ * The next onboarding step, or `null` when there is none left.
+ *
+ * Exists so a caller that has an `onboarding_state` but no `role` -- the 2FA
+ * challenge, whose response carries the state and nothing else -- can route
+ * without inventing a role. Only the `active` case needs one, and only then is
+ * it worth a round trip to the identity endpoint to find out.
+ */
+export function pendingOnboardingRoute(state: OnboardingState): string | null {
+  return state === 'active' ? null : ONBOARDING_ROUTES[state]
 }
 
 /**

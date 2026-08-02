@@ -173,6 +173,18 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(-50px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        // A rejected one-time code shakes its field (2fa-challenge prototype).
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-4px)' },
+          '20%, 40%, 60%, 80%': { transform: 'translateX(4px)' },
+        },
+        // The 2FA card swaps between code entry, method choice and the locked
+        // panel; each arrives rather than appearing.
+        'fade-in-up': {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'pulse-ring': 'pulse-ring 2s infinite',
@@ -180,6 +192,8 @@ const config: Config = {
         'drift-slow': 'drift 18s ease-in-out infinite',
         'drift-slower': 'drift 26s ease-in-out infinite',
         'roll-down': 'roll-down 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards',
+        shake: 'shake 0.5s ease-in-out',
+        'fade-in-up': 'fade-in-up 0.3s cubic-bezier(0.2, 1, 0.3, 1) forwards',
       },
 
       transitionTimingFunction: {

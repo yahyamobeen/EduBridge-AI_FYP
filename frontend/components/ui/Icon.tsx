@@ -129,6 +129,84 @@ export function CalendarIcon({ className }: IconProps) {
   )
 }
 
+/**
+ * Direction-neutral by design: an envelope and a padlock mean the same thing in
+ * Urdu, so unlike ArrowIcon these must NOT be mirrored (prd.md I18N-4).
+ */
+export function MailIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="1.75" />
+      <path d="m3 6 7 5 7-5" />
+    </Svg>
+  )
+}
+
+export function LockIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect x="4" y="8.5" width="12" height="9" rx="1.75" />
+      <path d="M7 8.5V6a3 3 0 0 1 6 0v2.5" />
+    </Svg>
+  )
+}
+
+export function KeyIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <circle cx="6.5" cy="13.5" r="3" />
+      <path d="m8.8 11.4 6-6M13.2 7l1.8 1.8M15 5.2l1.8 1.8" />
+    </Svg>
+  )
+}
+
+export function EyeIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M1.8 10S4.8 4.8 10 4.8 18.2 10 18.2 10 15.2 15.2 10 15.2 1.8 10 1.8 10z" />
+      <circle cx="10" cy="10" r="2.3" />
+    </Svg>
+  )
+}
+
+export function EyeOffIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M8.1 5.1A7.6 7.6 0 0 1 10 4.8c5.2 0 8.2 5.2 8.2 5.2a15 15 0 0 1-2.6 3.2M4.5 6.6A15.4 15.4 0 0 0 1.8 10S4.8 15.2 10 15.2c1 0 1.9-.2 2.7-.5" />
+      <path d="M8.4 8.4a2.3 2.3 0 0 0 3.2 3.2M3 3l14 14" />
+    </Svg>
+  )
+}
+
+/** Points in the reading direction, so callers add `rtl:-scale-x-100`. */
+export function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m8 5 5 5-5 5" />
+    </Svg>
+  )
+}
+
+/** Points against the reading direction, so callers add `rtl:-scale-x-100`. */
+export function ArrowLeftIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M16 10H4M9 5 4 10l5 5" />
+    </Svg>
+  )
+}
+
+/** A padlock inside a shield: the 2FA challenge's brand mark. */
+export function SecurityIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M10 2.5 16 5.2V10c0 3.5-2.5 5.8-6 7.5C6.5 15.8 4 13.5 4 10V5.2z" />
+      <rect x="7.75" y="8.75" width="4.5" height="3.75" rx="0.9" />
+      <path d="M8.9 8.75V7.6a1.1 1.1 0 0 1 2.2 0v1.15" />
+    </Svg>
+  )
+}
+
 export function TeachIcon({ className }: IconProps) {
   return (
     <Svg className={className}>

@@ -2,6 +2,7 @@
 
 import { useId, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { ErrorText } from '@/components/ui/FormFeedback'
 import { CheckIcon } from '@/components/ui/Icon'
 
 /**
@@ -24,26 +25,6 @@ type FieldProps = {
   required?: boolean
   defaultValue?: string
   register?: Record<string, unknown>
-}
-
-function ErrorText({ id, children }: { id: string; children: string }) {
-  return (
-    <p
-      id={id}
-      role="alert"
-      className="mt-1.5 flex items-center gap-1.5 text-body-sm text-error"
-    >
-      <svg
-        viewBox="0 0 20 20"
-        className="h-4 w-4 shrink-0"
-        aria-hidden="true"
-        fill="currentColor"
-      >
-        <path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 4a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm0 9.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z" />
-      </svg>
-      {children}
-    </p>
-  )
 }
 
 export function TextField({
@@ -205,25 +186,5 @@ export function RadioCards({
       {hint && !error && <p className="mt-2 text-body-sm text-outline">{hint}</p>}
       {error && <ErrorText id={errorId}>{error}</ErrorText>}
     </fieldset>
-  )
-}
-
-/** Form-level failure: rate limiting, an invalid pair, an unknown code. */
-export function FormBanner({ children }: { children: string }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded border border-error/40 bg-error-container px-4 py-3 text-body-sm text-on-error-container"
-    >
-      <svg
-        viewBox="0 0 20 20"
-        className="mt-0.5 h-4 w-4 shrink-0"
-        aria-hidden
-        fill="currentColor"
-      >
-        <path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm0 4a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm0 9.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z" />
-      </svg>
-      {children}
-    </div>
   )
 }

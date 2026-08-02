@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { OnboardingState, Role } from '@/lib/api/types'
-import { dashboardFor, isOnboardingComplete, routeForOnboardingState } from './onboarding'
+import {
+  dashboardFor,
+  isOnboardingComplete,
+  pendingOnboardingRoute,
+  routeForOnboardingState,
+} from './onboarding'
 
 const STATES: OnboardingState[] = [
   'email_verification_pending',
@@ -45,6 +50,19 @@ describe('routeForOnboardingState', () => {
   it('gives each role a distinct dashboard so none can leak into another', () => {
     const routes = ROLES.map(dashboardFor)
     expect(new Set(routes).size).toBe(ROLES.length)
+  })
+})
+
+describe('pendingOnboardingRoute', () => {
+  it('agrees with routeForOnboardingState for every incomplete state', () => {
+    for (const state of STATES) {
+      if (state === 'active') continue
+      expect(pendingOnboardingRoute(state)).toBe(routeForOnboardingState(state, 'student'))
+    }
+  })
+
+  it('returns null for active, since the destination needs a role', () => {
+    expect(pendingOnboardingRoute('active')).toBeNull()
   })
 })
 

@@ -3,9 +3,7 @@ import type { ReactNode } from 'react'
 import { notFound } from 'next/navigation'
 import { hasLocale, NextIntlClientProvider } from 'next-intl'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
-import { Footer } from '@/components/layout/Footer'
 import { SkipLink } from '@/components/layout/SkipLink'
-import { TopNav } from '@/components/layout/TopNav'
 import { dirFor, routing } from '@/i18n/routing'
 import { fontVariablesFor } from '../fonts'
 import '../globals.css'
@@ -42,16 +40,19 @@ export default async function LocaleLayout({ children, params }: Props) {
   // Required for static rendering; without it every page opts into dynamic.
   setRequestLocale(locale)
 
+  /*
+    The site chrome is NOT rendered here. Nav and footer belong to the (site)
+    group; the (auth) group suppresses them, because the login and 2FA
+    prototypes both do -- a linear, transactional screen offers no way to
+    wander off it. Keeping the chrome here and hiding it per route would mean
+    reading the pathname from a server layout, which is not available anyway.
+  */
   return (
     <html lang={locale} dir={dirFor(locale)} className={fontVariablesFor(locale)}>
       <body className="flex min-h-screen flex-col">
         <NextIntlClientProvider>
           <SkipLink />
-          <TopNav />
-          <main id="main" className="flex-1">
-            {children}
-          </main>
-          <Footer />
+          {children}
         </NextIntlClientProvider>
       </body>
     </html>

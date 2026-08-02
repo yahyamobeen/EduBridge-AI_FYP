@@ -120,6 +120,69 @@
       "enumsRetry": "Try again"
     }
   },
+  "auth": {
+    "login": {
+      "title": "Welcome to EduBridge AI",
+      "subtitle": "Sign in to continue your learning journey.",
+      "heroBadge": "AI-Powered Learning",
+      "heroTitle": "Master Your Curriculum with Confidence.",
+      "heroBody": "Access verified board content, personalized AI tutoring, and culturally resonant study plans designed for your success.",
+      "emailLabel": "Email Address",
+      "emailPlaceholder": "student@example.com",
+      "passwordLabel": "Password",
+      "forgotPassword": "Forgot Password?",
+      "submit": "Sign In",
+      "submitting": "Signing in…",
+      "noAccount": "Don't have an account?",
+      "createAccount": "Create an account"
+    },
+    "twoFactor": {
+      "brand": "EduBridge AI",
+      "title": "Two-Factor Authentication",
+      "promptTotp": "Enter the 6-digit code from your authenticator app to continue securely.",
+      "promptEmail": "Enter the 6-digit code we sent to {email}.",
+      "promptBackup": "Enter one of the 8-character backup codes you saved.",
+      "codeLabel": "Authentication code",
+      "expiresIn": "Code expires in",
+      "verify": "Verify Code",
+      "verifying": "Verifying…",
+      "tryAnotherWay": "Try another way",
+      "back": "Go back",
+      "optionsTitle": "Choose another method",
+      "optionsBody": "Select an alternative way to verify your identity.",
+      "methodTotpTitle": "Authenticator app",
+      "methodTotpBody": "Use the 6-digit code from your app",
+      "methodEmailTitle": "Email code",
+      "methodEmailBody": "Use the 6-digit code sent to {email}",
+      "methodBackupTitle": "Backup code",
+      "methodBackupBody": "Use one of the 8-character codes you saved",
+      "expiredTitle": "This sign-in request expired",
+      "expiredBody": "For your security the code request timed out. Sign in again to get a new one.",
+      "backToSignIn": "Back to sign in"
+    },
+    "locked": {
+      "title": "Account Temporarily Locked",
+      "body": "Too many failed authentication attempts. For your security, this account has been locked.",
+      "tryAgainIn": "Try again in"
+    },
+    "countdown": {
+      "minutesLeft": "About {minutes} minutes remaining.",
+      "lessThanAMinute": "Less than a minute remaining.",
+      "finished": "The wait is over. You can try again."
+    },
+    "errors": {
+      "badCredentials": "That email and password do not match an account.",
+      "invalidCode": "That code is not valid. Please try again.",
+      "rateLimited": "Too many attempts. Please wait a moment and try again.",
+      "rateLimitedIn": "Too many attempts. You can try again in",
+      "generic": "Something went wrong. Please try again."
+    },
+    "footer": {
+      "help": "Help",
+      "privacy": "Privacy",
+      "terms": "Terms"
+    }
+  },
   "landing": {
     "hero": {
       "badgeCurriculum": "PCTB & STBB Syllabi",

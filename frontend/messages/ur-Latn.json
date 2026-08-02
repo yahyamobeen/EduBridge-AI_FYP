@@ -120,6 +120,69 @@
       "enumsRetry": "Dobara koshish karein"
     }
   },
+  "auth": {
+    "login": {
+      "title": "EduBridge AI mein khush aamdeed",
+      "subtitle": "Apna seekhne ka safar jaari rakhne ke liye sign in karein.",
+      "heroBadge": "AI se chalne wali taleem",
+      "heroTitle": "Apne nisaab par aitmaad ke saath uboor haasil karein.",
+      "heroBody": "Tasdeeq shuda board content, zaati noiyat ki AI tuition aur aap ki kamyabi ke liye tayyar kiye gaye study plans haasil karein.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "student@example.com",
+      "passwordLabel": "Password",
+      "forgotPassword": "Password bhool gaye?",
+      "submit": "Sign in",
+      "submitting": "Sign in ho raha hai…",
+      "noAccount": "Account nahi hai?",
+      "createAccount": "Account banayein"
+    },
+    "twoFactor": {
+      "brand": "EduBridge AI",
+      "title": "Do marhalon wali tasdeeq",
+      "promptTotp": "Mehfooz tareeqe se aage barhne ke liye apni authenticator app se 6 hindson ka code darj karein.",
+      "promptEmail": "Hum ne {email} par jo 6 hindson ka code bheja hai wo darj karein.",
+      "promptBackup": "Aap ne jo 8 huroof wale backup codes mehfooz kiye thay, un mein se aik darj karein.",
+      "codeLabel": "Tasdeeqi code",
+      "expiresIn": "Code ki miyaad khatam hone mein",
+      "verify": "Code ki tasdeeq karein",
+      "verifying": "Tasdeeq ho rahi hai…",
+      "tryAnotherWay": "Koi aur tareeqa azmayein",
+      "back": "Wapas jayein",
+      "optionsTitle": "Doosra tareeqa muntakhib karein",
+      "optionsBody": "Apni shanakht ki tasdeeq ke liye mutabadil tareeqa muntakhib karein.",
+      "methodTotpTitle": "Authenticator app",
+      "methodTotpBody": "Apni app se 6 hindson ka code istemal karein",
+      "methodEmailTitle": "Email code",
+      "methodEmailBody": "{email} par bheja gaya 6 hindson ka code istemal karein",
+      "methodBackupTitle": "Backup code",
+      "methodBackupBody": "Mehfooz kiye gaye 8 huroof wale codes mein se aik istemal karein",
+      "expiredTitle": "Sign in ki ye darkhwast khatam ho gayi",
+      "expiredBody": "Aap ki hifazat ke liye code ki darkhwast ka waqt khatam ho gaya. Naya code haasil karne ke liye dobara sign in karein.",
+      "backToSignIn": "Sign in par wapas jayein"
+    },
+    "locked": {
+      "title": "Account aarzi tor par band hai",
+      "body": "Tasdeeq ki bohot ziyada nakaam koshishein. Aap ki hifazat ke liye ye account band kar diya gaya hai.",
+      "tryAgainIn": "Dobara koshish karein"
+    },
+    "countdown": {
+      "minutesLeft": "Taqreeban {minutes} minute baqi hain.",
+      "lessThanAMinute": "Aik minute se kam baqi hai.",
+      "finished": "Intezaar khatam. Ab dobara koshish kar sakte hain."
+    },
+    "errors": {
+      "badCredentials": "Ye email aur password kisi account se mel nahi khaate.",
+      "invalidCode": "Ye code durust nahi. Dobara koshish karein.",
+      "rateLimited": "Bohot ziyada koshishein. Baraye meherbani thori der baad dobara koshish karein.",
+      "rateLimitedIn": "Bohot ziyada koshishein. Aap dobara koshish kar sakte hain",
+      "generic": "Kuch ghalat ho gaya. Dobara koshish karein."
+    },
+    "footer": {
+      "help": "Madad",
+      "privacy": "Privacy",
+      "terms": "Sharait"
+    }
+  },
   "landing": {
     "hero": {
       "badgeCurriculum": "PCTB & STBB Nisab",

@@ -20,6 +20,9 @@ const SLUGS = [
   'integrity',
   'privacy',
   'security',
+  // The auth screens carry their own minimal footer (Help / Privacy / Terms).
+  'help',
+  'terms',
 ] as const
 
 type Slug = (typeof SLUGS)[number]

@@ -1,6 +1,6 @@
 import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { StudentSignupForm } from '@/components/signup/StudentSignupForm'
-import { FormBanner } from '@/components/signup/fields'
+import { FormBanner } from '@/components/ui/FormFeedback'
 import { getEnums } from '@/lib/api/endpoints'
 import type { EnumsResponse } from '@/lib/api/types'
 

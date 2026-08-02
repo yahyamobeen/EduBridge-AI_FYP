@@ -102,6 +102,15 @@ export type ApiRequestInit = {
   body?: unknown
   /** Sent instead of the session token, for short-lived challenge credentials. */
   bearer?: string
+  /**
+   * Opts out of refresh-and-retry on a 401.
+   *
+   * For most endpoints a 401 UNAUTHENTICATED means the access token died and a
+   * refresh is worth trying — that is how the app recovers after a reload, when
+   * only the httpOnly cookie survives. On /auth/login it means the password was
+   * wrong, so refreshing would fire a guaranteed-to-fail request on every typo.
+   */
+  noRetry?: boolean
   headers?: Record<string, string>
   signal?: AbortSignal
 }
@@ -156,7 +165,7 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}): Prom
 
     // A short-lived challenge credential is not a session; refreshing cannot
     // help it, and retrying would waste an attempt.
-    if (init.bearer === undefined && isRefreshableAuthError(error)) {
+    if (init.bearer === undefined && !init.noRetry && isRefreshableAuthError(error)) {
       if (await refreshOnce()) return rawRequest<T>(path, init)
     }
 

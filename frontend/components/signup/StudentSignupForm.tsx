@@ -7,7 +7,8 @@ import { ApiError } from '@/lib/api/errors'
 import type { BoardCode, EnumsResponse, Medium, StudentGroup } from '@/lib/api/types'
 import { toApiLanguage, type Locale } from '@/i18n/routing'
 import { useRouter } from '@/i18n/navigation'
-import { FormBanner, RadioCards, TextField, type Option } from './fields'
+import { FormBanner } from '@/components/ui/FormFeedback'
+import { RadioCards, TextField, type Option } from './fields'
 
 const STEPS = ['step1', 'step2', 'step3'] as const
 

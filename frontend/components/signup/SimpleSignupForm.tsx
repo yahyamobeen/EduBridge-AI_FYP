@@ -5,7 +5,8 @@ import { useLocale, useTranslations } from 'next-intl'
 import { register as registerAccount } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import { useRouter } from '@/i18n/navigation'
-import { FormBanner, TextField } from './fields'
+import { FormBanner } from '@/components/ui/FormFeedback'
+import { TextField } from './fields'
 
 /**
  * Teacher and parent registration.
