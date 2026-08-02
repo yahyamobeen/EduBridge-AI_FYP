@@ -1,7 +1,7 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 **Status:** Draft — under section-by-section review
 **Last Updated:** August 2, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend feature-complete (Phases 10–12).** Plan selection, the role guard, the three dashboard shells and the error boundary. §6.11 records a **deviation**: `script-src` now carries `'unsafe-inline'`, because the Phase-1 policy blocked the App Router's inline bootstrap scripts and left the whole application non-interactive in production (**new §14.5**). §9.5 gains two enforced rules — the RTL physical-property sweep and the parent-navigation assertion — plus the requirement that a production build be opened and interacted with before a phase is done. |
 | 0.3.3 | 2026-08-02 | EduBridge AI Team | **Frontend auth screens built (Phases 6–9).** §3.10 gains the rules the implementation forced: challenge credentials (`pending_token`, `enrollment_token`) stored in memory under the access token's rule; the `200`-always-advances login discriminator and its `noRetry` consequence; the 2FA challenge opening on the server's method with a server-driven lockout; `type="text"` for one-time codes; per-minute countdown announcements; site chrome scoped by route group. New **§14.4** records the contract findings for the backend tracks — chiefly that **nothing switches the second factor mid-challenge** (`2fa/resend` only re-sends to a user already enrolled in email OTP), that **enrolment has no resend at all**, and that guardian status has **no push channel**. Prototype links to unbuilt areas now resolve to a coming-soon page rather than being removed. |
 | 0.3.2 | 2026-08-02 | EduBridge AI Team | **Subscriptions + onboarding state.** New `subscription`, `subscription_plan`, `oauth_identity` tables (§5.3a, §5.4) with RLS (§6.8); `onboarding_state` documented as a **derived** field gaining `plan_selection_pending` (§3.1) — the first **non-monotonic** state in the system (§5.8). `guardian/confirm` becomes **authenticated** (§3.1) — the parent signs up first. `email/verify` and `2fa/confirm` now issue tokens, and the 2FA enrolment endpoints take `enrollment_token` in the **body** (§3.1, §7.3). Frontend design specified in depth (§3.10): API client, in-memory access token, `NAV_BY_ROLE`, RTL rule, `qr_svg` handling (§6.11). Teacher tutor access removed to match `/api/tutor/ask` scoping (§3.2, `prd.md` §4.2). Frontend test matrix added (§9.5). |
 | 0.3.1 | 2026-08-01 | EduBridge AI Team | Login returns **`200` + `status` discriminator** rather than `401 TWO_FACTOR_REQUIRED` (§3.1, §6.9, §7.3, §9.2); the two affected codes removed from the error catalogue. |
@@ -980,9 +981,18 @@ silently holds a transitive dependency back.
   `sessionStorage`, a readable cookie, or a query string (§3.10).
 - **No secrets in client-visible configuration.** Anything prefixed `NEXT_PUBLIC_` is compiled into the
   bundle and is therefore public by definition.
-- **Response headers** set at the edge: `Content-Security-Policy` without `unsafe-inline` scripts,
-  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-  `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Response headers** set at the edge: `Content-Security-Policy`, `X-Frame-Options: DENY`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`.
+  - **`script-src` carries `'unsafe-inline'`. This is a recorded deviation, not an oversight** — read §14.5
+    before removing it. The App Router streams its React payload through inline `<script>` elements; a bare
+    `script-src 'self'` blocks them, React never hydrates, and the entire application ships as inert HTML
+    with no console output and every asset returning `200`. A per-request nonce is the correct fix and is
+    unavailable here, because the auth routes are prerendered per locale at build time and a nonce requires
+    per-request rendering. Revisit if those routes ever become dynamic for another reason.
+  - The directives that matter most for an authentication surface are unaffected: `frame-ancestors 'none'`
+    blocks clickjacking of the login and 2FA screens, `form-action 'self'` stops a form being retargeted at
+    another origin, `base-uri 'self'` stops a `<base>` element rewriting every relative URL, `connect-src`
+    confines API calls, and `img-src 'self' data:` still admits only the 2FA QR.
 - **Credential-manager compatibility** — correct `autocomplete` values (`username`, `current-password`,
   `new-password`, `one-time-code`). This is a security control, not polish: the target cohort shares devices
   (`prd.md` §3.1), and fields a password manager cannot fill push users toward weak, memorable, reused
@@ -1172,6 +1182,22 @@ code, and a shared component tree makes it the single easiest thing to reintrodu
 a11y scan clean on every route; keyboard-only traversal of signup → login → 2FA; every screen at 360 px;
 first-load JS within budget.
 
+**Two rules are enforced by tests rather than by review, because both are invisible until someone reads the
+page in the wrong language or with the wrong account:**
+
+- **The RTL sweep.** Every source file's class strings are scanned for physical direction properties —
+  `ml`/`mr`, `pl`/`pr`, `left`/`right`, `text-left`/`text-right`, `border-l`/`border-r`. All fifteen
+  prototypes are written physically, so a class copied verbatim looks perfect in English and silently breaks
+  the Urdu layout. The rule (`prd.md` I18N-4) is that mirroring uses logical properties only, and the test is
+  what makes that true rather than aspirational.
+- **The parent-navigation assertion**, described above.
+
+**A production build must be opened in a browser and interacted with before a phase is done.** This is not
+ceremony: `tsc`, `eslint`, `vitest` and `next build` all passed for five phases while the shipped artefact was
+completely inert (§14.5). Unit and component tests render React directly and never see a Content-Security-
+Policy, a service worker, or a hydration failure, so none of them can catch a build that does not come alive.
+`npm start`, load a route, type into a field, press a button.
+
 ---
 
 ## 10. Future Enhancements
@@ -1337,6 +1363,26 @@ assume.
 | 3 | **A `401` on `/auth/login` must not be retried after a refresh.** The generic 401→refresh→retry path fires a guaranteed-to-fail refresh on every mistyped password | Client gained a per-request `noRetry` flag (§3.10). No backend change |
 | 4 | **`email/verify` is idempotent in practice but unspecified.** A verification link is commonly opened twice — a mail client prefetch, then the human | The client treats a second call returning `INVALID_TOKEN` as "already verified" only when it can confirm the state; otherwise it shows the invalid-link panel. **Muneeb** to confirm whether a spent token returns `INVALID_TOKEN` or succeeds idempotently |
 | 5 | **Guardian status has no push channel.** The student's gate screen must discover that the parent confirmed | The client polls `GET /auth/guardian/status`, pausing while the tab is hidden. **Mujtaba** to confirm the polling interval is acceptable against the rate limiter |
+| 6 | **`POST /auth/guardian/confirm` has no specified request body.** It is authenticated as the parent, but nothing says how the server learns WHICH pending link is being confirmed — a parent with two children cannot say | The client sends `{ invite_token }` from the email link, matching the rule that a token is always a body field. **Mujtaba** to confirm, or to key it off the parent's identity alone, in which case the field is dropped |
+
+### 14.5 Found during frontend Phases 10–12
+
+**The Content-Security-Policy shipped in Phase 1 broke the entire application, silently.** `script-src 'self'`
+blocks the App Router's inline bootstrap scripts, which carry the React payload. React therefore never
+hydrated: every page rendered as static HTML, no form accepted input and no button responded. It produced no
+console output and every asset returned `200`, which is why it survived five phases unnoticed — component
+tests all passed, because they render React directly and never see a CSP.
+
+`script-src` now carries **`'unsafe-inline'`**, and that is a deliberate, recorded deviation from §6.11.
+The correct fix is a per-request nonce; it cannot be used here, because a nonce must differ per response and
+these routes are **prerendered per locale at build time**. Forcing them dynamic would trade the static
+prerendering `prd.md` A11Y-2 depends on — a fast first paint on a mid-tier Android over Slow 3G — for a
+directive that stops a subset of XSS payloads. `frame-ancestors`, `form-action`, `base-uri`, `connect-src`
+and `img-src` are unchanged and still carry most of the value for an authentication surface.
+
+**The lesson worth keeping:** a production build was never opened in a browser until Phase 12. Type checks,
+lint, unit tests and `next build` all passed throughout while the shipped artefact was inert. `npm start` plus
+one real interaction belongs in the definition of done, and is now in §9.5.
 
 ---
 

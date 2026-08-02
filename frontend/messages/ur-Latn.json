@@ -1,7 +1,9 @@
 {
   "app": {
     "name": "EduBridge AI",
-    "tagline": "Pakistan ke mustaqbil ke liye Mehfooz Agentic Learning Platform."
+    "tagline": "Pakistan ke mustaqbil ke liye Mehfooz Agentic Learning Platform.",
+    "loading": "Load ho raha hai…",
+    "redirecting": "Aap ko durust safhe par le ja rahe hain…"
   },
   "a11y": {
     "skipToContent": "Content par jayein"
@@ -13,7 +15,27 @@
     "curriculum": "Nisab",
     "solutions": "Hal",
     "tutor": "Tutor",
-    "progress": "Paish raft"
+    "progress": "Paish raft",
+    "items": {
+      "dashboard": "Dashboard",
+      "subjects": "Mazameen",
+      "tutor": "AI Tutor",
+      "practice": "Mashq",
+      "quizzes": "Quiz",
+      "progress": "Peshraft",
+      "myClasses": "Meri classein",
+      "planner": "Mutalie ka mansooba",
+      "mySpaces": "Meri classein",
+      "reports": "Reportein",
+      "roster": "Class fehrist",
+      "slo": "SLO naqsha",
+      "announcements": "Elanaat",
+      "myChild": "Mera bacha",
+      "howToHelp": "Madad kaise karein",
+      "settings": "Tarteebat",
+      "help": "Madad markaz",
+      "logout": "Log out"
+    }
   },
   "languageSwitcher": {
     "label": "Zaban"
@@ -377,5 +399,80 @@
       "adaptiveTitle": "Mutabiqat Pazeer Andaz",
       "adaptiveBody": "Fehm ki satah ke mutabiq dushwari ki khudkar tabdeeli."
     }
+  },
+  "dashboard": {
+    "primaryNav": "Markazi navigation",
+    "openMenu": "Menu",
+    "closeMenu": "Band karein",
+    "notYetAvailable": "Abhi dastyab nahi",
+    "learnMore": "Mazeed janein",
+    "student": {
+      "role": "Talib ilm dashboard",
+      "welcome": "Khush aamdeed, {name}",
+      "subtitle": "Aap ka nisab, aap ki raftaar, aap ki zaban mein."
+    },
+    "teacher": {
+      "role": "Ustad dashboard",
+      "welcome": "Khush aamdeed, {name}",
+      "subtitle": "Aap ki classein aur wo nisabi khala jin par tawajjo zaroori hai."
+    },
+    "parent": {
+      "role": "Waldain dashboard",
+      "welcome": "Khush aamdeed, {name}",
+      "subtitle": "Aap ke bache ki peshraft, baghair musalsal nigrani ke."
+    },
+    "cards": {
+      "performanceTitle": "Majmooi karkardagi",
+      "performanceBody": "Aap ke mazameen mein imtehani tayyari aur nisab ki takmeel.",
+      "studyNextTitle": "Agla mutalia",
+      "studyNextBody": "Un mauzuaat ko tarjeeh jahan aap ki girift kamzor hai.",
+      "tutorTitle": "AI Tutor",
+      "tutorBody": "English, Urdu ya Roman Urdu mein sawal poochein aur qadam ba qadam hal samjhein.",
+      "quizzesTitle": "Quiz",
+      "quizzesBody": "Aap ke board aur jamaat se liye gaye mashqi sawalat.",
+      "myClassesTitle": "Meri classein",
+      "myClassesBody": "Dekhein kon aap ki peshraft dekh sakta hai, aur kisi bhi waqt class chor dein.",
+      "spacesTitle": "Meri classein",
+      "spacesBody": "Wo classein jo aap parhate hain aur un ki peshraft.",
+      "rosterTitle": "Class fehrist",
+      "rosterBody": "Kon shamil hai, aur kon abhi shamil nahi hua.",
+      "reportsTitle": "Mazameen ki reportein",
+      "reportsBody": "Aap ke dayra-e-tadrees ke mazameen ki peshraft.",
+      "sloTitle": "SLO naqsha",
+      "sloBody": "Aap ki class ne kon se taleemi maqasid mukammal kiye aur kon se baqi hain.",
+      "childProgressTitle": "Aap ke bache ki peshraft",
+      "childProgressBody": "Tasdeeq shuda nisabi peshraft aur waqt ke sath mutalie ki sargarmi.",
+      "howToHelpTitle": "Madad kaise karein",
+      "howToHelpBody": "Un maqamat par amali tajaweez jahan aap ke bache ko dushwari ho rahi hai.",
+      "privacyTitle": "Aap kya dekh sakte hain aur kya nahi",
+      "privacyBody": "Aap peshraft reportein aur mutalie ki sargarmi dekh sakte hain. Aap apne bache ki tuition guftagu ka mawad nahi parh sakte — wo bah lihaz-e-design un ke liye niji rehti hai."
+    }
+  },
+  "plan": {
+    "brand": "EduBridge AI",
+    "title": "Apna taleemi rasta muntakhib karein",
+    "subtitle": "Aap ke board ke tasdeeq shuda nisab par mabni zaati AI tuition tak mukammal rasai.",
+    "planName": "EduBridge AI",
+    "price": "Rs. 999",
+    "perMonth": "/mah",
+    "planBody": "Aik hi plan. Sab kuch shamil.",
+    "feature_tutor": "Aap ke board aur jamaat ke liye lamehdood AI tuition",
+    "feature_curriculum": "Tasdeeq shuda PCTB aur STBB nisab",
+    "feature_analytics": "Peshraft ki nigrani aur imtehani tayyari",
+    "feature_languages": "Har jagah English, Urdu aur Roman Urdu",
+    "statusTitle": "Aap ki rasai",
+    "loading": "Aap ki rasai ki janch ho rahi hai…",
+    "trialEnds": "Aap ki muft aazmaish {date} tak hai.",
+    "noAccess": "Aap ke paas faal rasai nahi. Jari rakhne ke liye plan muntakhib karein.",
+    "select": "Ye plan muntakhib karein",
+    "selecting": "Tarteeb di ja rahi hai…",
+    "noCheckoutNote": "Yahan abhi koi adaigi nahi li jati. Plan muntakhib karne se aap ka intekhab mehfooz ho jata hai; billing aainda release mein aayegi."
+  },
+  "errorPage": {
+    "title": "Kuch ghalat ho gaya",
+    "body": "Ye safha dikhaya nahi ja saka. Umooman dobara koshish karne se masla hal ho jata hai.",
+    "retry": "Dobara koshish karein",
+    "home": "Markazi safhe par jayein",
+    "reference": "Hawala: {digest}"
   }
 }

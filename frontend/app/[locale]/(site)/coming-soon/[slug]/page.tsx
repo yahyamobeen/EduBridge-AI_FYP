@@ -23,6 +23,21 @@ const SLUGS = [
   // The auth screens carry their own minimal footer (Help / Privacy / Terms).
   'help',
   'terms',
+  // Every non-dashboard destination in NAV_BY_ROLE. Each is a real product area
+  // from prd.md §4.2 that later phases build; until then the nav points here
+  // rather than nowhere.
+  'practice',
+  'quizzes',
+  'my-classes',
+  'planner',
+  'settings',
+  'spaces',
+  'reports',
+  'roster',
+  'slo',
+  'announcements',
+  'my-child',
+  'how-to-help',
 ] as const
 
 type Slug = (typeof SLUGS)[number]

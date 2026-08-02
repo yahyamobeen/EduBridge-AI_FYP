@@ -1,7 +1,9 @@
 {
   "app": {
     "name": "EduBridge AI",
-    "tagline": "The Secure Agentic Learning Platform for Pakistan's Future."
+    "tagline": "The Secure Agentic Learning Platform for Pakistan's Future.",
+    "loading": "Loading…",
+    "redirecting": "Taking you to the right place…"
   },
   "a11y": {
     "skipToContent": "Skip to content"
@@ -13,7 +15,27 @@
     "curriculum": "Curriculum",
     "solutions": "Solutions",
     "tutor": "Tutor",
-    "progress": "Progress"
+    "progress": "Progress",
+    "items": {
+      "dashboard": "Dashboard",
+      "subjects": "Subjects",
+      "tutor": "AI Tutor",
+      "practice": "Practice",
+      "quizzes": "Quizzes",
+      "progress": "Progress",
+      "myClasses": "My Classes",
+      "planner": "Study Planner",
+      "mySpaces": "My Spaces",
+      "reports": "Reports",
+      "roster": "Class Roster",
+      "slo": "SLO Mapping",
+      "announcements": "Announcements",
+      "myChild": "My Child",
+      "howToHelp": "How to Help",
+      "settings": "Settings",
+      "help": "Help Centre",
+      "logout": "Log Out"
+    }
   },
   "languageSwitcher": {
     "label": "Language"
@@ -377,5 +399,80 @@
       "adaptiveTitle": "Adaptive Flow",
       "adaptiveBody": "Dynamic difficulty adjustment based on real-time comprehension levels."
     }
+  },
+  "dashboard": {
+    "primaryNav": "Main navigation",
+    "openMenu": "Menu",
+    "closeMenu": "Close",
+    "notYetAvailable": "Not available yet",
+    "learnMore": "Learn more",
+    "student": {
+      "role": "Student Dashboard",
+      "welcome": "Welcome back, {name}",
+      "subtitle": "Your curriculum, your pace, in your language."
+    },
+    "teacher": {
+      "role": "Teacher Dashboard",
+      "welcome": "Welcome back, {name}",
+      "subtitle": "Your classes and the curriculum gaps worth your time."
+    },
+    "parent": {
+      "role": "Parent Dashboard",
+      "welcome": "Welcome, {name}",
+      "subtitle": "Your child's progress, without looking over their shoulder."
+    },
+    "cards": {
+      "performanceTitle": "Overall performance",
+      "performanceBody": "Exam readiness and syllabus coverage across your subjects.",
+      "studyNextTitle": "Study next",
+      "studyNextBody": "Prioritised topics based on where your mastery is thinnest.",
+      "tutorTitle": "AI Tutor",
+      "tutorBody": "Ask a question in English, Urdu or Roman-Urdu and work through it step by step.",
+      "quizzesTitle": "Quizzes",
+      "quizzesBody": "Practice sets drawn from your board and class.",
+      "myClassesTitle": "My classes",
+      "myClassesBody": "See who can view your progress, and leave any class at any time.",
+      "spacesTitle": "My spaces",
+      "spacesBody": "The classes you teach and how each is progressing.",
+      "rosterTitle": "Class roster",
+      "rosterBody": "Who is enrolled, and who has not joined yet.",
+      "reportsTitle": "Subject reports",
+      "reportsBody": "Progress for the subjects in your teaching scope.",
+      "sloTitle": "SLO mapping",
+      "sloBody": "Which learning outcomes your class has covered, and which are outstanding.",
+      "childProgressTitle": "Your child's progress",
+      "childProgressBody": "Verified curriculum progress and study activity over time.",
+      "howToHelpTitle": "How to help",
+      "howToHelpBody": "Practical suggestions based on where your child is finding things hard.",
+      "privacyTitle": "What you can and cannot see",
+      "privacyBody": "You can see progress reports and study activity. You cannot read the content of your child’s tutoring conversations — those stay private to them, by design."
+    }
+  },
+  "plan": {
+    "brand": "EduBridge AI",
+    "title": "Choose your learning path",
+    "subtitle": "Full access to personalised AI tutoring, grounded in your board’s verified curriculum.",
+    "planName": "EduBridge AI",
+    "price": "Rs. 999",
+    "perMonth": "/month",
+    "planBody": "One plan. Everything included.",
+    "feature_tutor": "Unlimited AI tutoring for your board and class",
+    "feature_curriculum": "Verified PCTB and STBB curriculum",
+    "feature_analytics": "Progress tracking and exam readiness",
+    "feature_languages": "English, Urdu and Roman-Urdu throughout",
+    "statusTitle": "Your access",
+    "loading": "Checking your access…",
+    "trialEnds": "Your free trial runs until {date}.",
+    "noAccess": "You do not have active access. Choose the plan to continue.",
+    "select": "Choose this plan",
+    "selecting": "Setting up…",
+    "noCheckoutNote": "No payment is taken here yet. Choosing the plan records your selection; billing arrives in a later release."
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "body": "This page could not be displayed. Trying again often fixes it.",
+    "retry": "Try again",
+    "home": "Go to the home page",
+    "reference": "Reference: {digest}"
   }
 }
