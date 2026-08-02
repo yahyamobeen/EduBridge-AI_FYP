@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import gate
 from app.auth.onboarding import derive_onboarding_state
 from app.auth.schemas import GROUP_LABELS, LoginRequest, RegisterRequest
 from app.auth.security import create_access_token, hash_password, verify_password
@@ -354,8 +355,9 @@ def me(db: Session, user_id: UUID) -> dict:
     is_student = str(row["role"]) == "student"
     class_level = row["class_level"]
 
-    # prd.md §4.3: Classes 9-10 only.
-    guardian_required = is_student and class_level in (9, 10)
+    # prd.md §4.3: Classes 9-10 only. Delegated to gate.py so `me()` and
+    # GET /api/auth/guardian/status cannot drift apart on this rule.
+    guardian_required = gate.guardian_required(is_student=is_student, class_level=class_level)
     # `null`, not the string "none": the contract types this as
     # `GuardianStatus | null`, and `revoked` is a real value that has to pass
     # through rather than being flattened away.
