@@ -280,6 +280,11 @@ def refresh(db: Session, refresh_token: str) -> dict:
         # two parties hold it. Kill the whole family rather than answering 401
         # and leaving the thief with a working chain.
         revoke_refresh_family(db, reuse.user_id)
+        # COMMIT BEFORE RAISING. The 401 below propagates out through `get_db`,
+        # which rolls the session back on any exception — so without this the
+        # revocation is undone by the very response that reports the reuse, and
+        # the stolen chain keeps working. A test caught exactly that.
+        db.commit()
         raise unauthenticated("Invalid or expired refresh token.") from None
 
     if rotated is None:

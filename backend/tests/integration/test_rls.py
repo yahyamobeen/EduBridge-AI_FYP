@@ -30,17 +30,32 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.core.db import engine, set_current_user_id
 
 
-def _make_user(session, email: str) -> str:
-    """`app_user_insert` is WITH CHECK (true), so this needs no bound user."""
-    return str(
-        session.execute(
-            text(
-                "INSERT INTO app_user (email, password_hash, role, full_name) "
-                "VALUES (:email, 'x', 'student', 'RLS Test') RETURNING id"
-            ),
-            {"email": email},
-        ).scalar_one()
+def _make_user(session, email: str, **extra) -> str:
+    """
+    Bind the id BEFORE inserting.
+
+    The applied database scopes app_user inserts to the acting user, so an
+    unbound insert is refused — which is also why `register()` binds the id it
+    is about to create. (`rls_policies.sql` in the repo shows
+    `app_user_insert ... WITH CHECK (true)`; the live policy is stricter, so the
+    file and the database disagree. Worth reconciling separately.)
+    """
+    from uuid import uuid4
+
+    from app.core.db import set_current_user_id
+
+    user_id = uuid4()
+    set_current_user_id(session, user_id)
+    columns = "id, email, password_hash, role, full_name"
+    values = ":id, :email, 'x', 'student', 'Test User'"
+    if extra.get("verified"):
+        columns += ", email_verified_at"
+        values += ", now()"
+    session.execute(
+        text(f"INSERT INTO app_user ({columns}) VALUES ({values})"),  # noqa: S608
+        {"id": user_id, "email": email},
     )
+    return str(user_id)
 
 
 class TestFailClosed:
@@ -50,7 +65,11 @@ class TestFailClosed:
         _make_user(db, unique_email("rls"))
         db.flush()
 
-        # Same session, same transaction — simply no app.current_user_id set.
+        # Creating the row required a binding (the applied INSERT policy is
+        # owner-scoped), so clear it and ask again. `app.current_user_id()` is
+        # NULLIF(setting, '')::uuid, so an empty string is genuinely "unset".
+        db.execute(text("SELECT set_config('app.current_user_id', '', true)"))
+
         count = db.execute(text("SELECT count(*) FROM app_user")).scalar_one()
         assert count == 0, (
             "app_user returned rows with no user bound, so RLS is not fail-closed. "
