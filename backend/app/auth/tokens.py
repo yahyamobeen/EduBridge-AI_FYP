@@ -187,3 +187,33 @@ def issue_challenge_token(
     plain = generate_opaque_token()
     _insert_token(session, user_id, kind, hash_token(plain), now + timedelta(seconds=ttl_seconds))
     return plain
+
+
+def issue_guardian_invite_token(
+    session: Session,
+    student_id: UUID,
+    *,
+    ttl_seconds: int = 7 * 86400,
+    now: datetime | None = None,
+) -> str:
+    """
+    Issue the one-time invite a student's guardian redeems via
+    POST /api/auth/guardian/confirm.
+
+    Stored hashed under `kind = 'guardian_invite'` through the existing
+    SECURITY DEFINER `app.insert_auth_token` (the pre-session pattern — the
+    token's `user_id` is the STUDENT, the gate subject, and the parent resolves
+    it by hash at confirm). 7 days by default. Deliberately NOT the
+    `issue_challenge_token` path, which is kind-restricted to the two 2FA
+    challenge kinds by design.
+    """
+    now = now or datetime.now(UTC)
+    plain = generate_opaque_token()
+    _insert_token(
+        session,
+        student_id,
+        TokenKind.guardian_invite,
+        hash_token(plain),
+        now + timedelta(seconds=ttl_seconds),
+    )
+    return plain

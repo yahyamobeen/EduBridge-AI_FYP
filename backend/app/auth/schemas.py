@@ -170,6 +170,40 @@ class GuardianOut(BaseModel):
     status: Literal["pending", "verified", "revoked"] | None = None
 
 
+# ---------------------------------------------------------------------------
+# Guardian gate (RBAC-002). All shapes mirror frontend/lib/api/types.ts
+# exactly; the parent email is masked before it leaves the API.
+# ---------------------------------------------------------------------------
+
+
+class GuardianInviteRequest(BaseModel):
+    parent_email: EmailStr
+
+
+class GuardianInviteResponse(BaseModel):
+    invite_sent: bool
+    parent_email: str
+    status: Literal["pending"]
+
+
+class GuardianConfirmRequest(BaseModel):
+    # A parent with two children must say WHICH link is being confirmed, so the
+    # token from the email travels in the body (a token is always a body field).
+    invite_token: str = Field(min_length=1)
+
+
+class GuardianConfirmResponse(BaseModel):
+    status: Literal["verified"]
+    student_name: str
+
+
+class GuardianStatusResponse(BaseModel):
+    required: bool
+    status: Literal["pending", "verified", "revoked"] | None = None
+    parent_email: str | None = None
+    invited_at: str | None = None
+
+
 class MeResponse(BaseModel):
     user_id: str
     email: str

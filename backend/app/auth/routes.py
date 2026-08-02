@@ -3,20 +3,49 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import AuthContext, authenticated, read_refresh_token_cookie
+from app.auth.dependencies import (
+    AuthContext,
+    authenticated,
+    read_refresh_token_cookie,
+    require_role,
+)
 from app.auth.schemas import (
     AccessTokenResponse,
     EnumsResponse,
+    GuardianConfirmRequest,
+    GuardianConfirmResponse,
+    GuardianInviteRequest,
+    GuardianInviteResponse,
+    GuardianStatusResponse,
     LoginRequest,
     LoginResponse,
     MeResponse,
     RegisterRequest,
     RegisterResponse,
 )
-from app.auth.service import enums, login, logout, me, refresh, register
+from app.auth.service import (
+    enums,
+    guardian_confirm,
+    guardian_invite,
+    guardian_status,
+    login,
+    logout,
+    me,
+    refresh,
+    register,
+)
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.ratelimit import LOGIN_LIMIT, REFRESH_LIMIT, REGISTER_LIMIT, enforce
+from app.core.ratelimit import (
+    GUARDIAN_CONFIRM_LIMIT,
+    GUARDIAN_INVITE_LIMIT,
+    GUARDIAN_STATUS_LIMIT,
+    LOGIN_LIMIT,
+    REFRESH_LIMIT,
+    REGISTER_LIMIT,
+    enforce,
+)
+from app.models.enums import UserRole
 
 router = APIRouter(tags=["auth"])
 
@@ -98,3 +127,39 @@ def enums_endpoint(db: Session = Depends(get_db)) -> EnumsResponse:
     # tables a SELECT policy. Before that they were deny-all, which is why this
     # endpoint needed a privileged connection.
     return EnumsResponse(**enums(db))
+
+
+# ---------------------------------------------------------------------------
+# Guardian gate (RBAC-002). Role-gated (NOT guardian-gated — a gated student
+# must be able to reach these). invite/status are student-only; confirm is
+# parent-only, so a student can never confirm their own gate through the API.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/auth/guardian/invite", response_model=GuardianInviteResponse)
+def guardian_invite_endpoint(
+    request: Request,
+    payload: GuardianInviteRequest,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> GuardianInviteResponse:
+    enforce(request, bucket="guardian_invite", limit=GUARDIAN_INVITE_LIMIT)
+    return GuardianInviteResponse(**guardian_invite(ctx.session, ctx.user_id, payload))
+
+
+@router.get("/auth/guardian/status", response_model=GuardianStatusResponse)
+def guardian_status_endpoint(
+    request: Request,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> GuardianStatusResponse:
+    enforce(request, bucket="guardian_status", limit=GUARDIAN_STATUS_LIMIT)
+    return GuardianStatusResponse(**guardian_status(ctx.session, ctx.user_id))
+
+
+@router.post("/auth/guardian/confirm", response_model=GuardianConfirmResponse)
+def guardian_confirm_endpoint(
+    request: Request,
+    payload: GuardianConfirmRequest,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.parent.value))],
+) -> GuardianConfirmResponse:
+    enforce(request, bucket="guardian_confirm", limit=GUARDIAN_CONFIRM_LIMIT)
+    return GuardianConfirmResponse(**guardian_confirm(ctx.session, ctx.user_id, payload))
