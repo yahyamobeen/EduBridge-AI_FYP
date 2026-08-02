@@ -1,0 +1,135 @@
+# EduBridge AI backend — RUNTIME + DEV dependencies, fully pinned.
+#
+# GENERATED. Do not edit by hand:
+#
+#     uv lock                 # after changing pyproject.toml
+#     uv export --format requirements-txt --no-hashes --no-emit-project --extra dev -o requirements-dev.txt
+#
+# pyproject.toml declares the direct dependencies and uv.lock resolves them;
+# this file is an export for pip users and anything that cannot run uv. Editing
+# it directly makes it disagree with the lock, which is the failure mode a
+# lockfile exists to prevent.
+#
+# Install:  pip install -r requirements.txt
+# Dev:      pip install -r requirements-dev.txt   (includes pytest and ruff)
+
+annotated-doc==0.0.5
+    # via fastapi
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.14.2
+    # via
+    #   httpx
+    #   starlette
+    #   watchfiles
+argon2-cffi==25.1.0
+    # via edubridge-backend
+argon2-cffi-bindings==25.1.0
+    # via argon2-cffi
+certifi==2026.7.22
+    # via
+    #   httpcore
+    #   httpx
+cffi==2.1.0
+    # via argon2-cffi-bindings
+click==8.4.2
+    # via uvicorn
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via
+    #   click
+    #   pytest
+coverage==7.15.2
+    # via pytest-cov
+dnspython==2.8.0
+    # via email-validator
+email-validator==2.3.0
+    # via edubridge-backend
+fastapi==0.141.1
+    # via edubridge-backend
+greenlet==3.5.4 ; platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64'
+    # via sqlalchemy
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
+httptools==0.8.0
+    # via uvicorn
+httpx==0.28.1
+    # via edubridge-backend
+idna==3.18
+    # via
+    #   anyio
+    #   email-validator
+    #   httpx
+iniconfig==2.3.0
+    # via pytest
+packaging==26.2
+    # via pytest
+pluggy==1.6.0
+    # via
+    #   pytest
+    #   pytest-cov
+psycopg==3.3.4
+    # via edubridge-backend
+psycopg-binary==3.3.4 ; implementation_name != 'pypy'
+    # via psycopg
+pycparser==3.0 ; implementation_name != 'PyPy'
+    # via cffi
+pydantic==2.13.4
+    # via
+    #   edubridge-backend
+    #   fastapi
+    #   pydantic-settings
+pydantic-core==2.46.4
+    # via pydantic
+pydantic-settings==2.14.2
+    # via edubridge-backend
+pygments==2.20.0
+    # via pytest
+pyjwt==2.13.0
+    # via edubridge-backend
+pytest==9.1.1
+    # via
+    #   edubridge-backend
+    #   pytest-cov
+pytest-cov==7.1.0
+    # via edubridge-backend
+python-dotenv==1.2.2
+    # via
+    #   pydantic-settings
+    #   uvicorn
+pyyaml==6.0.3
+    # via uvicorn
+ruff==0.16.1
+    # via edubridge-backend
+sqlalchemy==2.0.51
+    # via edubridge-backend
+starlette==1.3.1
+    # via fastapi
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   fastapi
+    #   psycopg
+    #   pydantic
+    #   pydantic-core
+    #   sqlalchemy
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+tzdata==2026.3 ; sys_platform == 'win32'
+    # via psycopg
+uvicorn==0.52.1
+    # via edubridge-backend
+uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
+    # via uvicorn
+watchfiles==1.2.0
+    # via uvicorn
+websockets==17.0.1
+    # via uvicorn
