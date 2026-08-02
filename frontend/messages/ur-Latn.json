@@ -1,0 +1,32 @@
+{
+  "app": {
+    "name": "EduBridge AI",
+    "tagline": "Class 9-12 ke liye nisab par mabni AI tuition"
+  },
+  "a11y": {
+    "skipToContent": "Content par jayein"
+  },
+  "nav": {
+    "home": "Home",
+    "signIn": "Sign in karein",
+    "signUp": "Account banayein"
+  },
+  "languageSwitcher": {
+    "label": "Zaban"
+  },
+  "footer": {
+    "privacy": "Privacy policy",
+    "terms": "Sharait o zawabit",
+    "support": "Madad",
+    "rights": "Tamam huqooq mehfooz hain."
+  },
+  "scaffold": {
+    "eyebrow": "Scaffold",
+    "body": "Design tokens, linting, test harness aur zabanon ki sahulat tayyar hai. Asal safhaat agle marahil mein aayenge.",
+    "paletteLabel": "Role palette check",
+    "student": "Talib ilm",
+    "teacher": "Ustad",
+    "parent": "Waldain",
+    "directionNote": "Is zaban ke text ki simt: {dir}"
+  }
+}

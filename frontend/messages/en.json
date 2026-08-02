@@ -1,0 +1,32 @@
+{
+  "app": {
+    "name": "EduBridge AI",
+    "tagline": "Curriculum-grounded AI tutoring for Classes 9-12"
+  },
+  "a11y": {
+    "skipToContent": "Skip to content"
+  },
+  "nav": {
+    "home": "Home",
+    "signIn": "Sign in",
+    "signUp": "Create account"
+  },
+  "languageSwitcher": {
+    "label": "Language"
+  },
+  "footer": {
+    "privacy": "Privacy policy",
+    "terms": "Terms of service",
+    "support": "Support",
+    "rights": "All rights reserved."
+  },
+  "scaffold": {
+    "eyebrow": "Scaffold",
+    "body": "Design tokens, linting, the test harness and internationalisation are wired. Routing and the real pages land in the next phases.",
+    "paletteLabel": "Role palette check",
+    "student": "Student",
+    "teacher": "Teacher",
+    "parent": "Parent",
+    "directionNote": "Text direction for this language: {dir}"
+  }
+}

@@ -393,11 +393,26 @@ TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing
   **(c)** the student surface must expose **My Classes**, because `prd.md` §4.2 guarantees a student can see
   who can view them and leave any space at any time — a right with no UI is not a right.
 
-- **i18n and RTL.** `next-intl` with a `[locale]` route segment. **`ur` is the only RTL locale; `roman_ur` is
-  Latin script and stays LTR.** Mirroring uses **logical** spacing and alignment properties throughout, so a
-  new screen is correct by construction rather than by remembering; directional icons flip, non-directional
-  ones do not; one-time codes, backup codes and countdown numerals are pinned LTR inside RTL pages
-  (`prd.md` I18N-4).
+- **i18n and RTL.** `next-intl` with a `[locale]` route segment, all locales prerendered. **`ur` is the only
+  RTL locale; Roman-Urdu is Latin script and stays LTR.** Mirroring uses **logical** spacing and alignment
+  properties throughout, so a new screen is correct by construction rather than by remembering; directional
+  icons flip, non-directional ones do not; one-time codes, backup codes and countdown numerals are pinned
+  LTR inside RTL pages (`prd.md` I18N-4).
+
+- **Web locale ≠ stored language value (`prd.md` I18N-5).** Routing uses `en` · `ur` · **`ur-Latn`**, while
+  the API and `language_code` enum use `en` · `ur` · **`roman_ur`**. `roman_ur` is not a valid BCP-47 tag —
+  `Intl` throws `RangeError` on it and `<html lang="roman_ur">` is meaningless to a screen reader — so it
+  cannot be used as a web locale. Conversion lives in one module and is covered both directions by tests.
+  **No backend change is implied:** the API keeps returning `roman_ur` in `languages` and accepting it for
+  `language_pref`.
+
+- **The Urdu face is loaded only for `ur`.** It is registered with preloading disabled and its CSS variable
+  applied conditionally, so an English or Roman-Urdu visitor never downloads a Naskh font they cannot read —
+  a meaningful saving on the metered connections in `prd.md` A11Y-2.
+
+- **Language switching is a set of real links, not a client-side control.** Each locale is a genuine URL, so
+  switching works without JavaScript and costs one tap; the current path is preserved, so a user switching
+  language mid-journey is not thrown back to the home page.
 
 - **Mock layer.** The frontend is built before the backend exists, against handlers matching these contracts
   field-for-field, switched by a single env var. Mock response types are derived from the same definitions
@@ -1190,6 +1205,13 @@ role dashboards.
 | 15 | Access token **in memory**, refresh in httpOnly cookie | v0.3.1 said "tokens in httpOnly cookies", which the client cannot read | §3.10, §6.11 |
 | 16 | Three tables + 5 RLS policies; admin gets **read-only** on `subscription` | An admin must not grant paid access outside the payment path | §5.3a, §6.8 |
 | 17 | Seven error codes added; RTL rule and frontend test matrix specified | Codes existed in the contract but were never catalogued | §7.3, §9.5, PRD I18N-4 |
+
+**Found during Phase 2 implementation — `roman_ur` is not a usable web locale.** The contract's language
+value was carried straight into routing, and it broke: `Intl` rejects the tag with `RangeError`, and
+`<html lang="roman_ur">` conveys nothing to assistive technology. The web layer now uses **`ur-Latn`** and
+maps at the API boundary (§3.10, `prd.md` I18N-5). The database enum and every API payload are unchanged, so
+no other track is affected. A test asserts every routing locale is a valid BCP-47 tag, which is what would
+have caught this on day one.
 
 **Amended during Phase 1 implementation:** browser E2E was moved out of the frontend and into the backend
 track. The frontend keeps unit and component levels and adds a **Flow** level — multi-screen component tests
