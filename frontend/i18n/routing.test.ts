@@ -10,6 +10,19 @@ import {
   type Locale,
 } from './routing'
 
+describe('default locale', () => {
+  it('is English', () => {
+    expect(routing.defaultLocale).toBe('en')
+  })
+
+  it('does not negotiate the locale from the browser', () => {
+    // With detection on, a browser set to Urdu is redirected to /ur before the
+    // visitor chooses anything. English is the default for everyone; language
+    // is picked explicitly through the switcher.
+    expect(routing.localeDetection).toBe(false)
+  })
+})
+
 describe('locale tags', () => {
   /**
    * This is the regression guard for a real defect: the contract's `roman_ur`

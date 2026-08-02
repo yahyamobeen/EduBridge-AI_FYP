@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "EduBridge AI",
-    "tagline": "Class 9-12 ke liye nisab par mabni AI tuition"
+    "tagline": "Pakistan ke mustaqbil ke liye Mehfooz Agentic Learning Platform."
   },
   "a11y": {
     "skipToContent": "Content par jayein"
@@ -9,24 +9,170 @@
   "nav": {
     "home": "Home",
     "signIn": "Sign in karein",
-    "signUp": "Account banayein"
+    "signUp": "Account banayein",
+    "curriculum": "Nisab",
+    "solutions": "Hal",
+    "tutor": "Tutor",
+    "progress": "Paish raft"
   },
   "languageSwitcher": {
     "label": "Zaban"
   },
   "footer": {
-    "privacy": "Privacy policy",
-    "terms": "Sharait o zawabit",
-    "support": "Madad",
-    "rights": "Tamam huqooq mehfooz hain."
+    "integrity": "Ilmi Diyanat",
+    "privacy": "Privacy Policy",
+    "security": "Hifazati Miyar",
+    "institutional": "Idaron ki Rasai",
+    "copyright": "© {year} EduBridge AI. PCTB aur STBB nisab ke liye."
   },
-  "scaffold": {
-    "eyebrow": "Scaffold",
-    "body": "Design tokens, linting, test harness aur zabanon ki sahulat tayyar hai. Asal safhaat agle marahil mein aayenge.",
-    "paletteLabel": "Role palette check",
-    "student": "Talib ilm",
-    "teacher": "Ustad",
-    "parent": "Waldain",
-    "directionNote": "Is zaban ke text ki simt: {dir}"
+  "notFound": {
+    "title": "Safha nahi mila",
+    "body": "Ye safha mojood nahi hai, ya ise muntaqil kar diya gaya hai.",
+    "cta": "Markazi safhe par jayein"
+  },
+  "comingSoon": {
+    "eyebrow": "Zer-e-tameer",
+    "title": "{feature} jald aa raha hai",
+    "body": "EduBridge AI ka ye hissa abhi ban raha hai. Account bana lijiye, tayyar hote hi aap ke liye dastyab hoga.",
+    "cta": "Account banayein",
+    "back": "Markazi safhe par jayein",
+    "curriculum": "Nisab",
+    "tutor": "AI Tutor",
+    "progress": "Paish raft",
+    "institutions": "Idaron ki rasai"
+  },
+  "signup": {
+    "role": {
+      "title": "EduBridge AI mein khush aamdeed",
+      "subtitle": "Aage barhne ke liye apna kirdar muntakhab karein. Hum aap ke taleemi safar ke mutabiq tajurba tarteeb denge.",
+      "studentTag": "Talib ilm",
+      "studentLead": "AI ke sath seekhein",
+      "studentBody": "Tasdeeq shuda nisab, bamaani AI tuition aur zati mutalie ke mansoobe tak rasai hasil karein.",
+      "studentCta": "Dashboard par jayein",
+      "teacherTag": "Ustad",
+      "teacherLead": "Classein sanbhalein",
+      "teacherBody": "Talaba ki paish raft dekhein, board se tasdeeq shuda mawad dein, aur har talib ilm ki madad karein.",
+      "teacherCta": "Portal par jayein",
+      "parentTag": "Walid / Sarparast",
+      "parentLead": "Paish raft par nazar",
+      "parentBody": "Digital tahaffuz yaqeeni banayein, tasdeeq shuda paish raft reports dekhein, aur taleemi kamyabiyon mein shareek hon.",
+      "parentCta": "Nigrani tak rasai"
+    },
+    "common": {
+      "fullName": "Poora naam",
+      "firstName": "Pehla naam",
+      "lastName": "Aakhri naam",
+      "email": "Email address",
+      "password": "Password",
+      "passwordHint": "Kam az kam aath huroof hone chahiye.",
+      "showPassword": "Password dikhayein",
+      "hidePassword": "Password chupayein",
+      "back": "Wapas",
+      "continue": "Aage barhein",
+      "submit": "Account banayein",
+      "submitting": "Account banaya ja raha hai…",
+      "haveAccount": "Pehle se account mojood hai?",
+      "signIn": "Sign in karein",
+      "stepOf": "Marhala {current} az {total}",
+      "required": "Ye khana zaroori hai.",
+      "invalidEmail": "Durust email address darj karein.",
+      "passwordTooShort": "Kam az kam aath huroof istemal karein."
+    },
+    "student": {
+      "title": "Talib ilm ka account banayein",
+      "subtitle": "Nisab tak rasai ke liye apni tafseelat darj karein.",
+      "step1": "Bunyadi maloomat",
+      "step2": "Taleemi profile",
+      "step3": "Tasdeeq",
+      "academicIntro": "Apne nisab ki tarjeehat muntakhab karein.",
+      "board": "Taleemi board",
+      "boardPCTB": "Punjab Board",
+      "boardSTBB": "Sindh Board",
+      "classLevel": "Class",
+      "classOption": "Class {level}",
+      "group": "Ikhtiyari group",
+      "groupHelp": "Ikhtiyarat aap ki muntakhab class par munhasir hain.",
+      "groupPickClassFirst": "Pehle class muntakhab karein.",
+      "medium": "Zariya-e-taleem",
+      "mediumEn": "English",
+      "mediumUr": "Urdu (اردو)",
+      "language": "Interface ki zaban",
+      "reviewTitle": "Janch aur tasdeeq",
+      "reviewIntro": "Account banane se pehle tasdeeq kar lein ke ye durust hain.",
+      "consentTitle": "Waldain ki ijazat darkar",
+      "consentBody": "Class 9 aur 10 ke talaba ke liye AI Tutor istemal karne se pehle sarparast ki tasdeeq lazmi hai."
+    },
+    "teacher": {
+      "title": "Asatza ki registration",
+      "subtitle": "Apne talaba ki nigrani aur madad ke liye platform mein shamil hon."
+    },
+    "parent": {
+      "title": "Waldain ka account banayein",
+      "subtitle": "Agar aap ke bache ne dawat bheji hai to yahan account banayein, phir us dawat ka link khol kar tasdeeq karein."
+    },
+    "errors": {
+      "emailTaken": "Is email par pehle se account mojood hai.",
+      "invalidClassGroup": "Ye group aap ki muntakhab class ke liye dastyab nahi.",
+      "rateLimited": "Bohat zyada koshishein. Barah-e-karam thori dair baad dobara koshish karein.",
+      "generic": "Kuch ghalat ho gaya. Dobara koshish karein.",
+      "enumsTitle": "Class aur mazameen ke ikhtiyarat load nahi ho sake",
+      "enumsBody": "Durust ikhtiyarat dikhane ke liye form ko in ki zaroorat hai.",
+      "enumsRetry": "Dobara koshish karein"
+    }
+  },
+  "landing": {
+    "hero": {
+      "badgeCurriculum": "PCTB & STBB Nisab",
+      "badgeSecurity": "Mehfooz MCP Layer",
+      "titleLead": "Mehfooz, Agentic, Kaseer-ul-lisani Tuition baraye",
+      "titleAccent": "Class 9–12",
+      "subtitle": "Pakistani nisab par mabni aik aala karkardagi wala taleemi nizam, jo talaba ko unki apni zaban mein AI ki madad deta hai.",
+      "ctaPrimary": "Abhi Seekhna Shuru Karein",
+      "ctaSecondary": "Idaron ke liye Demo",
+      "seeSolutions": "Mazeed dekhein"
+    },
+    "solutions": {
+      "title": "Har Talib Ilm ko Baikhtiyar Banana",
+      "subtitle": "Jadeed classroom ki zarooriyat ke liye tayyar karda moassar zaraye.",
+      "students": {
+        "tag": "Talaba",
+        "title": "24/7 AI Tutor aur Hal",
+        "body": "Science aur math aise tutor ke sath samjhein jo aap ki raftar ke mutabiq dhalta hai, aur apni pasandeeda zaban mein gehri wazahat hasil karein.",
+        "featureLanguages": "English, Urdu aur Roman-Urdu ki sahulat",
+        "featureMethod": "Sawal jawab ke zariye seekhne ka tareeqa",
+        "previewLabel": "Tutor Interface ka Namoona",
+        "previewAsk": "math 9 chp 4 ex 4.5 q 3",
+        "previewAnswer": "Ye raha wo sawal, aik aik qadam kar ke hal kiya gaya."
+      },
+      "teachers": {
+        "tag": "Asatza",
+        "title": "Classroom ki Baseerat",
+        "body": "Nisab ki kamiyon ko fori tor par pehchanein aur talaba ki paish raft tafseeli dashboards se dekhein.",
+        "sampleTopic": "Mozoo: Thermodynamics",
+        "sampleShare": "72% dohrai darkar"
+      },
+      "parents": {
+        "tag": "Waldain",
+        "title": "Be-misal Shaffafiyat",
+        "body": "Apne bache ke taleemi safar se mehfooz aur ghair mudakhilati paish raft reports ke zariye jure rahein.",
+        "cta": "Waldain Portal dekhein",
+        "cardMasteryTitle": "Mazmoon mein Maharat",
+        "cardMasteryBody": "Tamam boards mein karkardagi ki fori nigrani.",
+        "cardPlannerTitle": "Mutalie ka Mansooba",
+        "cardPlannerBody": "Imtihan ke liye AI se tayyar karda dohrai schedule."
+      }
+    },
+    "capabilities": {
+      "title": "Bunyadi Salahiyatein",
+      "subtitle": "Ilmi imtiyaz aur takneeki hifazat ki bunyad par.",
+      "curriculumTitle": "Nisab ke Ain Mutabiq",
+      "curriculumBody": "Board imtihan mein kamyabi ke liye PCTB aur STBB ke mutabiq.",
+      "bilingualTitle": "Do-lisani Bunyad",
+      "bilingualBody": "English aur Urdu mein mukammal rawani, riyazi ki alamat samet.",
+      "groundedTitle": "Mehfooz MCP Layer",
+      "groundedBody": "Mehfooz AI nizam jawabat ko tasdeeq shuda nisabi mawad par qaim rakhta hai.",
+      "adaptiveTitle": "Mutabiqat Pazeer Andaz",
+      "adaptiveBody": "Fehm ki satah ke mutabiq dushwari ki khudkar tabdeeli."
+    }
   }
 }

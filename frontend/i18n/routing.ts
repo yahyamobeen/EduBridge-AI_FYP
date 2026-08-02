@@ -16,6 +16,24 @@ import { defineRouting } from 'next-intl/routing'
 export const routing = defineRouting({
   locales: ['en', 'ur', 'ur-Latn'],
   defaultLocale: 'en',
+
+  /**
+   * English is the default for everyone, always.
+   *
+   * Left on (the library default), next-intl negotiates from the visitor's
+   * `Accept-Language` header and a `NEXT_LOCALE` cookie -- so a browser
+   * configured for Urdu, which is entirely normal in this audience, would be
+   * redirected to /ur before the visitor had chosen anything. Turning detection
+   * off makes `/` resolve to `/en` for every visitor, and language becomes an
+   * explicit choice through the switcher.
+   *
+   * Trade-off, deliberately accepted: this also disables the cookie, so a
+   * returning visitor who previously chose Urdu lands on `/` in English again.
+   * They stay in Urdu while navigating, because every link carries the locale
+   * prefix. Honouring the cookie while still ignoring `Accept-Language` would
+   * need custom middleware; next-intl has one flag for both.
+   */
+  localeDetection: false,
 })
 
 export type Locale = (typeof routing.locales)[number]

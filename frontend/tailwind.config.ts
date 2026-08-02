@@ -100,6 +100,23 @@ const config: Config = {
       },
 
       fontSize: {
+        /**
+         * Display sizes are an EXTENSION, not from the DESIGN.md frontmatter,
+         * whose scale tops out at 32px. The landing prototype sets section
+         * headings at 48px and the hero larger still; a marketing page needs
+         * display type the product type scale does not cover. Extending is the
+         * right call here rather than downgrading the design.
+         */
+        // Measured from the prototype in a browser: h1 and both h2 render at
+        // 48px / 56px line-height / -0.96px tracking (= -0.02em).
+        'display-md': [
+          '48px',
+          { lineHeight: '56px', fontWeight: '700', letterSpacing: '-0.02em' },
+        ],
+        'display-sm': [
+          '36px',
+          { lineHeight: '42px', fontWeight: '700', letterSpacing: '-0.02em' },
+        ],
         'headline-lg': ['32px', { lineHeight: '40px', fontWeight: '700' }],
         'headline-lg-mobile': ['24px', { lineHeight: '32px', fontWeight: '700' }],
         'headline-md': ['24px', { lineHeight: '32px', fontWeight: '600' }],
@@ -133,6 +150,43 @@ const config: Config = {
 
       maxWidth: {
         'container-max': '1280px',
+      },
+
+      // Motion from the prototype. Every one of these is disabled under
+      // prefers-reduced-motion in globals.css.
+      keyframes: {
+        'pulse-ring': {
+          '0%': { boxShadow: '0 0 0 0 rgba(26, 86, 219, 0.4)' },
+          '70%': { boxShadow: '0 0 0 10px rgba(26, 86, 219, 0)' },
+          '100%': { boxShadow: '0 0 0 0 rgba(26, 86, 219, 0)' },
+        },
+        'bob-down': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(6px)' },
+        },
+        drift: {
+          '0%, 100%': { transform: 'translate3d(0, 0, 0) scale(1)' },
+          '50%': { transform: 'translate3d(0, -14px, 0) scale(1.04)' },
+        },
+        // Role cards drop in from above, staggered (choose-your-path prototype).
+        'roll-down': {
+          from: { opacity: '0', transform: 'translateY(-50px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'pulse-ring': 'pulse-ring 2s infinite',
+        'bob-down': 'bob-down 2.2s ease-in-out infinite',
+        'drift-slow': 'drift 18s ease-in-out infinite',
+        'drift-slower': 'drift 26s ease-in-out infinite',
+        'roll-down': 'roll-down 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards',
+      },
+
+      transitionTimingFunction: {
+        // The prototype's easing curves.
+        reveal: 'cubic-bezier(0.2, 1, 0.3, 1)',
+        lift: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        springy: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)',
       },
     },
   },

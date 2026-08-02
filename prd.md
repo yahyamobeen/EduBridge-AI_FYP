@@ -805,6 +805,7 @@ Verbatim from the proposal NFR table (Table 3.2), each with an added **verificat
 ## 19. Internationalization & Accessibility
 
 - **I18N-1:** UI and content in **English, Urdu, and Roman-Urdu**; language switchable.
+- **I18N-1a:** **English is the default for every visitor.** The interface language is **never negotiated** from the browser's language settings or a stored preference — a device configured for Urdu, which is unremarkable in this audience, must not be pushed into Urdu before the user has chosen. Language is an explicit choice, made through the switcher, and it persists through navigation because every route carries its locale.
 - **I18N-2:** **RTL** layout for Urdu; correct rendering of Urdu script and mixed EN/UR content.
 - **I18N-3:** accept both **Urdu script and Roman-Urdu** input without a separate transliteration step (model handles both).
 - **I18N-4 (implementation rule):** **Urdu (`ur`) is the only right-to-left locale.** **Roman-Urdu is Latin script and stays left-to-right** — mirroring it would be a defect, not a feature.

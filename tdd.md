@@ -414,6 +414,15 @@ TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing
   switching works without JavaScript and costs one tap; the current path is preserved, so a user switching
   language mid-journey is not thrown back to the home page.
 
+- **Locale detection is disabled; English is the default (`prd.md` I18N-1a).** Left at the library default,
+  the locale is negotiated from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser set to Urdu is
+  redirected to `/ur` before the visitor chooses anything. Verified by request: with detection on, a request
+  carrying `Accept-Language: ur` was sent to `/ur`; with it off, every variant resolves to `/en` and explicit
+  `/ur` still serves normally. The trade-off accepted is that the cookie is disabled too, so a returning
+  visitor lands on `/` in English; they remain in their chosen language while navigating, because every link
+  carries the locale prefix. Honouring the cookie while still ignoring `Accept-Language` would require
+  custom middleware — next-intl exposes one flag for both.
+
 - **Mock layer.** The frontend is built before the backend exists, against handlers matching these contracts
   field-for-field, switched by a single env var. Mock response types are derived from the same definitions
   the live client uses, so drift is a type error rather than a runtime surprise.
@@ -421,6 +430,35 @@ TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing
 - **Budget (`prd.md` A11Y-2).** Fonts self-hosted and the Urdu face loaded only for `ur`; Tailwind compiled
   at build time; reference data cached rather than refetched per form step; target LCP under 3 s on a
   mid-tier Android over Slow 3G.
+
+- **No icon font.** The mockups pulled Material Symbols from Google at runtime — a third-party request in
+  the critical path, for decoration. Icons are inline SVG instead, marked `aria-hidden` since each sits
+  beside a real text label.
+
+- **Prototypes are built at full fidelity, motion included.** The supplied prototype is the visual
+  specification, not a content reference: grid spans, column ordering, aspect ratios, sticky behaviour,
+  illustrative preview panels, and the animation — scroll reveal, stagger, parallax, hover lift, pulse, and
+  the animated hero backdrop. Where a prototype exceeds the design system, the token set is **extended**
+  rather than the design downgraded: the landing needs display type at 48–56px, which the `DESIGN.md`
+  scale (max 32px) does not cover, so `display-sm/md/lg` were added and labelled as an extension.
+
+- **Motion degrades, it does not simplify.** Every animation is disabled under `prefers-reduced-motion`,
+  and scroll-reveal in particular resolves to fully visible rather than being left mid-transition. The
+  reveal CSS is scoped behind a `data-reveal-ready` attribute set by the controller on mount, so a visitor
+  whose JavaScript fails sees content rather than a permanently transparent page. The WebGL hero backdrop
+  falls back to a CSS gradient when WebGL is unavailable or the shaders fail to compile, caps its backing
+  store on high-DPI screens, and stops rendering while the tab is hidden — a backgrounded tab must not burn
+  a phone battery on an invisible animation (`prd.md` A11Y-1, A11Y-2).
+
+- **Marketing copy is bound by the RBAC matrix too.** The landing page describes what a parent gets as
+  progress visibility, and states that a child's tutoring conversations stay private. The mockups' parent
+  dashboard offered a session-replay control that `prd.md` §4.2 forbids; the marketing must not advertise
+  the capability either, so a component test asserts the parent copy says so.
+
+- **Removed: the "Institution Demo" call to action.** `prd.md` §15 CL-6 has institutions attach through
+  classroom join codes, with no separate institutional route in v1, so the button had no destination. The
+  secondary call to action is sign-in until that decision changes. **[PROPOSED — confirm]** whether an
+  institutional enquiry route is wanted at all.
 
 ### 3.11 Data Flows
 

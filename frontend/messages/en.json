@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "EduBridge AI",
-    "tagline": "Curriculum-grounded AI tutoring for Classes 9-12"
+    "tagline": "The Secure Agentic Learning Platform for Pakistan's Future."
   },
   "a11y": {
     "skipToContent": "Skip to content"
@@ -9,24 +9,170 @@
   "nav": {
     "home": "Home",
     "signIn": "Sign in",
-    "signUp": "Create account"
+    "signUp": "Create account",
+    "curriculum": "Curriculum",
+    "solutions": "Solutions",
+    "tutor": "Tutor",
+    "progress": "Progress"
   },
   "languageSwitcher": {
     "label": "Language"
   },
   "footer": {
-    "privacy": "Privacy policy",
-    "terms": "Terms of service",
-    "support": "Support",
-    "rights": "All rights reserved."
+    "integrity": "Academic Integrity",
+    "privacy": "Privacy Policy",
+    "security": "Security Standards",
+    "institutional": "Institutional Access",
+    "copyright": "© {year} EduBridge AI. Designed for PCTB & STBB Syllabi Excellence."
   },
-  "scaffold": {
-    "eyebrow": "Scaffold",
-    "body": "Design tokens, linting, the test harness and internationalisation are wired. Routing and the real pages land in the next phases.",
-    "paletteLabel": "Role palette check",
-    "student": "Student",
-    "teacher": "Teacher",
-    "parent": "Parent",
-    "directionNote": "Text direction for this language: {dir}"
+  "notFound": {
+    "title": "Page not found",
+    "body": "That page does not exist, or it may have moved.",
+    "cta": "Go to the home page"
+  },
+  "comingSoon": {
+    "eyebrow": "In development",
+    "title": "{feature} is on the way",
+    "body": "This part of EduBridge AI is being built. Create an account and it will be ready for you when it lands.",
+    "cta": "Create an account",
+    "back": "Back to the home page",
+    "curriculum": "Curriculum",
+    "tutor": "AI Tutor",
+    "progress": "Progress",
+    "institutions": "Institution access"
+  },
+  "signup": {
+    "role": {
+      "title": "Welcome to EduBridge AI",
+      "subtitle": "Please select your role to continue. We'll tailor your experience to provide the best tools for your educational journey.",
+      "studentTag": "Student",
+      "studentLead": "Learn with AI",
+      "studentBody": "Access verified curriculum, interactive AI tutoring, and personalized study plans to boost your academic progress.",
+      "studentCta": "Enter Dashboard",
+      "teacherTag": "Teacher",
+      "teacherLead": "Manage Classes",
+      "teacherBody": "Monitor student progress, assign board-verified content, and utilize AI insights to support every learner.",
+      "teacherCta": "Enter Portal",
+      "parentTag": "Parent / Guardian",
+      "parentLead": "Oversee Progress",
+      "parentBody": "Ensure digital safety, follow verified progress reports, and celebrate academic milestones with full transparency.",
+      "parentCta": "Access Oversight"
+    },
+    "common": {
+      "fullName": "Full Name",
+      "firstName": "First Name",
+      "lastName": "Last Name",
+      "email": "Email Address",
+      "password": "Password",
+      "passwordHint": "Must be at least 8 characters.",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
+      "back": "Back",
+      "continue": "Continue",
+      "submit": "Create Account",
+      "submitting": "Creating your account…",
+      "haveAccount": "Already have an account?",
+      "signIn": "Sign In",
+      "stepOf": "Step {current} of {total}",
+      "required": "This field is required.",
+      "invalidEmail": "Enter a valid email address.",
+      "passwordTooShort": "Use at least 8 characters."
+    },
+    "student": {
+      "title": "Create Student Account",
+      "subtitle": "Enter your details to access the curriculum.",
+      "step1": "Basic Info",
+      "step2": "Academic Profile",
+      "step3": "Verification",
+      "academicIntro": "Select your curriculum preferences.",
+      "board": "Education Board",
+      "boardPCTB": "Punjab Board",
+      "boardSTBB": "Sindh Board",
+      "classLevel": "Class Level",
+      "classOption": "Class {level}",
+      "group": "Elective Group",
+      "groupHelp": "Options depend on the class you selected.",
+      "groupPickClassFirst": "Choose a class first.",
+      "medium": "Medium of Instruction",
+      "mediumEn": "English",
+      "mediumUr": "Urdu (اردو)",
+      "language": "Interface Language",
+      "reviewTitle": "Review & Submit",
+      "reviewIntro": "Check these are correct before creating your account.",
+      "consentTitle": "Parental Consent Required",
+      "consentBody": "For students in Classes 9 & 10, guardian verification is mandatory before accessing AI Tutor features."
+    },
+    "teacher": {
+      "title": "Educator Registration",
+      "subtitle": "Join the platform to monitor and support your students."
+    },
+    "parent": {
+      "title": "Create Parent Account",
+      "subtitle": "If your child invited you, sign up here and then open the link in their invitation to confirm."
+    },
+    "errors": {
+      "emailTaken": "That email already has an account.",
+      "invalidClassGroup": "That group is not offered for the class you selected.",
+      "rateLimited": "Too many attempts. Please wait a moment and try again.",
+      "generic": "Something went wrong. Please try again.",
+      "enumsTitle": "Could not load the class and subject options",
+      "enumsBody": "The form needs these to offer the right choices.",
+      "enumsRetry": "Try again"
+    }
+  },
+  "landing": {
+    "hero": {
+      "badgeCurriculum": "PCTB & STBB Syllabi",
+      "badgeSecurity": "Secure MCP Layer",
+      "titleLead": "Secure, Agentic, Multilingual Tutoring for",
+      "titleAccent": "Classes 9–12",
+      "subtitle": "A high-performance learning ecosystem grounded in the Pakistani curriculum, empowering students with AI that speaks their language.",
+      "ctaPrimary": "Start Learning Now",
+      "ctaSecondary": "Institution Demo",
+      "seeSolutions": "Scroll to explore"
+    },
+    "solutions": {
+      "title": "Empowering Every Learner",
+      "subtitle": "Precision tools crafted for the unique needs of the modern classroom.",
+      "students": {
+        "tag": "Students",
+        "title": "24/7 AI Tutor & Solutions",
+        "body": "Master complex science and mathematics with a tutor that adapts to your pace. Get deep conceptual clarity in your preferred language.",
+        "featureLanguages": "English, Urdu & Roman-Urdu Support",
+        "featureMethod": "Socratic Learning Methodology",
+        "previewLabel": "Tutor Interface Preview",
+        "previewAsk": "math 9 chp 4 ex 4.5 q 3",
+        "previewAnswer": "Here is that question, worked through one step at a time."
+      },
+      "teachers": {
+        "tag": "Teachers",
+        "title": "Classroom Insights",
+        "body": "Instantly identify curriculum gaps and monitor student progress through high-fidelity analytics dashboards.",
+        "sampleTopic": "Topic: Thermodynamics",
+        "sampleShare": "72% requires review"
+      },
+      "parents": {
+        "tag": "Parents",
+        "title": "Unprecedented Visibility",
+        "body": "Stay connected with your child's learning journey through non-intrusive, secure progress reports and actionable study insights.",
+        "cta": "Explore Parent Portal",
+        "cardMasteryTitle": "Subject Mastery",
+        "cardMasteryBody": "Real-time performance tracking across all boards.",
+        "cardPlannerTitle": "Study Planner",
+        "cardPlannerBody": "AI-generated revision schedules for exams."
+      }
+    },
+    "capabilities": {
+      "title": "Core Capabilities",
+      "subtitle": "Built on a foundation of academic excellence and technical security.",
+      "curriculumTitle": "Curriculum Native",
+      "curriculumBody": "Mapped exactly to PCTB and STBB frameworks for board exam success.",
+      "bilingualTitle": "Bilingual Core",
+      "bilingualBody": "Native-level fluency in English and Urdu, including mathematical notation.",
+      "groundedTitle": "Secure MCP Layer",
+      "groundedBody": "Sandboxed AI logic keeps answers grounded in verified curriculum content.",
+      "adaptiveTitle": "Adaptive Flow",
+      "adaptiveBody": "Dynamic difficulty adjustment based on real-time comprehension levels."
+    }
   }
 }

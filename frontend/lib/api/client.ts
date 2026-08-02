@@ -8,7 +8,20 @@ import {
 import { ApiError, isRefreshableAuthError, toApiError } from './errors'
 import type { RefreshResponse } from './types'
 
-const USE_MOCKS = process.env.NEXT_PUBLIC_API_MODE === 'mock'
+/**
+ * Mock mode is the DEFAULT outside production.
+ *
+ * The backend does not exist yet, so a developer who has not copied
+ * .env.example to .env.local would otherwise get a real fetch against an empty
+ * base URL — which on the server is a relative path Node cannot parse, so every
+ * page that loads data fails with an unhelpful error. Defaulting to mocks in
+ * development means the app runs on checkout; production still requires the
+ * flag to be set explicitly, so mocks can never be shipped by omission.
+ */
+const API_MODE = process.env.NEXT_PUBLIC_API_MODE
+const USE_MOCKS =
+  API_MODE === 'mock' || (API_MODE === undefined && process.env.NODE_ENV !== 'production')
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
 
 /** Access-token lifetime from the last issue, needed for proactive refresh. */
