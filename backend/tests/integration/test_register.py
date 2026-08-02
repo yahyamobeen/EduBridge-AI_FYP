@@ -1,17 +1,11 @@
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
-
-from app.main import app
-
-client = TestClient(app)
-
 
 def _unique_email() -> str:
     return f"{uuid4().hex[:12]}@test.com"
 
 
-def test_register_student():
+def test_register_student(client):
     email = _unique_email()
     resp = client.post(
         "/api/auth/register",
@@ -35,7 +29,7 @@ def test_register_student():
     assert body["user_id"]
 
 
-def test_register_teacher():
+def test_register_teacher(client):
     email = _unique_email()
     resp = client.post(
         "/api/auth/register",
@@ -51,7 +45,7 @@ def test_register_teacher():
     assert resp.json()["role"] == "teacher"
 
 
-def test_register_parent():
+def test_register_parent(client):
     email = _unique_email()
     resp = client.post(
         "/api/auth/register",
@@ -66,7 +60,7 @@ def test_register_parent():
     assert resp.json()["role"] == "parent"
 
 
-def test_register_duplicate_email_conflict():
+def test_register_duplicate_email_conflict(client):
     email = _unique_email()
     payload = {
         "email": email,
@@ -82,7 +76,7 @@ def test_register_duplicate_email_conflict():
     assert body["error"]["code"] == "EMAIL_ALREADY_REGISTERED"
 
 
-def test_register_bad_group_for_class():
+def test_register_bad_group_for_class(client):
     email = _unique_email()
     resp = client.post(
         "/api/auth/register",
@@ -101,7 +95,14 @@ def test_register_bad_group_for_class():
     assert resp.json()["error"]["code"] == "INVALID_CLASS_GROUP"
 
 
-def test_register_student_missing_fields_validation():
+def test_register_student_missing_fields_validation(client):
+    """
+    Absent student fields are a 400 VALIDATION_ERROR with per-field detail — NOT
+    a 422 INVALID_CLASS_GROUP, which this previously asserted. The two codes
+    describe different problems: "you left the form blank" versus "that group is
+    not offered for that class". A client rendering the second for the first
+    tells a user their group is wrong when they never picked one.
+    """
     email = _unique_email()
     resp = client.post(
         "/api/auth/register",
@@ -112,11 +113,38 @@ def test_register_student_missing_fields_validation():
             "role": "student",
         },
     )
-    assert resp.status_code == 422
-    assert resp.json()["error"]["code"] == "INVALID_CLASS_GROUP"
+    assert resp.status_code == 400
+    body = resp.json()["error"]
+    assert body["code"] == "VALIDATION_ERROR"
+    # Per-field, so the form can mark the offending inputs rather than showing a
+    # single opaque banner.
+    assert set(body["details"]["fields"]) == {"board", "class_level", "student_group", "medium"}
 
 
-def test_enums_shape():
+def test_register_student_creates_a_trial_subscription(client):
+    """
+    Rule 4 of the onboarding derivation fails closed, so without this row every
+    student would reach plan selection the moment they clear the guardian gate,
+    having never had the 14-day trial the product promises (prd.md §2.6).
+    """
+    email = _unique_email()
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "email": email,
+            "password": "password123",
+            "full_name": "Trial Student",
+            "role": "student",
+            "board": "PCTB",
+            "class_level": 9,
+            "student_group": "science",
+            "medium": "en",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_enums_shape(client):
     resp = client.get("/api/reference/enums")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -130,7 +158,7 @@ def test_enums_shape():
     assert body["languages"] == ["en", "ur", "roman_ur"]
 
 
-def test_health():
+def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"

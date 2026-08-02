@@ -1,0 +1,105 @@
+name: backend
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    # Lint and import checks need no database, so they always run and always
+    # give a signal. The integration suite talks to Supabase and cannot, which
+    # is why the two are separate jobs rather than one that is red by default.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # uv with the committed lockfile, per tdd.md §2.2 and §8.3. `--frozen`
+      # means CI installs exactly what is pinned and FAILS if uv.lock has drifted
+      # from pyproject.toml, rather than quietly resolving something newer — a
+      # green build that installed different packages from the developer's is
+      # not a signal.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --frozen --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Unit tests
+        # The onboarding-state derivation is a pure function on purpose: the
+        # single field the frontend routes on is testable without a database.
+        run: uv run pytest tests/unit -q
+
+  integration:
+    # Needs DATABASE_URL and SERVICE_ROLE_DATABASE_URL as repository secrets.
+    # Skipped rather than failed when they are absent, so a fork or a first-time
+    # contributor does not see a red tick they cannot fix.
+    runs-on: ubuntu-latest
+    needs: static
+    if: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SERVICE_ROLE_DATABASE_URL: ${{ secrets.SERVICE_ROLE_DATABASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+      APP_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # uv with the committed lockfile, per tdd.md §2.2 and §8.3. `--frozen`
+      # means CI installs exactly what is pinned and FAILS if uv.lock has drifted
+      # from pyproject.toml, rather than quietly resolving something newer — a
+      # green build that installed different packages from the developer's is
+      # not a signal.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --frozen --extra dev
+
+      - name: Skip if no database configured
+        id: guard
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DATABASE_URL secret not set; skipping integration tests."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Integration tests
+        if: steps.guard.outputs.run == 'true'
+        # Every test runs inside a transaction that is rolled back (see
+        # tests/conftest.py), so this leaves no rows behind.
+        run: uv run pytest tests/integration -q

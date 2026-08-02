@@ -1,13 +1,7 @@
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 
-from app.main import app
-
-client = TestClient(app)
-
-
-def _register_student() -> tuple[str, str]:
+def _register_student(client) -> tuple[str, str]:
     email = f"{uuid4().hex[:12]}@test.com"
     resp = client.post(
         "/api/auth/register",
@@ -26,14 +20,14 @@ def _register_student() -> tuple[str, str]:
     return email, resp.json()["user_id"]
 
 
-def test_login_wrong_password_401():
-    email, _ = _register_student()
+def test_login_wrong_password_401(client):
+    email, _ = _register_student(client)
     resp = client.post("/api/auth/login", json={"email": email, "password": "wrong-password"})
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
-def test_login_unknown_email_same_401_wording():
+def test_login_unknown_email_same_401_wording(client):
     resp = client.post(
         "/api/auth/login",
         json={"email": f"{uuid4().hex[:12]}@nobody.com", "password": "whatever"},
@@ -44,8 +38,8 @@ def test_login_unknown_email_same_401_wording():
     assert body["error"]["message"] == "Incorrect email or password."
 
 
-def test_login_email_verification_required_no_session():
-    email, _ = _register_student()
+def test_login_email_verification_required_no_session(client):
+    email, _ = _register_student(client)
     resp = client.post("/api/auth/login", json={"email": email, "password": "password123"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -56,30 +50,30 @@ def test_login_email_verification_required_no_session():
     assert "set-cookie" not in resp.headers
 
 
-def test_login_never_sets_session_cookie():
-    email, _ = _register_student()
+def test_login_never_sets_session_cookie(client):
+    email, _ = _register_student(client)
     resp = client.post("/api/auth/login", json={"email": email, "password": "password123"})
     assert resp.status_code == 200
     assert not any(h.lower() == "set-cookie" for h in resp.headers)
 
 
-def test_refresh_without_cookie_401():
+def test_refresh_without_cookie_401(client):
     resp = client.post("/api/auth/refresh")
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
-def test_me_requires_token():
+def test_me_requires_token(client):
     resp = client.get("/api/auth/me")
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
-def test_me_with_invalid_token_401():
+def test_me_with_invalid_token_401(client):
     resp = client.get("/api/auth/me", headers={"Authorization": "Bearer not-a-jwt"})
     assert resp.status_code == 401
 
 
-def test_logout_without_token_401():
+def test_logout_without_token_401(client):
     resp = client.post("/api/auth/logout")
     assert resp.status_code == 401

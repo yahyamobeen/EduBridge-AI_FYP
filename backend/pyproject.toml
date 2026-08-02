@@ -7,7 +7,7 @@ name = "edubridge-backend"
 version = "0.1.0"
 description = "EduBridge AI Backend - Authentication Module"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
@@ -33,11 +33,16 @@ packages = ["app"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "RET", "S"]
-ignore = ["S101", "S311", "ARG001", "ARG002", "B008", "UP042", "S105"]
+# S105 (hardcoded password) is deliberately NOT ignored: suppressing it
+# globally in the authentication module is the wrong default. Silence it per
+# line where a match is genuinely a false positive.
+# S101 stays ignored for pytest's assert; ARG001/ARG002 and B008 for FastAPI's
+# dependency-injection signatures.
+ignore = ["S101", "S311", "ARG001", "ARG002", "B008", "UP042"]
 
 [tool.ruff.format]
 quote-style = "double"

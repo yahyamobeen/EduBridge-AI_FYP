@@ -1,8 +1,11 @@
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("edubridge.errors")
 
 
 class AppError(Exception):
@@ -84,11 +87,33 @@ def _validation_error_response(request: Request, exc: RequestValidationError) ->
 
 
 def _unhandled_error_response(request: Request, exc: Exception) -> JSONResponse:
+    """
+    The catch-all.
+
+    THE EXCEPTION IS LOGGED, WHICH IT PREVIOUSLY WAS NOT. This handler used to
+    return the envelope and drop the exception entirely, with no logger
+    configured anywhere — so every crash in production was invisible and the
+    first symptom would have been a user reporting it.
+
+    The response body still says nothing: a stack or a database message can
+    carry an email address, a token fragment or an internal path, and this is
+    reachable by anyone. The request id is the bridge — meaningless to a
+    caller, and enough to find the log line.
+    """
+    request_id = getattr(request.state, "request_id", None)
+    logger.exception(
+        "unhandled error on %s %s (request_id=%s)",
+        request.method,
+        request.url.path,
+        request_id,
+        exc_info=exc,
+    )
     return JSONResponse(
         status_code=500,
         content=error_envelope(
             code="INTERNAL_ERROR",
             message="An unexpected error occurred.",
+            details={"request_id": request_id} if request_id else None,
         ),
     )
 

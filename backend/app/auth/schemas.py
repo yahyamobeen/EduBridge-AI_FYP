@@ -1,7 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field
 
+from app.core.errors import invalid_class_group, validation_error
 from app.models.enums import (
     BoardCode,
     LanguageCode,
@@ -10,6 +11,10 @@ from app.models.enums import (
     UserRole,
 )
 
+# Mirrors the `ck_group_matches_class` CHECK constraint in the applied schema so
+# a bad pair gets a readable message before the database rejects it. The
+# authoritative list of which groups exist per class comes from `subject_group`
+# and is served by /reference/enums; this is only the validation guard.
 STUDENT_GROUP_BY_CLASS: dict[int, set[str]] = {
     9: {"science", "computer"},
     10: {"science", "computer"},
@@ -17,6 +22,7 @@ STUDENT_GROUP_BY_CLASS: dict[int, set[str]] = {
     12: {"pre_medical", "pre_engineering", "ics"},
 }
 
+# Presentation only. The codes themselves come from the database.
 GROUP_LABELS: dict[str, str] = {
     "science": "Science",
     "computer": "Computer Science",
@@ -40,30 +46,49 @@ class RegisterRequest(BaseModel):
 
     institution: str | None = Field(default=None, max_length=300)
 
-    @field_validator("password")
-    @classmethod
-    def _password_strength(cls, value: str) -> str:
-        if len(value) < 8:
-            raise ValueError("Password must be at least 8 characters long.")
-        return value
+    def validate_required_student_fields(self) -> None:
+        """
+        Absent student fields are a 400 VALIDATION_ERROR with per-field detail —
+        NOT a 422 INVALID_CLASS_GROUP, which means something else entirely
+        ("that group is not offered for that class"). A client rendering the
+        second for an empty form tells the user their group is wrong when they
+        never chose one.
+        """
+        if self.role != UserRole.student:
+            return
 
-    @field_validator("student_group")
-    @classmethod
-    def _validate_group(cls, value: StudentGroup | None) -> StudentGroup | None:
-        if value is None:
-            return value
-        return value
+        missing = {
+            name: "This field is required for students."
+            for name, value in (
+                ("board", self.board),
+                ("class_level", self.class_level),
+                ("student_group", self.student_group),
+                ("medium", self.medium),
+            )
+            if value is None
+        }
+        if missing:
+            raise validation_error(
+                message="Student registration requires board, class, group and medium.",
+                details={"fields": missing},
+            )
 
     def validate_student_group_for_class(self) -> None:
+        """
+        The pair itself. Mirrors the `ck_group_matches_class` CHECK constraint,
+        so a bad pair is rejected with a useful message before the database
+        rejects it with an opaque one. Call after
+        `validate_required_student_fields`, which guarantees both are present.
+        """
         if self.role != UserRole.student:
             return
         if self.class_level is None or self.student_group is None:
-            raise ValueError("board, class_level and student_group are required for students.")
+            return
+
         allowed = STUDENT_GROUP_BY_CLASS.get(self.class_level, set())
         if self.student_group.value not in allowed:
-            raise ValueError(
-                f"student_group '{self.student_group.value}' is not valid "
-                f"for class {self.class_level}."
+            raise invalid_class_group(
+                f"'{self.student_group.value}' is not offered for class {self.class_level}."
             )
 
 
@@ -120,7 +145,7 @@ LoginResponse = EmailVerificationRequired | TwoFactorEnrollmentRequired | TwoFac
 
 class AccessTokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105 -- a scheme name, not a secret
     expires_in: int
 
 
@@ -139,7 +164,10 @@ class ProfileOut(BaseModel):
 
 class GuardianOut(BaseModel):
     required: bool
-    status: Literal["pending", "verified", "none"]
+    # `null` when there is no link — not the string "none", which the client
+    # types as an unexpected value. `revoked` is a real enum member and passes
+    # through rather than being flattened into "none".
+    status: Literal["pending", "verified", "revoked"] | None = None
 
 
 class MeResponse(BaseModel):
@@ -147,10 +175,16 @@ class MeResponse(BaseModel):
     email: str
     full_name: str | None
     role: str
+    # FIVE states. `plan_selection_pending` is the one a user can reach AFTER
+    # being active, when a 14-day trial lapses (prd.md §2.6 MON-4) — the only
+    # backward transition in the system. Omitting it does not merely hide a
+    # screen: it means paid access is never enforced, because a lapsed student
+    # keeps reporting `active` forever.
     onboarding_state: Literal[
         "email_verification_pending",
         "two_factor_enrollment_pending",
         "guardian_link_pending",
+        "plan_selection_pending",
         "active",
     ]
     email_verified: bool

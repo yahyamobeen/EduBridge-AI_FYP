@@ -55,9 +55,15 @@ class TokenKind(str, Enum):
     refresh = "refresh"
     guardian_invite = "guardian_invite"
     email_verify = "email_verify"
-    password_reset = "password_reset"
+    password_reset = "password_reset"  # noqa: S105 -- an enum member, not a secret
     two_factor_email_otp = "two_factor_email_otp"
+    # Two DISTINCT kinds on purpose. `two_factor_pending` (~5 min) is exchanged
+    # by /2fa/verify for a full session; `two_factor_enrollment` (~15 min) is
+    # only good for /2fa/enroll and /2fa/confirm. Storing both under the same
+    # kind — as this originally did — left /2fa/verify unable to reject the
+    # longer-lived one (migration 20260802140100).
     two_factor_pending = "two_factor_pending"
+    two_factor_enrollment = "two_factor_enrollment"
 
 
 class TwoFactorMethod(str, Enum):

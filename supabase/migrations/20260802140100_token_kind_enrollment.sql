@@ -1,0 +1,24 @@
+-- ============================================================================
+-- EduBridge AI — a distinct token_kind for 2FA enrolment
+-- Implements : tdd.md §3.1, §6.9 (SEC-14)
+--
+-- WHY
+--   Login issues two different short-lived credentials:
+--     * an ENROLMENT token (~900 s) for a user who has no second factor yet,
+--       which /2fa/enroll and /2fa/confirm accept;
+--     * a PENDING token (~300 s) for a user who has one, which /2fa/verify
+--       exchanges for a FULL SESSION.
+--
+--   Both were being stored as kind 'two_factor_pending', so nothing could tell
+--   them apart. That means /2fa/verify cannot reject an enrolment token — a
+--   longer-lived credential, issued for a weaker purpose, presented at the one
+--   endpoint that hands out a session. The kinds are the only thing that can
+--   enforce that boundary, so they have to differ.
+--
+-- SEPARATE FILE ON PURPOSE
+--   Postgres will not let a value added by ALTER TYPE ... ADD VALUE be USED in
+--   the same transaction, and the Supabase CLI runs each migration in one. This
+--   file only adds the value; the code that writes it ships afterwards.
+-- ============================================================================
+
+ALTER TYPE token_kind ADD VALUE IF NOT EXISTS 'two_factor_enrollment';

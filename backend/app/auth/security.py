@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from uuid import UUID
 
 import jwt
@@ -10,20 +11,32 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from app.core.config import get_settings
 
-_password_hasher = PasswordHasher(
-    time_cost=get_settings().argon2_time_cost,
-    memory_cost=get_settings().argon2_memory_cost,
-    parallelism=get_settings().argon2_parallelism,
-)
+
+@lru_cache(maxsize=1)
+def _password_hasher() -> PasswordHasher:
+    """
+    Built on first use, not at import.
+
+    Reading settings at module scope means importing ANYTHING that transitively
+    reaches this module requires a complete `.env` — which made the unit tests
+    impossible to run without database credentials they never touch. Cached, so
+    the parameters are still resolved exactly once.
+    """
+    settings = get_settings()
+    return PasswordHasher(
+        time_cost=settings.argon2_time_cost,
+        memory_cost=settings.argon2_memory_cost,
+        parallelism=settings.argon2_parallelism,
+    )
 
 
 def hash_password(password: str) -> str:
-    return _password_hasher.hash(password)
+    return _password_hasher().hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     try:
-        return _password_hasher.verify(password_hash, password)
+        return _password_hasher().verify(password_hash, password)
     except (VerifyMismatchError, InvalidHashError):
         return False
 

@@ -76,9 +76,6 @@ infra/           Docker and deployment configuration
 4. The team lead reviews and merges
 5. Delete the feature branch after merge
 
-```bash
-git checkout main && git pull && git checkout -b feature/auth-jwt-login
-```
 
 ## License
 
