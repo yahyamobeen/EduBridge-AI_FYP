@@ -9,16 +9,32 @@ from app.core.db import set_current_user_id
 from app.models.enums import TokenKind
 
 
-def _make_user(session, email: str) -> str:
-    return str(
-        session.execute(
-            text(
-                "INSERT INTO app_user (email, password_hash, role, full_name) "
-                "VALUES (:email, 'x', 'student', 'Token Test') RETURNING id"
-            ),
-            {"email": email},
-        ).scalar_one()
+def _make_user(session, email: str, **extra) -> str:
+    """
+    Bind the id BEFORE inserting.
+
+    The applied database scopes app_user inserts to the acting user, so an
+    unbound insert is refused — which is also why `register()` binds the id it
+    is about to create. (`rls_policies.sql` in the repo shows
+    `app_user_insert ... WITH CHECK (true)`; the live policy is stricter, so the
+    file and the database disagree. Worth reconciling separately.)
+    """
+    from uuid import uuid4
+
+    from app.core.db import set_current_user_id
+
+    user_id = uuid4()
+    set_current_user_id(session, user_id)
+    columns = "id, email, password_hash, role, full_name"
+    values = ":id, :email, 'x', 'student', 'Test User'"
+    if extra.get("verified"):
+        columns += ", email_verified_at"
+        values += ", now()"
+    session.execute(
+        text(f"INSERT INTO app_user ({columns}) VALUES ({values})"),  # noqa: S608
+        {"id": user_id, "email": email},
     )
+    return str(user_id)
 
 
 @pytest.fixture
