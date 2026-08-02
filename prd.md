@@ -2,9 +2,9 @@
 
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform for Secondary & Higher-Secondary Students
 
-**Version:** 0.3.0
+**Version:** 0.3.4
 **Status:** Draft — under section-by-section review
-**Last Updated:** July 19, 2026
+**Last Updated:** August 2, 2026
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen)
 **Supervisor:** Dr. Muhammad Arif Butt — Department of Data Science, FCIT, University of the Punjab
 **Authors:** Osairum Ahmad Khan (BSDSF23A019), Muhammad Mujtaba (BSDSF23A026), Abdul Muneeb (BSDSF23A036), Yahya Mobeen (BSDSF23A039)
@@ -18,6 +18,10 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial PRD draft derived from the approved FYP proposal and the agreed planning blueprint. Adopts supervisor PRD format; extended to engineering depth for TDD derivation. |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Added **TEL-5** endpoint access logging + admin daily-logs view; entity `ApiRequestLog`; RBAC + Admin-dashboard updates (kept in sync with TDD v0.1.1). |
+| 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend build complete.** §19 gains **I18N-4a**: the RTL rule is now enforced by an automated sweep rather than by reviewer memory, because every supplied prototype is written with physical direction properties that look correct in English and silently break Urdu. No scope change. |
+| 0.3.3 | 2026-08-02 | EduBridge AI Team | **Accessibility rules made testable** during frontend build: **A11Y-1a** (errors carried by icon + text + colour, and countdowns announced per minute rather than per second) and **A11Y-1b** (focus moves to a step's single field, and returns to it after a rejected code). No scope change; both make A11Y-1 checkable in review rather than aspirational. |
+| 0.3.2 | 2026-08-02 | EduBridge AI Team | **Access is now paid** — new §2.6 defines a single tier (Rs. 999/month, PKR) with a **14-day trial and no free tier**, students only; onboarding gains the derived state **`plan_selection_pending`** after the parental gate, and it is **re-entrant** (a student returns to it when the trial lapses). **Parental-gate mechanism resolved to a student-initiated email invite** (§4.3, §6.1, §6.2), closing open decision 4. **Teachers no longer have tutor access** (§4.2) — aligns the matrix with `tdd.md` §3.2, which scoped `/api/tutor/ask` to students. **FR-A1** now captures `student_group` and `language_pref`; **FR-A5** (plan selection) and **FR-A6** (social sign-in, deferred) added. §19 records the RTL implementation rule; §26 flags minors as the subscriber of record. |
+| 0.3.1 | 2026-08-01 | EduBridge AI Team | Login now returns **`200` with a `status` discriminator** instead of `401 TWO_FACTOR_REQUIRED`; a correct password is a success, not an error. `TWO_FACTOR_REQUIRED` and `TWO_FACTOR_ENROLLMENT_REQUIRED` removed from the error catalogue. |
 | 0.3.0 | 2026-08-01 | EduBridge AI Team | **Two-factor authentication mandatory for all roles** — added **FR-A4** (enrolment + challenge) and **SEC-14** (TOTP primary, email-OTP fallback, hashed single-use backup codes, admin-assisted recovery). Data model gains `TwoFactorEnrollment` and `TwoFactorBackupCode`. NFR-2 records the usability trade-off and its mitigations. |
 | 0.2.0 | 2026-08-01 | EduBridge AI Team | **Subject matrix expanded to 10 subjects** with per-class lists and **elective groups** (science/computer, pre-medical/pre-engineering/ICS). Two content branches replaced by **four content strategies**, adding **FR-17 religious-verbatim** (Quran Translation is retrieval-only). Database moved to **Supabase**; **Row Level Security** added as defense-in-depth (SEC-13). Data model updated (`subject_group`, `student_group`, `content_strategy`, `question_key`, `agent_component`). |
 
@@ -138,8 +142,43 @@ Each subject declares **how the agent is permitted to answer it**. This replaces
 1. **Class 11 ICS subject list** — currently seeded as English, Urdu, Physics, Chemistry, Mathematics, Computer Science, Islamiat, Quran Translation (8 subjects). Traditional ICS often excludes Chemistry — confirm against the official scheme of studies. **[PROPOSED — confirm]**
 2. **KPI thresholds** — adopt proposal NFR targets as KPIs vs. set specific numbers (§22). **[PROPOSED — confirm]**
 3. **Institutional auth model** — institutions attach via classroom join-code only (no separate SSO/tenant) in v1 (§15). **[PROPOSED — confirm]**
-4. **Parental-link enforcement & mechanism** for Classes 9–10 (hard gate vs. grace; invite mechanism; class self-declared vs. verified) (§4.3, §6.1). **[PROPOSED — confirm]**
+4. **Parental-link enforcement & mechanism** — **RESOLVED (v0.3.2):** a **hard gate** for Classes 9–10, satisfied by a **student-initiated email invite**; the parent signs up and confirms out of band (§4.3, §6.1, §6.2). *Still open:* whether the student's class level is **self-declared or verified** at signup. **[PROPOSED — confirm]**
 5. **Tiering split** — confirm P0/P1/P2 assignment (§23). **[PROPOSED — confirm]**
+6. **Payment provider** — card plus EasyPaisa/JazzCash is the intent (§2.6); the acquirer is not chosen. Note that Stripe does not support Pakistani acquiring, so a card-only design is not shippable here. **[PROPOSED — confirm]**
+
+---
+
+### 2.6 Access & Monetisation
+
+The platform is **paid**. There is **no free tier**: when a student's trial lapses and no subscription is
+active, learning access stops.
+
+| Aspect | Decision |
+|---|---|
+| Tiers | **One** — plan code `standard`, "EduBridge AI" |
+| Price | **Rs. 999 / month**, currency **PKR** *(stored in minor units — 99900 paisa — so money is never a float)* |
+| Trial | **14 days** from registration, granted automatically. The trial length is defined once, in the `subscription.trial_ends_at` schema default; no other component carries a copy of the number |
+| Who pays | **Students only.** Teachers, parents and admins are never charged and never see plan selection |
+| Payment methods | Card and **EasyPaisa / JazzCash** (provider open — §2.5 item 6) |
+
+**MON-1 — Trial on registration.** Every student account is created with a `trialing` subscription. *AC:* a
+student can use the product immediately after onboarding, without payment details.
+
+**MON-2 — Fail closed.** The absence of a subscription record is **not** equivalent to "trialing". A student
+with no record has no access. *AC:* a failed subscription insert can never silently grant indefinite free
+access.
+
+**MON-3 — Gate placement.** Plan selection is the **last** onboarding step, after the parental gate (§6.1).
+A Class 9–10 student therefore has a verified guardian before any payment is discussed.
+
+**MON-4 — Re-entrant.** Plan selection is **not** a one-way step. A student completes onboarding, becomes
+active, uses the product for the trial period, and then returns to plan selection when the trial lapses.
+*AC:* a live session whose trial expires mid-use is redirected on its next identity check, not left stranded
+on a page it no longer has rights to.
+
+> **Scope note.** Checkout is **not** part of the authentication/onboarding sprint. That sprint delivers the
+> plan screen and the routing into it; payment capture is a separate card. See §26.5 for the minors'
+> contracting question this raises.
 
 ---
 
@@ -195,7 +234,7 @@ Legend: ✅ allowed · 🔵 read-only · ⛔ not allowed · *scope notes inline*
 | Register / manage own account | ✅ (self-serve) | ✅ | ✅ | ✅ |
 | Enrol / manage own second factor (2FA) | ✅ (required) | ✅ (required) | ✅ (required) | ✅ (required) |
 | Reset another user's 2FA (identity-verified, audited) | ⛔ | ⛔ | ⛔ | ✅ |
-| Use tutor chatbot (ask, voice, visuals, avatar) | ✅ | ✅ (own testing) | ⛔ | ⛔ |
+| Use tutor chatbot (ask, voice, visuals, avatar) | ✅ | ⛔ *(see note)* | ⛔ | ⛔ |
 | View own progress / coverage / exam-readiness | ✅ (own) | — | 🔵 (linked child, all subjects) | ⛔ |
 | Create / edit class space | ⛔ | ✅ | ✅ (as guardian space) | ✅ |
 | Enroll students / issue join codes | ⛔ | ✅ (own space) | ✅ (link own child) | ✅ |
@@ -207,7 +246,18 @@ Legend: ✅ allowed · 🔵 read-only · ⛔ not allowed · *scope notes inline*
 | View daily endpoint access logs (traffic, status codes, messages) | ⛔ | ⛔ | ⛔ | ✅ |
 | Post announcements to a space | ⛔ | ✅ (own space) | ✅ (own space) | ✅ |
 
+> **Note on teacher tutor access (changed in v0.3.2).** Through v0.3.1 this cell read *"✅ (own testing)"*,
+> which contradicted `tdd.md` §3.2, where `POST /api/tutor/ask` has always been scoped to
+> **Student (gate-verified)**. The TDD is authoritative: the tutor is **student-only**. This keeps the
+> guardian-gate dependency a purely student-shaped check and keeps tutor usage out of teacher analytics.
+> If teachers are later given a way to evaluate the tutor, it should be a separate, quota-limited endpoint
+> rather than a widening of this one.
+
 **Cross-cutting rules:**
+- **The UI must not offer what the matrix forbids.** Navigation and controls are derived per role from this
+  matrix — a role never renders a control it cannot use, even disabled. This is a requirement, not a
+  presentation preference: a parent dashboard that shows a "replay this tutor session" button advertises a
+  capability the matrix denies, and a shared component tree makes that failure easy to introduce by copying.
 - **Consent by joining** — a viewer (teacher/parent) sees a student only after the student joins their space via a revocable **join code**. The student can see who can view them and can **leave any space at any time**.
 - **Read-only viewers** — teachers/parents can see progress but can never chat as the student or change the student's settings.
 - **Subject-scoped teacher** — a teacher declares the subject they teach; their reports are limited to that subject only (least-privilege).
@@ -219,8 +269,21 @@ To protect younger minors, parental linkage is **required by class level** for i
 
 | Student class | Parent/guardian link | Effect |
 |---|---|---|
-| **Class 9–10** | **Mandatory** | The student must have a **signed-up, linked, verified** parent/guardian to use the app; the parent can view the student's progress. Enforced at onboarding as a **hard gate** *(hard-gate vs. grace period and invite mechanism — **[PROPOSED — confirm]**, §6.1)*. |
+| **Class 9–10** | **Mandatory** | The student must have a **signed-up, linked, verified** parent/guardian to use the app; the parent can view the student's progress. Enforced at onboarding as a **hard gate** — no grace period (§6.1). |
 | **Class 11–12** | **Optional** | Parent linkage is offered but not required; the student can use the app without it. |
+
+**Mechanism (resolved in v0.3.2).** The link is created by a **student-initiated email invite**: the student
+enters a parent's email address, the parent receives an invite, **signs up**, and confirms the link from
+their own account. Only then does the link become `verified`.
+
+The direction and the channel both matter:
+
+- **The signal must be out of band.** Verification happens in a mailbox the student does not control. A code
+  the student types in — from any source — is not out of band, because everything it touches passes through
+  the minor being protected.
+- **A student must not be able to satisfy their own gate.** The parent account is distinct and separately
+  authenticated, backed by the `CHECK (parent_id <> student_id)` constraint and a parent-role check in the
+  service layer.
 
 This gate reinforces the platform's minors'-data and consent posture (§26) and is keyed on the student's class level *(self-declared vs. verified at signup — **[PROPOSED — confirm]**)*.
 
@@ -265,18 +328,50 @@ CI/CD via **GitHub Actions**; containerized with **Docker**; the **self-updating
 
 ### 6.1 Student onboarding + parental-consent gate
 
-1. Student signs up (self-serve) with minimal PII; selects **board**, **class (9–12)**, **elective group**, and **medium/language**.
+Onboarding progress is carried by a single **derived** value, `onboarding_state`, returned from the identity
+endpoint. It is computed from email verification, two-factor status, guardian link and subscription — it is
+not stored as a column, and clients **route on this field alone** rather than inferring progress from a
+combination of flags.
+
+```
+register ──► email_verification_pending
+                    │ verifies email
+                    ▼
+             two_factor_enrollment_pending
+                    │ enrols + confirms a factor
+                    ▼
+             guardian_link_pending          [Classes 9–10 only]
+                    │ parent signs up and confirms
+                    ▼
+                  active   ◄─── 14-day trial running
+                    │ trial lapses with no subscription
+                    ▼
+             plan_selection_pending         [students only]
+                    │ subscribes
+                    └──────► active
+```
+
+1. Student signs up (self-serve) with minimal PII; selects **board**, **class (9–12)**, **elective group**, **medium**, and **interface language**.
 1a. **Email verification** — the student confirms their address before proceeding.
-1b. **Two-factor enrolment (mandatory, FR-A4)** — the student chooses TOTP or email-OTP, confirms one challenge, and saves the 10 backup codes shown once. Full access is withheld until this completes.
-2. **If Class 9–10:** the student must link a parent/guardian. The student initiates an invite (email/code); the parent creates/confirms an account and the link is **verified**. *Full tutor access is gated until the link is verified (hard gate — [PROPOSED — confirm], §4.3).*
-3. **If Class 11–12:** parental linkage is offered but optional; the student proceeds directly.
-4. Student lands on the student dashboard (progress, recent chats, avatar entry point).
+1b. **Two-factor enrolment (mandatory, FR-A4)** — the student chooses TOTP or email-OTP **as equally weighted options**, confirms one challenge, and saves the 10 backup codes shown once. Full access is withheld until this completes.
+2. **If Class 9–10:** the student must link a parent/guardian. The student enters a parent's **email address**; the parent signs up and confirms, and the link becomes **verified** (§4.3). *Full tutor access is gated until then — a hard gate.*
+3. **If Class 11–12:** parental linkage is offered but optional; the student proceeds directly. A Class 11–12 student is **never** shown the gate.
+4. **Plan selection (FR-A5)** — reached only once the 14-day trial lapses without an active subscription (§2.6). New students pass straight through to step 5 and meet this later.
+5. Student lands on the student dashboard (progress, recent chats, avatar entry point).
+
+> **The chain is not one-way.** Step 4 is re-entrant: a student who is `active` returns to
+> `plan_selection_pending` when the trial expires. Any client that evaluates `onboarding_state` once on
+> entry and then trusts it will strand such a user (§2.6 MON-4).
 
 ### 6.2 Parent onboarding / linking
 
-1. Parent receives an invite (from the student, or via a guardian space).
-2. Parent creates/confirms an account and is linked to the child (all-subject **read-only**).
-3. Parent dashboard shows the child's coverage, weak areas, and a how-to-help plan (§15).
+1. Parent receives an invite email, triggered by their child entering the parent's address (§4.3).
+2. Parent **signs up** for their own account, then confirms the link from it. Confirmation is an
+   authenticated action: the link is only `verified` once a distinct, separately authenticated parent
+   account has accepted it.
+3. Parent is linked to the child (all-subject **read-only**) and the child's gate clears.
+4. Parent dashboard shows the child's coverage, weak areas, and a how-to-help plan (§15) — and **no tutor,
+   chat-replay or write control of any kind** (§4.2).
 
 ### 6.3 Runtime tutor flow (text or voice in, voice out) — 9 steps
 
@@ -313,13 +408,21 @@ A new/updated skill or MCP server is submitted → static scan + claim-vs-actual
 Requirements are grouped by **Epic** (A–K). Each carries the proposal's `FR-ID`, the user-story-form requirement and acceptance criteria (verbatim from the proposal), plus **tier**, **primary role**, **dependencies**, and **edge/failure** notes added for engineering. Epics **A** and **K** have no proposal FR-ID (derived from proposal §1.5.1) and are marked *derived*.
 
 ### Epic A — Authentication, Roles & RBAC *(derived; P0)*
-- **FR-A1 (P0):** Self-serve **student registration & login** (JWT), with board/class/medium capture. *AC:* account created; session established; role assigned. *Deps:* §4. *Edge:* duplicate email; weak password; unverified email.
+- **FR-A1 (P0):** Self-serve **registration & login** (JWT) for student, teacher and parent roles. Student registration captures **board**, **class level**, **elective group**, **medium** and **interface language**. *AC:* account created and role assigned; **no session is issued at registration** — the account enters `email_verification_pending` (§6.1) and a session is only granted once the second factor is satisfied. The offered elective groups are **derived from the chosen class** and an invalid class/group pair is rejected, so `science` cannot survive a switch from Class 9 to Class 11. *Deps:* §2.4.1, §4. *Edge:* duplicate email; weak password; invalid class/group pair; unverified email.
 - **FR-A2 (P0):** **Role-based access control** for student/teacher/parent/admin. *AC:* each capability enforced per §4.2 matrix. *Edge:* privilege-escalation attempt → denied + audited.
 - **FR-A4 (P0):** **Two-factor authentication — mandatory for every role.** *As any user, I want a second authentication factor, so that a stolen password alone cannot expose a student's account or data.* **AC:** after email verification, the user must enrol a second factor before gaining full access; login becomes two-step (password → factor challenge); a valid challenge is required for every new session. **Methods:** **TOTP** (authenticator app) is primary; **email-OTP** is offered for users without a smartphone; **10 single-use backup codes** are issued at enrolment and shown exactly once. *Role:* all. *Deps:* email verification, SEC-14. *Edge:* lost device → backup code; lost device *and* codes → admin-assisted recovery with identity verification (audited); repeated failures → temporary lock, not permanent lockout.
 
   > **Accessibility note.** Mandatory 2FA is in tension with **NFR-2** ("usable by students new to digital tools, without training"). Many Class 9–10 students share a device or have no smartphone. The email-OTP method and backup codes exist specifically to keep that cohort from being locked out; enrolment UX must therefore present email-OTP as an equal option, not a fallback buried behind TOTP.
 
-- **FR-A3 (P0):** **Class-based parental-consent gate** — Class 9–10 require a verified parent link before full access; 11–12 optional. *AC:* 9–10 student blocked from full tutor use until parent verified; 11–12 unaffected. *Deps:* §4.3, §6.1. *Edge:* parent never confirms → student remains gated (grace behavior [PROPOSED]).
+- **FR-A3 (P0):** **Class-based parental-consent gate** — Class 9–10 require a verified parent link before full access; 11–12 optional. The link is created by a **student-initiated email invite**; the parent signs up and confirms from their own account (§4.3). *AC:* a 9–10 student is blocked from full tutor use until the parent is verified; a **Class 11–12 student is never shown the gate**; a student cannot satisfy their own gate. *Deps:* §4.3, §6.1. *Edge:* parent never confirms → student remains gated, **no grace period**; student enters their own address → rejected; invite resendable and the address changeable.
+
+- **FR-A5 (P0):** **Plan selection.** *As a student whose trial has ended, I want to see what the subscription costs and choose it, so that I can carry on studying.* **AC:** a student whose 14-day trial has lapsed without an active subscription is routed to plan selection and cannot reach learning features until a subscription is active; teachers, parents and admins are never routed there; a student **already active** whose trial lapses mid-session is redirected on their next identity check rather than left on a page they no longer have rights to. *Role:* Student. *Deps:* §2.6, §6.1. *Edge:* missing subscription record → treated as no access, never as a trial (MON-2); payment failure → remains gated with a retry path.
+
+- **FR-A6 (P2, deferred — not built in v1):** **Social sign-in** with Google and Microsoft as an alternative to email/password. *AC:* an external identity maps to exactly one local account; a user links a given provider at most once; email/password remains available. *Role:* all. *Deps:* §16. *Edge:* provider email already registered → link rather than duplicate; provider-only account has no password to reset.
+
+  > **This is consumer social login, not institutional SSO.** It does not change §15 CL-6 or §2.5 item 3,
+  > which concern multi-tenant/institutional identity and remain out of scope for v1. The supporting table
+  > (`oauth_identity`) is in the schema so it is stable when the feature is built; nothing writes to it yet.
 
 ### Epic B — Board Curriculum Chatbot *(P0)*
 - **FR-1 (P0):** *As a Class-9 student, I want to type "math 9 chp 4 ex 4.5 q 3" and get the exact question with a step-by-step solution.* **AC:** right question found; step-wise solution; option to explain a step. *Role:* Student. *Deps:* KB (§12), retrieval (§11). *Edge:* question not in KB → graceful "not found / closest match"; ambiguous reference → clarify.
@@ -370,13 +473,22 @@ Each story carries its `US-x.x` id, source `FR`, tier, and testable Given/When/T
 ### Epic 1 — Account, Roles & Consent
 
 **US-1.1 (FR-A1, P0) — Student self-serve signup.**
-- **Given** a new student on the signup page, **when** they submit a unique email, password, board, class (9–12), and medium, **then** an account is created, a session (JWT) starts, and they land on the student dashboard.
+- **Given** a new student on the signup page, **when** they submit a unique email, password, board, class (9–12), elective group, medium and interface language, **then** an account is created and they are asked to verify their email. **No session is issued yet** — access begins only after email verification and second-factor enrolment (§6.1).
 - **Given** an email already in use, **when** they submit, **then** signup is rejected with a clear message and no account is created.
+- **Given** a student who chose Class 9 and the `science` group, **when** they change the class to 11, **then** the group selection is cleared and only Class-11 groups are offered, so an invalid class/group pair cannot be submitted.
+- **Given** the reference data has not loaded, **when** the student reaches the academic step, **then** the group options are shown as unavailable rather than guessed at by the client.
 
 **US-1.2 (FR-A3, P0) — Class 9–10 parental-consent gate.**
-- **Given** a Class-9 or Class-10 student without a verified parent link, **when** they try to use the tutor, **then** access is gated and they are prompted to invite/verify a parent.
-- **Given** the parent completes and verifies the link, **when** the student returns, **then** full tutor access is granted.
-- **Given** a Class-11/12 student, **when** they sign up, **then** they get full access without a required parent link (parent optional).
+- **Given** a Class-9 or Class-10 student without a verified parent link, **when** they try to use the tutor, **then** access is gated and they are prompted to enter a parent's **email address**.
+- **Given** the parent signs up and confirms the link from their own account, **when** the student returns, **then** full tutor access is granted.
+- **Given** a Class-11/12 student, **when** they sign up, **then** they get full access without a required parent link, and the gate is **never** displayed to them.
+- **Given** a student who enters **their own** email address as the parent's, **when** they submit, **then** the invite is rejected — a student cannot satisfy their own gate.
+
+**US-1.4 (FR-A5, P0) — Trial expiry and plan selection.**
+- **Given** a student whose 14-day trial has lapsed with no active subscription, **when** they sign in, **then** they are routed to plan selection and cannot reach learning features until a subscription is active.
+- **Given** a student who is **already signed in and active**, **when** their trial lapses mid-session, **then** the next identity check redirects them to plan selection rather than leaving them on a page they no longer have rights to.
+- **Given** a teacher or a parent, **when** they sign in, **then** plan selection is never shown — only students are charged.
+- **Given** a student account with **no** subscription record at all, **when** access is evaluated, **then** it is treated as no access, never as an open-ended trial.
 
 **US-1.3 (FR-A2, P0) — RBAC enforcement.**
 - **Given** a teacher scoped to "Physics", **when** they open reports, **then** only Physics data for their space is shown; **when** they request another subject's data, **then** it is denied and the attempt is audited.
@@ -464,6 +576,9 @@ This is a **product-level** entity model — the seed for the TDD database schem
 - **GuardianLink** — `parent_user_id, student_user_id, status (pending|verified|revoked), verified_at`; enforces the class-based parental gate (§4.3).
 - **TwoFactorEnrollment** — `user_id, method (totp|email_otp), status (pending|active|disabled), totp_secret_encrypted, confirmed_at, last_used_at, failed_attempts, locked_until`; one per user (SEC-14). The secret is stored encrypted and is never readable through the API after enrolment.
 - **TwoFactorBackupCode** — `id, user_id, code_hash, used_at`; 10 issued per enrolment, **hashed** and single-use.
+- **SubscriptionPlan** — `code, name, price_minor, currency, billing_interval, is_active`; reference data. One row in v1 (`standard`, Rs. 999/month). Prices are held in **minor units** so money is never a float (§2.6).
+- **Subscription** — `id, user_id, plan_code, status (trialing|active|past_due|canceled|expired), trial_ends_at, current_period_end`; **one per user**. `trial_ends_at` defaults to 14 days and is the single definition of trial length. A **missing** record means no access, not a trial (§2.6 MON-2).
+- **OAuthIdentity** — `id, user_id, provider (google|microsoft), provider_user_id`; unique per `(provider, provider_user_id)` and per `(user_id, provider)`. Reserved for **FR-A6**, which is deferred — nothing writes to it in v1.
 - **Institution** *(optional)* — `id, name`; institutions attach via spaces (§15).
 
 ### 9.2 Classroom & collaboration
@@ -522,6 +637,10 @@ User 1–1 profile; Parent M–N Student via GuardianLink; Teacher/Parent 1–N 
 **10.4 KBDocument ingestion (self-update):** `Detected → ProvenanceCheck → (Quarantined[fail] | Parsing[pass]) → Indexed → IntegrityVerified → Live`; new **board+year version** on each refresh.
 
 **10.5 Skill/MCP vetting:** `Submitted → Scanning → (Blocked[mismatch/over-privilege] | ManifestAssigned) → Sandboxed → Admitted(AgentSBOM)`; runtime: `Admitted → (Suspended[guardrail violation])`.
+
+**10.6 Subscription (§2.6):** `Trialing → (Active | Expired)`; `Active → (PastDue → (Active | Canceled)) | Canceled`; `Expired → Active` on subscribing. Learning access requires `Trialing` or `Active`. **No record at all is not a state** — it is treated as no access (MON-2).
+
+**10.7 Onboarding (derived, §6.1):** `EmailVerificationPending → TwoFactorEnrollmentPending → [GuardianLinkPending, Classes 9–10] → Active ⇄ PlanSelectionPending`. This is the one state machine here that is **not** a forward-only progression: the last transition is bidirectional, because a trial lapsing returns an already-active student to plan selection. It is **derived** from §9.1 entities rather than stored, so it has no column and no migration.
 
 ---
 
@@ -640,7 +759,7 @@ Security is a **first-class, built-in** capability (proposal title: "Secure & Ag
 - **SEC-10 (P0) — Data protection & PII:** **AES-256 at rest, TLS 1.3 in transit**; RBAC; **minimal PII** collection; minors' data minimized (§26).
 - **SEC-11 (P1) — Audit logging:** who/what/when for tool calls and data access (§21) with tamper-evident storage.
 - **SEC-12 (P1) — Supply-chain hardening in CI:** static analysis (**Semgrep**), policy-as-code (**OPA/Rego**), and artifact signing (**sigstore/cosign**) in the CI/CD pipeline; the Secure Skills & MCP scanner runs on every PR.
-- **SEC-14 (P0) — Two-factor authentication (all roles):** every account must hold an active second factor before full access is granted (FR-A4). **TOTP** (RFC 6238, 6 digits, 30 s period) is the primary method, with **email-OTP** as an equal-standing alternative and **10 single-use backup codes** for recovery. Storage rules: the **TOTP secret is encrypted at rest** and never returned after enrolment; **backup codes are hashed** (argon2id) and never retrievable. Verification is **rate-limited and locked after repeated failures** (a 6-digit code is only 10⁶ combinations), each attempt is audited, and a used TOTP code cannot be replayed within its window. Password authentication alone never yields a full session — it yields only a short-lived challenge token.
+- **SEC-14 (P0) — Two-factor authentication (all roles):** every account must hold an active second factor before full access is granted (FR-A4). **TOTP** (RFC 6238, 6 digits, 30 s period) is the primary method, with **email-OTP** as an equal-standing alternative and **10 single-use backup codes** for recovery. Storage rules: the **TOTP secret is encrypted at rest** and never returned after enrolment; **backup codes are hashed** (argon2id) and never retrievable. Verification is **rate-limited and locked after repeated failures** (a 6-digit code is only 10⁶ combinations), each attempt is audited, and a used TOTP code cannot be replayed within its window. Password authentication alone never yields a full session — a correct password returns `200` with a `status` discriminator (`email_verification_required` | `two_factor_enrollment_required` | `two_factor_required`) and a short-lived challenge token; a wrong password returns `401`.
 - **SEC-13 (P0) — Row Level Security (database-level authorization):** every table enforces RLS so the **database itself** filters rows by the acting user, independent of application code. Policies implement the §4.2 RBAC matrix: a student sees only their own data; a parent sees a linked child's data only through a **verified** guardian link; a teacher sees only students enrolled in their space **and** only subjects they are scoped to; chat content is **owner-only** with no teacher/parent/admin read path. Two hard guarantees: **answer keys are unreadable by the application role** (no policy grants access — NFR-8 backstop), and access **fails closed** if the acting user is not established. RLS is defense-in-depth beneath application authorization, not a replacement for it.
 
 ### 16.2 OWASP threat → requirement → acceptance mapping
@@ -688,9 +807,15 @@ Verbatim from the proposal NFR table (Table 3.2), each with an added **verificat
 ## 19. Internationalization & Accessibility
 
 - **I18N-1:** UI and content in **English, Urdu, and Roman-Urdu**; language switchable.
+- **I18N-1a:** **English is the default for every visitor.** The interface language is **never negotiated** from the browser's language settings or a stored preference — a device configured for Urdu, which is unremarkable in this audience, must not be pushed into Urdu before the user has chosen. Language is an explicit choice, made through the switcher, and it persists through navigation because every route carries its locale.
 - **I18N-2:** **RTL** layout for Urdu; correct rendering of Urdu script and mixed EN/UR content.
 - **I18N-3:** accept both **Urdu script and Roman-Urdu** input without a separate transliteration step (model handles both).
+- **I18N-4 (implementation rule):** **Urdu (`ur`) is the only right-to-left locale.** **Roman-Urdu is Latin script and stays left-to-right** — mirroring it would be a defect, not a feature.
+- **I18N-5 (identifier rule):** the stored language value and the web locale tag are **not the same string**. The database and API use `roman_ur` (the `language_code` enum). That is not a valid BCP-47 tag: locale-aware date, number and plural formatting rejects it, and `lang="roman_ur"` tells assistive technology nothing. The web layer therefore uses **`ur-Latn`** — the correct tag for Urdu in Latin script — and converts at the API boundary. Neither side changes for the other; the conversion lives in one place. Mirroring must be achieved with **direction-agnostic layout primitives** (logical start/end spacing and alignment) rather than per-locale overrides, so a new screen is RTL-correct by construction instead of by remembering. Directional icons (arrows, chevrons) flip; non-directional ones (mail, lock, person) must not. Content that is inherently left-to-right inside an RTL page — one-time codes, backup codes, numerals in a countdown — is pinned LTR so its characters cannot reorder.
+- **I18N-4a (implementation rule):** the RTL requirement is **enforced automatically, not by review**. Every source file is swept for physical direction properties (`ml`/`mr`, `pl`/`pr`, `left`/`right`, `text-left`/`text-right`, `border-l`/`border-r`); only logical equivalents are permitted. This is a rule about human attention, not about CSS: all fifteen supplied prototypes are written physically, so a class copied verbatim renders perfectly in English and quietly breaks the Urdu layout — a defect nobody sees until an Urdu-reading user does.
 - **A11Y-1:** WCAG-oriented targets — sufficient contrast, keyboard navigation, readable typography for Urdu/English; captions/text alongside avatar audio.
+- **A11Y-1a (implementation rule):** an **error is conveyed by icon, text and colour together**, never by colour alone, and is tied to its control so assistive technology announces it. A **countdown is announced coarsely, not per second** — a lockout or code-expiry timer that updates a live region every second interrupts a screen-reader user continuously for its whole duration, which technically satisfies "announced" while making the page unusable. The precise timer is presented visually and a separate live region reports "about N minutes left", changing only when the minute changes.
+- **A11Y-1b (implementation rule):** where a step's whole purpose is one field — a one-time code, a backup code — **focus moves to that field**, and returns to it after a rejected attempt clears it. A rejected code that leaves focus on the submit button strands keyboard and screen-reader users on a control they have just been told did not work.
 - **A11Y-2:** **Low-bandwidth / entry-device** friendliness — the responsive web UI must work on modest mobile browsers (target audience context, §3.1).
 
 ---
@@ -706,6 +831,7 @@ Graceful degradation is required at every model-dependent step (NFR-3).
 - **STT:** low-confidence transcription → ask the student to confirm/retype.
 - **Quiz:** timeout → auto-submit; connection loss → resume within the window (one attempt preserved).
 - **User-facing error states:** every failure yields a clear, localized message (EN/UR) and a safe next action.
+- **Every documented failure has a designed state.** A screen that can render its success path but not its failure paths is incomplete. Clients branch on the machine-readable **error code**, never on the message text — messages are translated and will change — and an unrecognised code must still render a usable state rather than a blank screen.
 
 ---
 
@@ -797,6 +923,7 @@ From proposal Table 3.3, with **owner** and **trigger** added for tracking.
 - **26.2 Data protection:** AES-256 at rest, TLS 1.3 in transit, RBAC, least-privilege, minimal PII, audited access (SEC-10/11).
 - **26.3 Licensing / fair use:** textbook content used as **fair educational use with attribution**; prefer openly available, board-issued, or teacher-reviewed material; respect source licensing.
 - **26.4 Institutional use:** institutions deploy via the classroom layer; recommended to inform students/parents of data handling and obtain appropriate consents.
+- **26.5 Minors as the subscriber of record — [OPEN, needs supervisor review]:** access is paid (§2.6) and the **student** is the party selecting the plan, including Class 9–10 students who are typically 14–15. Minors generally lack capacity to enter a payment contract, and the platform already treats this cohort as requiring a verified guardian (§4.3). Two mitigations are available and neither has been adopted yet: route billing to the **linked guardian** for Classes 9–10, or require **guardian acknowledgement** of the subscription before it is charged. Flagged rather than resolved, because it is a legal question rather than a design one.
 
 ---
 
@@ -853,7 +980,7 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 | O5 Multimodal Layer | G-3 | D | FR-5, FR-6 | SEC-2, NFR-3 | P0 |
 | O6 Self-Updating Pipeline | G-7 | J | FR-12 | SEC-9 | P2 |
 | O7 Secure Skills & MCP Layer | G-8 | H, I | FR-13, FR-14 | SEC-1…12, NFR-4/5 | P1 (baseline P0) |
-| (Platform foundation) | — | A, K | FR-A1/A2/A3, **FR-A4**, FR-K1 | SEC-10, **SEC-13**, **SEC-14**, NFR-2/6 | P0 |
+| (Platform foundation) | — | A, K | FR-A1/A2/A3, **FR-A4**, **FR-A5**, FR-K1 *(FR-A6 deferred)* | SEC-10, **SEC-13**, **SEC-14**, NFR-2/6 | P0 |
 
 ---
 
