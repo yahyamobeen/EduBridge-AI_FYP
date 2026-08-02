@@ -15,6 +15,7 @@ const startSession = vi.fn()
 
 vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ replace }),
+  usePathname: () => '/login/2fa',
   Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),

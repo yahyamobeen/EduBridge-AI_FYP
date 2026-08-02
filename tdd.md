@@ -1,7 +1,7 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.3.2
+**Version:** 0.3.3
 **Status:** Draft — under section-by-section review
 **Last Updated:** August 2, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.3 | 2026-08-02 | EduBridge AI Team | **Frontend auth screens built (Phases 6–9).** §3.10 gains the rules the implementation forced: challenge credentials (`pending_token`, `enrollment_token`) stored in memory under the access token's rule; the `200`-always-advances login discriminator and its `noRetry` consequence; the 2FA challenge opening on the server's method with a server-driven lockout; `type="text"` for one-time codes; per-minute countdown announcements; site chrome scoped by route group. New **§14.4** records the contract findings for the backend tracks — chiefly that **nothing switches the second factor mid-challenge** (`2fa/resend` only re-sends to a user already enrolled in email OTP), that **enrolment has no resend at all**, and that guardian status has **no push channel**. Prototype links to unbuilt areas now resolve to a coming-soon page rather than being removed. |
 | 0.3.2 | 2026-08-02 | EduBridge AI Team | **Subscriptions + onboarding state.** New `subscription`, `subscription_plan`, `oauth_identity` tables (§5.3a, §5.4) with RLS (§6.8); `onboarding_state` documented as a **derived** field gaining `plan_selection_pending` (§3.1) — the first **non-monotonic** state in the system (§5.8). `guardian/confirm` becomes **authenticated** (§3.1) — the parent signs up first. `email/verify` and `2fa/confirm` now issue tokens, and the 2FA enrolment endpoints take `enrollment_token` in the **body** (§3.1, §7.3). Frontend design specified in depth (§3.10): API client, in-memory access token, `NAV_BY_ROLE`, RTL rule, `qr_svg` handling (§6.11). Teacher tutor access removed to match `/api/tutor/ask` scoping (§3.2, `prd.md` §4.2). Frontend test matrix added (§9.5). |
 | 0.3.1 | 2026-08-01 | EduBridge AI Team | Login returns **`200` + `status` discriminator** rather than `401 TWO_FACTOR_REQUIRED` (§3.1, §6.9, §7.3, §9.2); the two affected codes removed from the error catalogue. |
 | 0.3.0 | 2026-08-01 | EduBridge AI Team | **Two-factor authentication for all roles** (SEC-14 / FR-A4): TOTP primary, email-OTP alternative, hashed single-use backup codes, admin-assisted recovery. Adds `two_factor_enrollment` and `two_factor_backup_code` tables plus two `token_kind` values; login becomes a two-step challenge (§3.1, §6.9). |
@@ -423,6 +424,48 @@ TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing
   carries the locale prefix. Honouring the cookie while still ignoring `Accept-Language` would require
   custom middleware — next-intl exposes one flag for both.
 
+- **Short-lived challenge credentials follow the access token's storage rule.** `pending_token` and
+  `enrollment_token` complete an authentication step, so presenting one *is* authenticating. They live in a
+  module variable and nowhere else — never web storage, a readable cookie, or a query string. The
+  consequence is deliberate: a reload on `/login/2fa` loses the challenge and the screen returns the user to
+  sign-in. A token that survived a reload would also survive the user walking away from the shared device
+  `prd.md` §3.1 describes.
+
+- **A `200` from `/auth/login` is never a failure.** It means the password was right and the journey is
+  unfinished, so the client branches on `status` and moves forward: `two_factor_required` → the challenge,
+  `two_factor_enrollment_required` → enrolment, `email_verification_required` → the check-your-email screen.
+  **Only a `401` is a credential error**, and it renders one neutral message for both "no such account" and
+  "wrong password", so the form cannot be used to enumerate registered addresses (§6.3). Two consequences
+  that are easy to miss: the `email_verification_required` payload carries a **masked** address, which
+  `/auth/email/resend` cannot act on, so the client keeps the unmasked address the user typed; and a `401`
+  here must **not** trigger refresh-and-retry, so the client exposes a per-request `noRetry` flag rather than
+  firing a guaranteed-to-fail refresh on every typo.
+
+- **The 2FA challenge opens on the method the server returned**, never on a TOTP default. A student enrolled
+  in email OTP — the alternative that exists precisely for students without a smartphone (`prd.md` NFR-2) —
+  would otherwise be shown a screen asking for an authenticator app they do not have. The lockout countdown
+  is driven by `details.locked_until` from the `423`, not by counting failed attempts in the tab, which a
+  reload would reset. **[PROPOSED — confirm]** there is no endpoint that sends or resends an OTP *during* a
+  challenge, so the only alternative factor the client can honestly offer is the backup code; if a
+  challenge-time send endpoint is added, email OTP joins the same chooser unchanged.
+
+- **One-time codes use `type="text"` with `inputmode="numeric"`, never `type="number"`.** A number input
+  drops a leading zero in several engines, renders spinners, and ignores `maxlength` entirely — a code of
+  `012345` silently becomes `12345`. `autocomplete="one-time-code"` is set so mobile keyboards offer the code
+  from the notification shade; a backup code opts out, because it is not a one-time code to the browser.
+
+- **Countdowns are announced coarsely, not per second.** `prd.md` A11Y-1 requires a countdown to be
+  announced rather than ticking silently, but putting `aria-live` on the seconds interrupts a screen-reader
+  user continuously for the whole lockout. The visible mm:ss readout is `aria-hidden` and a separate live
+  region announces "about N minutes left", changing only when the minute changes.
+
+- **The site chrome is scoped by route group, not toggled per page.** `[locale]/(site)` renders the nav and
+  footer; `[locale]/(auth)` renders neither, because the login and 2FA prototypes both suppress them and the
+  reason is sound — a half-authenticated user has nowhere legitimate to navigate to, and the marketing nav
+  mid-challenge is an invitation to abandon the flow. Route groups add no path segment, so no URL changes.
+  The 404 sits outside both groups and renders its own chrome: a dead end is the page that most needs a way
+  out.
+
 - **Mock layer.** The frontend is built before the backend exists, against handlers matching these contracts
   field-for-field, switched by a single env var. Mock response types are derived from the same definitions
   the live client uses, so drift is a type error rather than a runtime surprise.
@@ -455,10 +498,13 @@ TanStack Query (data) · react-hook-form + zod (forms) · Vitest + React Testing
   dashboard offered a session-replay control that `prd.md` §4.2 forbids; the marketing must not advertise
   the capability either, so a component test asserts the parent copy says so.
 
-- **Removed: the "Institution Demo" call to action.** `prd.md` §15 CL-6 has institutions attach through
-  classroom join codes, with no separate institutional route in v1, so the button had no destination. The
-  secondary call to action is sign-in until that decision changes. **[PROPOSED — confirm]** whether an
-  institutional enquiry route is wanted at all.
+- **Prototype links whose product area does not exist yet resolve to a coming-soon page**, not to `href="#"`
+  and not by deletion. "Institution Demo", the Curriculum / Tutor / Progress nav entries, the footer policy
+  links and the auth screens' Help / Privacy / Terms all land there. A dead anchor reads as broken software,
+  and removing the link loses the prototype's navigation; a page that says "this is being built" is honest
+  about both. *(Supersedes v0.3.2's "Removed: the Institution Demo call to action".)* **[PROPOSED — confirm]**
+  whether an institutional enquiry route is wanted at all — `prd.md` §15 CL-6 has institutions attach through
+  classroom join codes, with no separate institutional route in v1.
 
 ### 3.11 Data Flows
 
@@ -1278,6 +1324,19 @@ identity row exists, or every account must set a password. **[PROPOSED — confi
 place so it is stable when they are implemented; nothing writes to `oauth_identity` in v1.
 
 **Not yet verified:** the migrations have **not been executed against a live database**. First `supabase db push` should be treated as the real test.
+
+### 14.4 Found during frontend Phases 6–9
+
+Implementation findings, recorded here because each one changes what another track must build or must not
+assume.
+
+| # | Finding | Consequence |
+|---|---|---|
+| 1 | **No endpoint switches the factor mid-challenge.** `POST /auth/2fa/resend` re-sends an email OTP to a user *already enrolled* in email OTP, but nothing sends a first OTP to a user enrolled in TOTP — so the prototype's "Email OTP" entry in the chooser has no request behind it | The chooser offers **backup code** as the only alternative factor, since enrolment has already handed those over, and an email-OTP challenge gets a **resend** control instead. **Muneeb** to confirm whether switching factor mid-challenge is intended at all; if it is, it needs a send endpoint |
+| 2 | **Enrolment has no resend.** `2fa/resend` takes a **pending** token, not an `enrollment_token`, so a student whose enrolment OTP is delayed has no endpoint to call | The enrolment screen re-calls `POST /auth/2fa/enroll`, which by shape re-triggers the send. **Muneeb** to confirm that is safe and rate-limited, or to widen `2fa/resend` to accept an `enrollment_token` |
+| 3 | **A `401` on `/auth/login` must not be retried after a refresh.** The generic 401→refresh→retry path fires a guaranteed-to-fail refresh on every mistyped password | Client gained a per-request `noRetry` flag (§3.10). No backend change |
+| 4 | **`email/verify` is idempotent in practice but unspecified.** A verification link is commonly opened twice — a mail client prefetch, then the human | The client treats a second call returning `INVALID_TOKEN` as "already verified" only when it can confirm the state; otherwise it shows the invalid-link panel. **Muneeb** to confirm whether a spent token returns `INVALID_TOKEN` or succeeds idempotently |
+| 5 | **Guardian status has no push channel.** The student's gate screen must discover that the parent confirmed | The client polls `GET /auth/guardian/status`, pausing while the tab is hidden. **Mujtaba** to confirm the polling interval is acceptable against the rate limiter |
 
 ---
 

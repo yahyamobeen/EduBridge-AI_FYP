@@ -196,6 +196,46 @@ export function ArrowLeftIcon({ className }: IconProps) {
   )
 }
 
+export function CheckCircleIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="m6.5 10.2 2.4 2.4 4.6-5" />
+    </Svg>
+  )
+}
+
+export function AlertCircleIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M10 6.2v4.6" />
+      <circle cx="10" cy="13.8" r="0.6" fill="currentColor" />
+    </Svg>
+  )
+}
+
+/** A clock with its hands back: the "this link expired" mark. */
+export function HistoryIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M3 10a7 7 0 1 0 2.1-5" />
+      <path d="M2.5 3v3.2h3.2" />
+      <path d="M10 6.3V10l2.6 1.6" />
+    </Svg>
+  )
+}
+
+/** An opened envelope: "we have sent you mail". */
+export function MailOpenIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M2.5 8.6 10 3.5l7.5 5.1v7a1.4 1.4 0 0 1-1.4 1.4H3.9a1.4 1.4 0 0 1-1.4-1.4z" />
+      <path d="m2.5 8.6 7.5 5 7.5-5" />
+    </Svg>
+  )
+}
+
 /** A padlock inside a shield: the 2FA challenge's brand mark. */
 export function SecurityIcon({ className }: IconProps) {
   return (

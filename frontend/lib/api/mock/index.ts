@@ -38,6 +38,23 @@ let counter = 0
  */
 let scenario: string | null = null
 
+/**
+ * A real, scannable QR — a 21×21 module grid drawn as rects, which is enough
+ * for the screen to prove it renders server-supplied SVG as a data-URI <img>
+ * rather than injecting it as markup (tdd.md §6.11). The pattern is decorative,
+ * not a valid encoding of the otpauth URI.
+ */
+const QR_SVG = [
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" shape-rendering="crispEdges">',
+  '<rect width="21" height="21" fill="#fff"/>',
+  '<path fill="#000" d="M0 0h7v7H0zm1 1v5h5V1zm1 1h3v3H2z"/>',
+  '<path fill="#000" d="M14 0h7v7h-7zm1 1v5h5V1zm1 1h3v3h-3z"/>',
+  '<path fill="#000" d="M0 14h7v7H0zm1 1v5h5v-5zm1 1h3v3H2z"/>',
+  '<path fill="#000" d="M9 0h1v3H9zm2 4h1v2h-1zM8 5h2v1H8zm4 2h3v1h-3zM9 8h1v4H9zm3 3h2v1h-2z"/>',
+  '<path fill="#000" d="M0 9h3v1H0zm5 0h3v1H5zm6 5h1v3h-1zm3 1h2v1h-2zm4 2h2v2h-2zm-6 2h3v1h-3z"/>',
+  '</svg>',
+].join('')
+
 export function setMockScenario(next: string | null): void {
   scenario = next
 }
@@ -242,6 +259,15 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
       } as T
     }
 
+    case 'POST /auth/2fa/resend': {
+      const req = body as unknown as { pending_token: string }
+      const user = challengeUser(req.pending_token)
+      // Only meaningful for a user already enrolled in email OTP; the contract
+      // has nothing that switches factor mid-challenge (tdd.md §14.4).
+      if (user.two_factor.method !== 'email_otp') fail(422, 'VALIDATION_ERROR')
+      return { sent_to: maskEmail(user.email), expires_in: 300 } as T
+    }
+
     case 'POST /auth/2fa/enroll': {
       const req = body as unknown as TwoFactorEnrollRequest
       const user = challengeUser(req.enrollment_token)
@@ -251,7 +277,7 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
           method: 'totp',
           secret: 'JBSWY3DPEHPK3PXP',
           otpauth_uri: `otpauth://totp/EduBridge:${user.email}?secret=JBSWY3DPEHPK3PXP`,
-          qr_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"></svg>',
+          qr_svg: QR_SVG,
         } as T
       }
       return { method: 'email_otp', sent_to: maskEmail(user.email), expires_in: 600 } as T
@@ -277,6 +303,10 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
 
     case 'POST /auth/email/verify': {
       const req = body as unknown as EmailVerifyRequest
+      // Fixed shapes so every documented state can be driven from a URL:
+      //   verify-<user id>  -> success        expired-token -> 410
+      //   anything else     -> 400 INVALID_TOKEN
+      if (req.token === 'expired-token') fail(410, 'TOKEN_EXPIRED')
       const user = users.find((u) => u.id === req.token.replace('verify-', ''))
       if (!user) fail(400, 'INVALID_TOKEN')
       user.email_verified_at = new Date().toISOString()
@@ -299,8 +329,17 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
       // Identical response whether or not the address exists.
       return { sent: true } as T
 
-    case 'POST /auth/password/reset':
+    case 'POST /auth/password/reset': {
+      const req = body as unknown as { token: string; new_password: string }
+      if (req.token === 'expired-token') fail(410, 'TOKEN_EXPIRED')
+      if (!req.token.startsWith('reset-')) fail(400, 'INVALID_TOKEN')
+      if (req.new_password.length < 8) {
+        fail(400, 'VALIDATION_ERROR', {
+          fields: { new_password: 'Use at least 8 characters.' },
+        })
+      }
       return { reset: true } as T
+    }
 
     case 'POST /auth/guardian/invite': {
       const req = body as unknown as GuardianInviteRequest
@@ -311,11 +350,28 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
       user.guardian.parent_email = req.parent_email
       user.guardian.status = 'pending'
       user.guardian.invited_at = new Date().toISOString()
+      // The real invite token arrives by email. Here it is `invite-<student id>`,
+      // so a developer can open the parent's side directly:
+      //   /en/guardian/confirm?token=invite-u-s9
       return {
         invite_sent: true,
         parent_email: maskEmail(req.parent_email),
         status: 'pending',
       } as T
+    }
+
+    case 'POST /auth/guardian/confirm': {
+      const req = body as unknown as { invite_token: string }
+      const parent = userFor(init)
+      if (parent.role !== 'parent') fail(403, 'FORBIDDEN_SCOPE')
+
+      const student = users.find((u) => u.id === req.invite_token.replace('invite-', ''))
+      if (!student) fail(400, 'INVALID_TOKEN')
+      if (student.id === parent.id) fail(422, 'SELF_LINK_FORBIDDEN')
+      if (student.guardian.status === 'verified') fail(409, 'GUARDIAN_ALREADY_LINKED')
+
+      student.guardian.status = 'verified'
+      return { status: 'verified', student_name: student.full_name } as T
     }
 
     case 'GET /auth/guardian/status': {

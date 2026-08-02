@@ -108,6 +108,11 @@ export type TwoFactorVerifyRequest = {
   type: TwoFactorType
 }
 
+/** Re-sends an email OTP for an ALREADY email-OTP-enrolled challenge (tdd.md §3.1). */
+export type TwoFactorResendRequest = { pending_token: string }
+
+export type TwoFactorResendResponse = { sent_to: string; expires_in: number }
+
 export type TwoFactorVerifyResponse = {
   access_token: string
   token_type: 'bearer'
@@ -172,6 +177,22 @@ export type GuardianInviteResponse = {
   invite_sent: boolean
   parent_email: string
   status: GuardianStatus
+}
+
+/**
+ * ASSUMPTION, flagged for Mujtaba. `guardian/confirm` is authenticated as the
+ * parent (tdd.md §3.1) but the request body is not specified anywhere. The
+ * invite link has to identify WHICH pending link is being confirmed, otherwise
+ * a parent with two children cannot say which one — so the token from the email
+ * travels in the body, matching the rule that a token is always a body field
+ * (decision 6). If Mujtaba's implementation keys off the parent's identity
+ * alone, this field is dropped and nothing else changes.
+ */
+export type GuardianConfirmRequest = { invite_token: string }
+
+export type GuardianConfirmResponse = {
+  status: GuardianStatus
+  student_name: string
 }
 
 export type GuardianStatusResponse = {

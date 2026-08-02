@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { AuthFooterLinks } from '@/components/auth/AuthFooterLinks'
+import { AuthPanel, AuthShell } from '@/components/auth/AuthShell'
 import { CodeInput } from '@/components/auth/CodeInput'
 import { CountdownReadout } from '@/components/auth/Countdown'
 import { LockedPanel } from '@/components/auth/LockedPanel'
@@ -16,7 +16,7 @@ import {
   SecurityIcon,
 } from '@/components/ui/Icon'
 import { useRouter } from '@/i18n/navigation'
-import { getMe, startSession, twoFactorVerify } from '@/lib/api/endpoints'
+import { getMe, startSession, twoFactorResend, twoFactorVerify } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { TwoFactorMethod, TwoFactorType } from '@/lib/api/types'
 import { clearAllChallenges, getPendingChallenge } from '@/lib/auth/challenge'
@@ -58,18 +58,28 @@ type Screen = 'code' | 'options' | 'locked' | 'expired'
  *     reload, which is a demonstration of the visual rather than the rule.
  *
  * CONTRACT GAP, deliberately not papered over: the prototype offers "Email OTP
- * — send a code to s***@…" as an alternative to TOTP, but no endpoint sends an
- * OTP during a challenge, and none resends one. So the alternative offered here
- * is the backup code, which needs no send step because enrolment already handed
- * the codes over. Raised with Muneeb; if a send endpoint lands, email OTP joins
- * this list unchanged.
+ * — send a code to s***@…" as an alternative to TOTP, but nothing SWITCHES the
+ * factor mid-challenge. `POST /auth/2fa/resend` re-sends to a user already
+ * enrolled in email OTP — which is why this screen has a resend control — but
+ * no endpoint sends a first OTP to a TOTP-enrolled user. So the alternative
+ * offered in the chooser is the backup code, which needs no send step because
+ * enrolment already handed the codes over. Raised with Muneeb (tdd.md §14.4);
+ * if a send endpoint lands, email OTP joins the chooser unchanged.
  */
 export function TwoFactorChallenge() {
   const t = useTranslations('auth.twoFactor')
   const te = useTranslations('auth.errors')
   const router = useRouter()
 
-  const challenge = getPendingChallenge()
+  /**
+   * Captured ONCE for the life of this screen, not re-read each render.
+   *
+   * A successful verify calls `clearAllChallenges()` so a spent token cannot be
+   * replayed. Re-reading the store after that would find `null` and fire the
+   * guard below, sending a user who has just authenticated correctly back to
+   * /login — racing the redirect to their actual destination.
+   */
+  const [challenge] = useState(getPendingChallenge)
 
   const [type, setType] = useState<TwoFactorType>(challenge?.method ?? 'totp')
   const [code, setCode] = useState('')
@@ -80,6 +90,8 @@ export function TwoFactorChallenge() {
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(null)
   const [shaking, setShaking] = useState(false)
   const [focusKey, setFocusKey] = useState(0)
+  const [resending, setResending] = useState(false)
+  const [resentAt, setResentAt] = useState<string | null>(null)
 
   /**
    * No challenge in memory means this screen was opened directly, or reloaded
@@ -110,6 +122,26 @@ export function TwoFactorChallenge() {
     setFormError(null)
     setScreen('code')
     setFocusKey((k) => k + 1)
+  }
+
+  async function resend() {
+    if (challenge === null) return
+    setResending(true)
+    setFormError(null)
+    try {
+      const result = await twoFactorResend({ pending_token: challenge.token })
+      // Latched, not on a cooldown timer: the endpoint is rate-limited server
+      // side, and a second press within one challenge has nothing useful to do.
+      setResentAt(result.sent_to)
+    } catch (error) {
+      setFormError(
+        error instanceof ApiError && error.code === 'RATE_LIMITED'
+          ? te('rateLimited')
+          : te('generic'),
+      )
+    } finally {
+      setResending(false)
+    }
   }
 
   function reject(message: string) {
@@ -185,179 +217,168 @@ export function TwoFactorChallenge() {
   }
 
   return (
-    <div className="relative flex flex-grow items-center justify-center overflow-hidden p-margin-mobile md:p-margin-desktop">
-      {/* Prototype backdrop: three blurred discs, measured at 80/100/60px blur. */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
-        aria-hidden="true"
-      >
-        <div className="absolute -end-[5%] -top-[10%] h-[40%] w-[40%] rounded-full bg-primary-fixed-dim/20 blur-[80px]" />
-        <div className="absolute -bottom-[10%] -start-[10%] h-[50%] w-[50%] rounded-full bg-student-blue/40 blur-[100px]" />
-        <div className="absolute start-[20%] top-[40%] h-[30%] w-[30%] rounded-full bg-surface-container-high/50 blur-[60px]" />
-      </div>
+    <AuthShell>
+      <>
+        {screen === 'locked' && (
+          <LockedPanel lockedUntilMs={lockedUntilMs} onExpire={onLockExpiry} />
+        )}
 
-      <div className="relative z-10 w-full max-w-md">
-        <div className="mb-8 flex justify-center">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded bg-primary-container text-on-primary shadow-sm">
-              <SecurityIcon className="h-6 w-6" />
-            </div>
-            <span className="font-headline text-headline-md text-primary">{t('brand')}</span>
-          </div>
-        </div>
-
-        <div className="relative overflow-hidden rounded-md border border-outline-variant bg-surface-container-lowest p-8 shadow-sm transition-all duration-300">
-          {screen === 'locked' && (
-            <LockedPanel lockedUntilMs={lockedUntilMs} onExpire={onLockExpiry} />
-          )}
-
-          {screen === 'expired' && (
-            <div
-              role="alert"
-              className="flex flex-col items-center space-y-6 py-4 text-center motion-safe:animate-fade-in-up"
+        {screen === 'expired' && (
+          <AuthPanel
+            icon={<SecurityIcon className="h-8 w-8" />}
+            title={t('expiredTitle')}
+            body={t('expiredBody')}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                clearAllChallenges()
+                router.replace('/login')
+              }}
+              className="w-full rounded bg-primary-container px-4 py-4 text-label-caps uppercase tracking-wider text-on-primary transition-colors hover:bg-primary"
             >
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-container text-on-surface-variant">
-                <SecurityIcon className="h-8 w-8" />
-              </div>
-              <div>
-                <h2 className="mb-2 font-headline text-headline-md text-on-surface">
-                  {t('expiredTitle')}
-                </h2>
-                <p className="text-body-md text-on-surface-variant">{t('expiredBody')}</p>
-              </div>
+              {t('backToSignIn')}
+            </button>
+          </AuthPanel>
+        )}
+
+        {screen === 'options' && (
+          <div className="flex flex-col space-y-6 motion-safe:animate-fade-in-up">
+            <div className="mb-2 flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => {
-                  clearAllChallenges()
-                  router.replace('/login')
-                }}
-                className="w-full rounded bg-primary-container px-4 py-4 text-label-caps uppercase tracking-wider text-on-primary transition-colors hover:bg-primary"
+                onClick={() => setScreen('code')}
+                aria-label={t('back')}
+                className="flex items-center justify-center rounded-full p-2 text-on-surface-variant transition-colors hover:bg-surface-variant"
               >
-                {t('backToSignIn')}
+                <ArrowLeftIcon className="h-5 w-5 rtl:-scale-x-100" />
               </button>
+              <h2 className="font-headline text-headline-md text-on-surface">
+                {t('optionsTitle')}
+              </h2>
             </div>
-          )}
+            <p className="text-body-sm text-on-surface-variant">{t('optionsBody')}</p>
 
-          {screen === 'options' && (
-            <div className="flex flex-col space-y-6 motion-safe:animate-fade-in-up">
-              <div className="mb-2 flex items-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => setScreen('code')}
-                  aria-label={t('back')}
-                  className="flex items-center justify-center rounded-full p-2 text-on-surface-variant transition-colors hover:bg-surface-variant"
-                >
-                  <ArrowLeftIcon className="h-5 w-5 rtl:-scale-x-100" />
-                </button>
-                <h2 className="font-headline text-headline-md text-on-surface">
-                  {t('optionsTitle')}
-                </h2>
-              </div>
-              <p className="text-body-sm text-on-surface-variant">{t('optionsBody')}</p>
+            <div className="space-y-3">
+              {isBackup ? (
+                <MethodOption
+                  icon={<MailIcon className="h-5 w-5" />}
+                  title={t(enrolled === 'totp' ? 'methodTotpTitle' : 'methodEmailTitle')}
+                  body={
+                    enrolled === 'totp'
+                      ? t('methodTotpBody')
+                      : t('methodEmailBody', { email: maskEmail(challenge.email) })
+                  }
+                  onSelect={() => switchTo(enrolled)}
+                />
+              ) : (
+                <MethodOption
+                  icon={<KeyIcon className="h-5 w-5" />}
+                  title={t('methodBackupTitle')}
+                  body={t('methodBackupBody')}
+                  onSelect={() => switchTo('backup_code')}
+                />
+              )}
+            </div>
+          </div>
+        )}
 
-              <div className="space-y-3">
-                {isBackup ? (
-                  <MethodOption
-                    icon={<MailIcon className="h-5 w-5" />}
-                    title={t(enrolled === 'totp' ? 'methodTotpTitle' : 'methodEmailTitle')}
-                    body={
-                      enrolled === 'totp'
-                        ? t('methodTotpBody')
-                        : t('methodEmailBody', { email: maskEmail(challenge.email) })
-                    }
-                    onSelect={() => switchTo(enrolled)}
-                  />
-                ) : (
-                  <MethodOption
-                    icon={<KeyIcon className="h-5 w-5" />}
-                    title={t('methodBackupTitle')}
-                    body={t('methodBackupBody')}
-                    onSelect={() => switchTo('backup_code')}
-                  />
+        {screen === 'code' && (
+          <div className="flex flex-col space-y-6">
+            <div className="text-center">
+              <h1 className="mb-2 font-headline text-headline-lg-mobile text-on-surface md:text-headline-lg">
+                {t('title')}
+              </h1>
+              <p className="text-body-md text-on-surface-variant">
+                {isBackup
+                  ? t('promptBackup')
+                  : type === 'email_otp'
+                    ? t('promptEmail', { email: maskEmail(challenge.email) })
+                    : t('promptTotp')}
+              </p>
+            </div>
+
+            <form onSubmit={submit} className="space-y-6" noValidate>
+              {formError && <FormBanner>{formError}</FormBanner>}
+
+              <div
+                className={shaking ? 'motion-safe:animate-shake' : undefined}
+                onAnimationEnd={() => setShaking(false)}
+              >
+                <CodeInput
+                  id="two-factor-code"
+                  label={t('codeLabel')}
+                  value={code}
+                  onChange={setCode}
+                  length={length}
+                  alphanumeric={isBackup}
+                  invalid={codeError !== null}
+                  describedBy={codeError !== null ? 'two-factor-code-error' : undefined}
+                  focusKey={focusKey}
+                  disabled={submitting}
+                />
+                {codeError !== null && (
+                  <div className="mt-2 flex justify-center">
+                    <ErrorText id="two-factor-code-error">{codeError}</ErrorText>
+                  </div>
                 )}
               </div>
-            </div>
-          )}
 
-          {screen === 'code' && (
-            <div className="flex flex-col space-y-6">
-              <div className="text-center">
-                <h1 className="mb-2 font-headline text-headline-lg-mobile text-on-surface md:text-headline-lg">
-                  {t('title')}
-                </h1>
-                <p className="text-body-md text-on-surface-variant">
-                  {isBackup
-                    ? t('promptBackup')
-                    : type === 'email_otp'
-                      ? t('promptEmail', { email: maskEmail(challenge.email) })
-                      : t('promptTotp')}
-                </p>
-              </div>
-
-              <form onSubmit={submit} className="space-y-6" noValidate>
-                {formError && <FormBanner>{formError}</FormBanner>}
-
-                <div
-                  className={shaking ? 'motion-safe:animate-shake' : undefined}
-                  onAnimationEnd={() => setShaking(false)}
-                >
-                  <CodeInput
-                    id="two-factor-code"
-                    label={t('codeLabel')}
-                    value={code}
-                    onChange={setCode}
-                    length={length}
-                    alphanumeric={isBackup}
-                    invalid={codeError !== null}
-                    describedBy={codeError !== null ? 'two-factor-code-error' : undefined}
-                    focusKey={focusKey}
-                    disabled={submitting}
-                  />
-                  {codeError !== null && (
-                    <div className="mt-2 flex justify-center">
-                      <ErrorText id="two-factor-code-error">{codeError}</ErrorText>
-                    </div>
-                  )}
-                </div>
-
-                {/*
+              {/*
                   The challenge itself expires. The prototype has no such
                   indicator, so a student typing slowly on a shared phone would
                   simply be told "invalid" with no explanation.
                 */}
-                {!isBackup && (
-                  <p className="flex items-center justify-center gap-1.5 text-body-sm text-on-surface-variant">
-                    {t('expiresIn')}
-                    <CountdownReadout targetMs={challenge.expiresAtMs} onExpire={onExpiry} />
-                  </p>
-                )}
+              {!isBackup && (
+                <p className="flex items-center justify-center gap-1.5 text-body-sm text-on-surface-variant">
+                  {t('expiresIn')}
+                  <CountdownReadout targetMs={challenge.expiresAtMs} onExpire={onExpiry} />
+                </p>
+              )}
 
-                <button
-                  type="submit"
-                  disabled={submitting || code.length !== length}
-                  className="flex w-full items-center justify-center gap-2 rounded bg-primary-container px-4 py-4 text-label-caps uppercase tracking-wider text-on-primary transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? t('verifying') : t('verify')}
-                  <ArrowIcon className="h-4 w-4 rtl:-scale-x-100" />
-                </button>
-              </form>
+              {/*
+                  Resend exists ONLY for a challenge already using email OTP.
+                  `2fa/resend` re-sends to the enrolled method; there is no
+                  endpoint that sends a first OTP to a TOTP user, which is why
+                  the chooser above offers a backup code rather than a switch
+                  (tdd.md §14.4 finding 1).
+                */}
+              {type === 'email_otp' && (
+                <p className="text-center text-body-sm text-on-surface-variant">
+                  <button
+                    type="button"
+                    onClick={resend}
+                    disabled={resending || resentAt !== null}
+                    className="font-semibold text-primary transition-colors hover:text-primary-container disabled:cursor-not-allowed disabled:text-on-surface-variant"
+                  >
+                    {resentAt !== null ? t('resent') : resending ? t('resending') : t('resend')}
+                  </button>
+                </p>
+              )}
 
-              <div className="border-t border-surface-variant pt-4 text-center">
-                <button
-                  type="button"
-                  onClick={() => setScreen('options')}
-                  className="text-body-sm text-primary transition-colors hover:text-primary-container"
-                >
-                  {t('tryAnotherWay')}
-                </button>
-              </div>
+              <button
+                type="submit"
+                disabled={submitting || code.length !== length}
+                className="flex w-full items-center justify-center gap-2 rounded bg-primary-container px-4 py-4 text-label-caps uppercase tracking-wider text-on-primary transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submitting ? t('verifying') : t('verify')}
+                <ArrowIcon className="h-4 w-4 rtl:-scale-x-100" />
+              </button>
+            </form>
+
+            <div className="border-t border-surface-variant pt-4 text-center">
+              <button
+                type="button"
+                onClick={() => setScreen('options')}
+                className="text-body-sm text-primary transition-colors hover:text-primary-container"
+              >
+                {t('tryAnotherWay')}
+              </button>
             </div>
-          )}
-        </div>
-
-        <AuthFooterLinks />
-      </div>
-    </div>
+          </div>
+        )}
+      </>
+    </AuthShell>
   )
 }
 

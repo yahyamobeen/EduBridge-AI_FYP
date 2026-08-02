@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { AuthField } from '@/components/auth/AuthField'
 import { CountdownReadout } from '@/components/auth/Countdown'
 import { LockedPanel } from '@/components/auth/LockedPanel'
+import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowIcon, LockIcon, MailIcon, TeachIcon } from '@/components/ui/Icon'
 import { Link, useRouter } from '@/i18n/navigation'
@@ -253,6 +254,16 @@ export function LoginForm() {
               {t('createAccount')}
             </Link>
           </p>
+
+          {/*
+            This group renders no top nav, so without the switcher here there is
+            no way to change language on the sign-in screen — the one most often
+            reached cold, and the one where an Urdu-first user most needs it
+            (prd.md I18N-1).
+          */}
+          <div className="mt-8 flex justify-center">
+            <LanguageSwitcher />
+          </div>
         </div>
       </section>
     </div>

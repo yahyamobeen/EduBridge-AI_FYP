@@ -17,6 +17,9 @@ const signIn = vi.fn()
 
 vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ push }),
+  // The screen renders no top nav, so it carries its own language switcher —
+  // which needs the locale-aware pathname.
+  usePathname: () => '/login',
   Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),

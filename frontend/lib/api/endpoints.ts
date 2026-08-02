@@ -1,11 +1,27 @@
 import { apiFetch, endSession, rememberSession } from './client'
 import type {
+  EmailResendRequest,
+  EmailVerifyRequest,
+  EmailVerifyResponse,
   EnumsResponse,
+  GuardianConfirmRequest,
+  GuardianConfirmResponse,
+  GuardianInviteRequest,
+  GuardianInviteResponse,
+  GuardianStatusResponse,
   LoginRequest,
   LoginResponse,
   MeResponse,
+  PasswordForgotRequest,
+  PasswordResetRequest,
   RegisterRequest,
   RegisterResponse,
+  TwoFactorConfirmRequest,
+  TwoFactorConfirmResponse,
+  TwoFactorEnrollRequest,
+  TwoFactorEnrollResponse,
+  TwoFactorResendRequest,
+  TwoFactorResendResponse,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponse,
 } from './types'
@@ -57,6 +73,94 @@ export function twoFactorVerify(
   body: TwoFactorVerifyRequest,
 ): Promise<TwoFactorVerifyResponse> {
   return apiFetch<TwoFactorVerifyResponse>('/auth/2fa/verify', { method: 'POST', body })
+}
+
+/**
+ * Re-sends the OTP for a challenge whose enrolled method is ALREADY email OTP.
+ *
+ * It cannot start an email-OTP challenge for a TOTP-enrolled user — there is no
+ * endpoint for that, which is why the challenge screen offers a backup code
+ * rather than a factor switch (tdd.md §14.4 finding 1).
+ */
+export function twoFactorResend(
+  body: TwoFactorResendRequest,
+): Promise<TwoFactorResendResponse> {
+  return apiFetch<TwoFactorResendResponse>('/auth/2fa/resend', { method: 'POST', body })
+}
+
+// ---------------------------------------------------------------------------
+// Two-factor enrolment
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts enrolment in the chosen method. `enrollment_token` travels in the body
+ * (decision 6), so this is not an authenticated call in the usual sense — the
+ * user has no session yet.
+ *
+ * Calling it a second time with the same method is also how an email OTP is
+ * re-sent, because `2fa/resend` takes a pending token rather than an enrollment
+ * token (tdd.md §14.4 finding 2).
+ */
+export function twoFactorEnroll(
+  body: TwoFactorEnrollRequest,
+): Promise<TwoFactorEnrollResponse> {
+  return apiFetch<TwoFactorEnrollResponse>('/auth/2fa/enroll', { method: 'POST', body })
+}
+
+/** Confirms the first code. Returns the backup codes ONCE, plus a session. */
+export function twoFactorConfirm(
+  body: TwoFactorConfirmRequest,
+): Promise<TwoFactorConfirmResponse> {
+  return apiFetch<TwoFactorConfirmResponse>('/auth/2fa/confirm', { method: 'POST', body })
+}
+
+// ---------------------------------------------------------------------------
+// Email verification and password reset
+// ---------------------------------------------------------------------------
+
+/**
+ * The returned `access_token` is scoped to onboarding routes only. If it ever
+ * reached protected resources, verifying an email address alone would be a full
+ * login and 2FA would be bypassable (tdd.md §3.1, contract delta 1).
+ */
+export function verifyEmail(body: EmailVerifyRequest): Promise<EmailVerifyResponse> {
+  return apiFetch<EmailVerifyResponse>('/auth/email/verify', { method: 'POST', body })
+}
+
+export function resendVerification(body: EmailResendRequest): Promise<void> {
+  return apiFetch<void>('/auth/email/resend', { method: 'POST', body })
+}
+
+/**
+ * The response is identical whether or not the address exists (tdd.md §3.1), so
+ * the screen must show the same confirmation either way. Branching on it would
+ * turn this form into an account-enumeration oracle.
+ */
+export function forgotPassword(body: PasswordForgotRequest): Promise<void> {
+  return apiFetch<void>('/auth/password/forgot', { method: 'POST', body })
+}
+
+export function resetPassword(body: PasswordResetRequest): Promise<void> {
+  return apiFetch<void>('/auth/password/reset', { method: 'POST', body })
+}
+
+// ---------------------------------------------------------------------------
+// Guardian gate
+// ---------------------------------------------------------------------------
+
+export function guardianInvite(body: GuardianInviteRequest): Promise<GuardianInviteResponse> {
+  return apiFetch<GuardianInviteResponse>('/auth/guardian/invite', { method: 'POST', body })
+}
+
+export function guardianStatus(signal?: AbortSignal): Promise<GuardianStatusResponse> {
+  return apiFetch<GuardianStatusResponse>('/auth/guardian/status', signal ? { signal } : {})
+}
+
+/** Authenticated as the PARENT (v0.3.2) — the student cannot call this. */
+export function guardianConfirm(
+  body: GuardianConfirmRequest,
+): Promise<GuardianConfirmResponse> {
+  return apiFetch<GuardianConfirmResponse>('/auth/guardian/confirm', { method: 'POST', body })
 }
 
 export function getMe(): Promise<MeResponse> {
