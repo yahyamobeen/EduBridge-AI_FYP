@@ -19,6 +19,11 @@ export const ERROR_CODES = [
   'FORBIDDEN_SCOPE',
   'EMAIL_ALREADY_REGISTERED',
   'GUARDIAN_ALREADY_LINKED',
+  // 422 from `POST /auth/guardian/invite`: no ACTIVE PARENT account uses that
+  // address. The likeliest outcome of the gate screen, not an edge case — the
+  // parent has to sign up before the student can invite them (tdd.md §3.1
+  // decision 2) — so it needs its own message, never the generic one.
+  'GUARDIAN_NOT_FOUND',
   'ATTEMPT_EXISTS',
   'INVALID_CLASS_GROUP',
   'SELF_LINK_FORBIDDEN',

@@ -7,13 +7,26 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import gate
 from app.auth.onboarding import derive_onboarding_state
-from app.auth.schemas import GROUP_LABELS, LoginRequest, RegisterRequest
-from app.auth.security import create_access_token, hash_password, verify_password
+from app.auth.schemas import (
+    GROUP_LABELS,
+    GuardianConfirmRequest,
+    GuardianInviteRequest,
+    LoginRequest,
+    RegisterRequest,
+)
+from app.auth.security import (
+    create_access_token,
+    hash_password,
+    hash_token,
+    verify_password,
+)
 from app.auth.tokens import (
     RefreshTokenReuseError,
     find_token,
     issue_challenge_token,
+    issue_guardian_invite_token,
     revoke_refresh_family,
     revoke_user_tokens,
     rotate_refresh_token,
@@ -22,6 +35,10 @@ from app.core.config import get_settings
 from app.core.db import set_current_user_id
 from app.core.errors import (
     email_already_registered,
+    guardian_already_linked,
+    guardian_not_found,
+    invalid_token,
+    self_link_forbidden,
     two_factor_locked,
     unauthenticated,
 )
@@ -354,8 +371,9 @@ def me(db: Session, user_id: UUID) -> dict:
     is_student = str(row["role"]) == "student"
     class_level = row["class_level"]
 
-    # prd.md §4.3: Classes 9-10 only.
-    guardian_required = is_student and class_level in (9, 10)
+    # prd.md §4.3: Classes 9-10 only. Delegated to gate.py so `me()` and
+    # GET /api/auth/guardian/status cannot drift apart on this rule.
+    guardian_required = gate.guardian_required(is_student=is_student, class_level=class_level)
     # `null`, not the string "none": the contract types this as
     # `GuardianStatus | null`, and `revoked` is a real value that has to pass
     # through rather than being flattened away.
@@ -399,3 +417,173 @@ def me(db: Session, user_id: UUID) -> dict:
         "profile": profile,
         "guardian": {"required": guardian_required, "status": guardian_status},
     }
+
+
+# ----------------------------------------------------------------------------
+# Guardian gate (RBAC-002). PRD §4.3: a class 9-10 student cannot use learning
+# endpoints until a parent confirms an out-of-band invite. No route in this
+# file touches `get_service_db`; the two privileged reads (parent id by email,
+# parent email by student) and the atomic confirm write are the SECURITY
+# DEFINER functions from migration 20260802150000.
+# ----------------------------------------------------------------------------
+
+
+def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteRequest) -> dict:
+    """
+    Student -> parent invite. Requires the parent's account to EXIST (decision
+    5: the parent signs up first); a missing/inactive/non-parent account is a
+    422 GUARDIAN_NOT_FOUND. All writes happen after every validation, so nothing
+    is made that must survive an error.
+    """
+    parent_email = str(payload.parent_email).lower()
+
+    # Self-link is checked against the student's OWN email (readable under
+    # app_user_self_read), not the parent lookup, so a student can't learn
+    # whether an arbitrary address exists from this endpoint's response codes.
+    student = (
+        db.execute(
+            text("SELECT email FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            {"uid": student_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if student is None:
+        raise unauthenticated()
+    if str(student["email"]).lower() == parent_email:
+        raise self_link_forbidden()
+
+    parent_id = db.execute(
+        text("SELECT app.lookup_parent_id_by_email(:email)"), {"email": parent_email}
+    ).scalar_one_or_none()
+    if parent_id is None:
+        raise guardian_not_found()
+
+    already_verified = db.execute(
+        text("SELECT 1 FROM guardian_link WHERE student_id = :sid AND status = 'verified' LIMIT 1"),
+        {"sid": student_id},
+    ).one_or_none()
+    if already_verified is not None:
+        raise guardian_already_linked()
+
+    # Create the link if it is missing, then reset it to pending. Two statements
+    # rather than a read-then-branch, so two invites racing cannot both decide
+    # the row is absent and collide on uq_guardian_pair.
+    #
+    # The INSERT runs under `guardian_link_create` as the student. The RESET does
+    # NOT run under RLS as the student, because `guardian_link_update` is
+    # PARENT-ONLY in the applied database: a student's UPDATE matches zero rows
+    # and raises nothing, which is how re-inviting after a revoke used to return
+    # `invite_sent: true` while leaving the link `revoked` and un-confirmable.
+    # Widening that policy is not the fix — a student who can UPDATE their own
+    # link can set `verified` and clear their own gate. `reinvite_guardian_link`
+    # is the narrow privileged path and can only ever write `pending`
+    # (migration 20260803090000).
+    db.execute(
+        text(
+            "INSERT INTO guardian_link (parent_id, student_id, status) "
+            "VALUES (:pid, :sid, 'pending') "
+            "ON CONFLICT (parent_id, student_id) DO NOTHING"
+        ),
+        {"pid": parent_id, "sid": student_id},
+    )
+    reset_to = db.execute(
+        text("SELECT app.reinvite_guardian_link(:sid, :pid)"),
+        {"sid": student_id, "pid": parent_id},
+    ).scalar_one()
+    if reset_to != "pending":
+        # NULL means nothing was reset, which after the INSERT above can only be
+        # a link that turned `verified` between the check and here. Fail loudly:
+        # an invitation that is already superseded must not be reported as sent.
+        raise guardian_already_linked()
+
+    # Only the newest invite is live: revoking BEFORE issuance means a stale
+    # email link cannot be redeemed after a resend. Both are owner-scoped writes
+    # under RLS as the student.
+    revoke_user_tokens(db, student_id, kind=TokenKind.guardian_invite.value)
+    issue_guardian_invite_token(db, student_id)
+
+    return {
+        "invite_sent": True,
+        "parent_email": _mask_email(parent_email),
+        "status": "pending",
+    }
+
+
+def guardian_status(db: Session, student_id: UUID) -> dict:
+    """
+    The student's gate state. `required` and the gated decision share the pure
+    helpers in gate.py with `me()`. `status` is `null` when there is no link and
+    `revoked` passes through unchanged; the parent email is masked.
+    """
+    profile = (
+        db.execute(
+            text("SELECT class_level FROM student_profile WHERE user_id = :uid"),
+            {"uid": student_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    link = (
+        db.execute(
+            text(
+                "SELECT status, created_at FROM guardian_link g "
+                "WHERE g.student_id = :uid "
+                "ORDER BY (g.status = 'verified') DESC, g.created_at DESC LIMIT 1"
+            ),
+            {"uid": student_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+    # The route is role=student, so is_student is True; class_level comes from
+    # the profile, and a missing profile (defensive) means "not gated".
+    required = gate.guardian_required(
+        is_student=True, class_level=profile["class_level"] if profile is not None else None
+    )
+    guardian_status = str(link["status"]) if link is not None else None
+
+    parent_email = None
+    if link is not None:
+        email = db.execute(
+            text("SELECT app.lookup_guardian_parent_email(:sid)"), {"sid": student_id}
+        ).scalar_one_or_none()
+        if email is not None:
+            parent_email = _mask_email(str(email))
+
+    invited_at = link["created_at"].isoformat() if link is not None else None
+
+    return {
+        "required": required,
+        "status": guardian_status,
+        "parent_email": parent_email,
+        "invited_at": invited_at,
+    }
+
+
+def guardian_confirm(db: Session, parent_id: UUID, payload: GuardianConfirmRequest) -> dict:
+    """
+    Parent confirms a one-time invite token. The atomic write (flip link +
+    consume token) lives inside app.confirm_guardian_link and is the ONLY write
+    here — so nothing is written that must survive an error (transaction safety
+    rule). The function returns the link status BEFORE the transition:
+      * 0 rows        -> unknown/expired/revoked token, or no link  -> 400
+      * 'verified'    -> was already verified (token untouched)      -> 409
+      * 'pending'     -> this call flipped it to verified            -> 200
+    """
+    token_hash = hash_token(payload.invite_token)
+    row = (
+        db.execute(
+            text("SELECT status, student_name FROM app.confirm_guardian_link(:pid, :hash)"),
+            {"pid": parent_id, "hash": token_hash},
+        )
+        .mappings()
+        .one_or_none()
+    )
+
+    if row is None:
+        raise invalid_token()
+    if str(row["status"]) == "verified":
+        raise guardian_already_linked()
+    return {"status": "verified", "student_name": row["student_name"]}

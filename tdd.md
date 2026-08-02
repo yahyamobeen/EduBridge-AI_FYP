@@ -1,9 +1,9 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.3.4
+**Version:** 0.3.5
 **Status:** Draft — under section-by-section review
-**Last Updated:** August 2, 2026
+**Last Updated:** August 3, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen) · **Supervisor:** Dr. Muhammad Arif Butt (FCIT, University of the Punjab)
 **Source of truth:** `prd.md` (this TDD implements it) · **Upstream:** `EDUBRIDGE_AI_PROPOSAL.pdf`
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.5 | 2026-08-03 | EduBridge AI Team | **Guardian gate hardened (RBAC-002 review fixes).** §6.8 gains the `guardian_link` **write boundary**: either participant may INSERT only as `pending`, only the parent may UPDATE and never to `verified`, so the status is reachable through `app.confirm_guardian_link` alone — the policies now enforce the anti-forgery claim §3.1 had been making on their behalf. The student's re-invite reset moves to `app.reinvite_guardian_link`, because the applied `guardian_link_update` is parent-only and the student's UPDATE was matching zero rows **silently**: a resend after a revoke reported success while changing nothing and produced an unconfirmable invitation. §3.1 rule 3 extends to an **unknown class level**, which now fails closed rather than waving the student through. New error code **`GUARDIAN_NOT_FOUND` (422)** catalogued in §7.3 — it was already being returned. Rate limits on the authenticated guardian endpoints key on the **acting user** rather than the address, so a shared school-lab or carrier-NAT address no longer makes one student spend the cohort's allowance. `guardian/confirm` returns `student_name` as **nullable**, matching `app_user.full_name`. |
 | 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend feature-complete (Phases 10–12).** Plan selection, the role guard, the three dashboard shells and the error boundary. §6.11 records a **deviation**: `script-src` now carries `'unsafe-inline'`, because the Phase-1 policy blocked the App Router's inline bootstrap scripts and left the whole application non-interactive in production (**new §14.5**). §9.5 gains two enforced rules — the RTL physical-property sweep and the parent-navigation assertion — plus the requirement that a production build be opened and interacted with before a phase is done. |
 | 0.3.3 | 2026-08-02 | EduBridge AI Team | **Frontend auth screens built (Phases 6–9).** §3.10 gains the rules the implementation forced: challenge credentials (`pending_token`, `enrollment_token`) stored in memory under the access token's rule; the `200`-always-advances login discriminator and its `noRetry` consequence; the 2FA challenge opening on the server's method with a server-driven lockout; `type="text"` for one-time codes; per-minute countdown announcements; site chrome scoped by route group. New **§14.4** records the contract findings for the backend tracks — chiefly that **nothing switches the second factor mid-challenge** (`2fa/resend` only re-sends to a user already enrolled in email OTP), that **enrolment has no resend at all**, and that guardian status has **no push channel**. Prototype links to unbuilt areas now resolve to a coming-soon page rather than being removed. |
 | 0.3.2 | 2026-08-02 | EduBridge AI Team | **Subscriptions + onboarding state.** New `subscription`, `subscription_plan`, `oauth_identity` tables (§5.3a, §5.4) with RLS (§6.8); `onboarding_state` documented as a **derived** field gaining `plan_selection_pending` (§3.1) — the first **non-monotonic** state in the system (§5.8). `guardian/confirm` becomes **authenticated** (§3.1) — the parent signs up first. `email/verify` and `2fa/confirm` now issue tokens, and the 2FA enrolment endpoints take `enrollment_token` in the **body** (§3.1, §7.3). Frontend design specified in depth (§3.10): API client, in-memory access token, `NAV_BY_ROLE`, RTL rule, `qr_svg` handling (§6.11). Teacher tutor access removed to match `/api/tutor/ask` scoping (§3.2, `prd.md` §4.2). Frontend test matrix added (§9.5). |
@@ -190,7 +191,8 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 **Key design decisions:**
 - Passwords hashed with **argon2id** (never MD5 — the supervisor's template's MD5 is the explicit anti-pattern we avoid). Refresh tokens stored hashed, rotated, revocable.
 - RBAC via FastAPI dependencies: `require_role(...)`, `require_subject_scope()`, `require_guardian_verified()`. The gate dependency blocks **every student learning/assessment endpoint** for a Class 9–10 student whose `guardian_link` is not `verified` — `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, and `/api/reports/*` (returns `403 GATE_PENDING`). An authz-matrix test asserts the gate on each such route (§9.4).
-- **Anti-forgery of the gate (mechanism fixed in v0.3.2):** the link is created by a **student-initiated email invite** — the student supplies a parent's address, the parent **signs up**, and confirms the link from their own authenticated account. `guardian_link` has `CHECK(parent_id≠student_id)` and the service enforces `parent_id.role='parent'`.
+- **Anti-forgery of the gate (mechanism fixed in v0.3.2, enforced in the database in v0.3.5):** the link is created by a **student-initiated email invite** — the student supplies a parent's address, the parent **signs up**, and confirms the link from their own authenticated account. `guardian_link` has `CHECK(parent_id≠student_id)` and the service enforces `parent_id.role='parent'`. The RLS write boundary in §6.8 is what makes this more than a convention: neither participant can write `verified` at all, so the token path is the only way in.
+- **The gate FAILS CLOSED on an unknown class level.** A student with no readable `student_profile` row is gated, because under RLS an unreadable row is indistinguishable from an absent one and the failure mode of guessing wrong is serving a 14-year-old as though they were 18. `guardian_required` and the gate agree on this deliberately — if the gate holds, `onboarding_state` must report `guardian_link_pending` so the student lands on a screen that can resolve it.
   - `guardian/confirm` is therefore **authenticated**, not token-only as it was through v0.3.1. Requiring a real parent account before the link verifies is what makes the signal out of band: confirmation happens in a mailbox *and* an account the student does not control.
   - A **redeemable code** was considered and rejected. Any code the student types has, by definition, passed through the student — so it is not out-of-band, and a student could register a throwaway "parent", generate a code and clear their own gate. That is precisely the forgery this control exists to stop (§14 finding 3).
 - **Single canonical parent↔child link:** `guardian_link` is the only source of truth for "a parent may view a child" and for the gate; the guardian-space path (§3.6) creates/verifies a `guardian_link`, it does not rely on `enrollment`.
@@ -205,7 +207,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
   |---|---|---|
   | 1 | `app_user.email_verified_at IS NULL` | `email_verification_pending` |
   | 2 | `two_factor_enrollment.status <> 'active'` | `two_factor_enrollment_pending` |
-  | 3 | student, class 9–10, `guardian_link.status <> 'verified'` | `guardian_link_pending` |
+  | 3 | student, class 9–10 **or class level unknown**, `guardian_link.status <> 'verified'` | `guardian_link_pending` |
   | 4 | student, `subscription.status NOT IN ('trialing','active')` **or no record** | `plan_selection_pending` |
   | 5 | otherwise | `active` |
 
@@ -864,6 +866,7 @@ SET LOCAL app.current_user_id = '<uuid from our JWT>';
 |---|---|
 | Own profile / progress / attempts | `student_id = app.current_user_id()` |
 | Parent → child | `app.is_verified_guardian_of(student)` — requires `guardian_link.status='verified'` |
+| `guardian_link` **writes** | Either participant may INSERT, but only as `pending`; only the **parent** may UPDATE, and never to `verified`. `verified` is therefore reachable through exactly one path — `app.confirm_guardian_link`, which demands an unexpired one-time `guardian_invite` token — and a parent can withdraw consent without being able to grant it. The student's re-invite reset goes through `app.reinvite_guardian_link` for the same reason (§3.1 anti-forgery; migration `20260803090000`) |
 | Teacher → student | `app.teaches_student_subject(student, subject)` — active enrollment in the teacher's space **and** the subject in `teacher_subject_scope` |
 | Chat (`chat_session`/`message`/`visual_aid`) | **Owner only.** No teacher, parent, or admin read path exists |
 | `question_key` | **No policy at all** — the app role can never read answer keys (NFR-8 database backstop) |
@@ -1046,6 +1049,7 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 | 409 | `ATTEMPT_EXISTS` | second quiz attempt blocked |
 | 422 | `INVALID_CLASS_GROUP` | elective group is not valid for the chosen class |
 | 422 | `SELF_LINK_FORBIDDEN` | student used their own address as the parent's |
+| 422 | `GUARDIAN_NOT_FOUND` | no **active parent** account uses that address — the parent signs up first (§3.1), so this is the ordinary outcome of the gate screen, not an edge case, and the client must render a next step rather than a generic failure |
 | 422 | `NOT_GROUNDED` | no confident curriculum answer (degrade) |
 | 429 | `RATE_LIMITED` | over limit; `Retry-After` header |
 | 503 | `MODEL_UNAVAILABLE` | fallback path engaged |

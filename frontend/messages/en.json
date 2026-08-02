@@ -320,7 +320,8 @@
       "changeEmail": "Sent to the wrong address?",
       "verifiedTitle": "Guardian linked",
       "verifiedBody": "Your parent has approved the link. Your account is ready.",
-      "continue": "Continue"
+      "continue": "Continue",
+      "notFoundError": "No parent account uses that address yet. Ask them to sign up first, then send the invitation again."
     },
     "guardianConfirm": {
       "title": "Approve your child’s account",
@@ -342,7 +343,8 @@
       "invalidTitle": "Invalid invitation",
       "invalidBody": "This invitation link is malformed, expired, or has already been used. Ask your child to send a new one.",
       "selfLinkError": "An account cannot be its own guardian.",
-      "notAParentError": "Only a parent account can approve this link."
+      "notAParentError": "Only a parent account can approve this link.",
+      "confirmedBodyNoName": "You are now linked to your child’s account."
     }
   },
   "landing": {

@@ -40,22 +40,48 @@ LOGIN_LIMIT = Limit(max_requests=10, window_seconds=60)
 REGISTER_LIMIT = Limit(max_requests=5, window_seconds=300)
 REFRESH_LIMIT = Limit(max_requests=30, window_seconds=60)
 
+# Guardian gate (RBAC-002). The status endpoint is polled every 15 s by the
+# gate screen (GuardianGate.tsx, pausing while hidden), so its bucket is wide;
+# it is authenticated and not a brute-force surface. Confirm IS a brute-force
+# surface (one-time token guessing) and mirrors LOGIN. Invite mirrors REGISTER.
+GUARDIAN_STATUS_LIMIT = Limit(max_requests=60, window_seconds=60)
+GUARDIAN_INVITE_LIMIT = Limit(max_requests=5, window_seconds=300)
+GUARDIAN_CONFIRM_LIMIT = Limit(max_requests=10, window_seconds=60)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 
 
-def _client_key(request: Request, bucket: str) -> str:
-    # `request.client.host` is the socket peer. Behind a proxy that is the
-    # proxy, so the deployment must either set trusted-host forwarding or accept
-    # that the limit is per-proxy. Noted rather than silently trusting an
-    # X-Forwarded-For header, which any caller can set.
+def _client_key(request: Request, bucket: str, subject: str | None = None) -> str:
+    # An AUTHENTICATED endpoint keys on the acting user, not the address. The
+    # deployment target is Pakistani school labs and mobile carriers, where a
+    # whole cohort shares one public IP: on an IP key, fifteen students polling
+    # the guardian screen every 15 s exhaust a 60/min bucket and everyone gets a
+    # 429, and five invitations throttle the entire lab. Keying on the user is
+    # both correct and available here, because the auth dependency has already
+    # resolved one. It does mean one address can hold N buckets with N accounts
+    # — acceptable, because creating those accounts goes through `register`,
+    # which is still IP-limited.
+    #
+    # Pre-authentication buckets (register, login, refresh) have no user yet and
+    # stay on the address. `request.client.host` is the socket peer; behind a
+    # proxy that is the proxy, so the deployment must either set trusted-host
+    # forwarding or accept that the limit is per-proxy. Noted rather than
+    # silently trusting an X-Forwarded-For header, which any caller can set.
+    if subject is not None:
+        return f"{bucket}:u:{subject}"
     host = request.client.host if request.client else "unknown"
     return f"{bucket}:{host}"
 
 
-def enforce(request: Request, *, bucket: str, limit: Limit) -> None:
-    """Raise `RATE_LIMITED` when the caller is over the limit for this bucket."""
-    key = _client_key(request, bucket)
+def enforce(request: Request, *, bucket: str, limit: Limit, subject: str | None = None) -> None:
+    """
+    Raise `RATE_LIMITED` when the caller is over the limit for this bucket.
+
+    Pass `subject` (the acting user id) on authenticated endpoints; omit it on
+    pre-authentication ones, which fall back to the client address.
+    """
+    key = _client_key(request, bucket, subject)
     now = time.monotonic()
     cutoff = now - limit.window_seconds
 

@@ -57,6 +57,30 @@ def rate_limited(message: str = "Too many requests. Please slow down.") -> AppEr
     return AppError(code="RATE_LIMITED", message=message, status_code=429)
 
 
+def forbidden_scope(message: str = "This account cannot do that.") -> AppError:
+    return AppError(code="FORBIDDEN_SCOPE", message=message, status_code=403)
+
+
+def gate_pending(message: str = "Parental consent is pending.") -> AppError:
+    return AppError(code="GATE_PENDING", message=message, status_code=403)
+
+
+def self_link_forbidden(message: str = "A parent cannot be linked to themselves.") -> AppError:
+    return AppError(code="SELF_LINK_FORBIDDEN", message=message, status_code=422)
+
+
+def guardian_already_linked(message: str = "A guardian is already linked.") -> AppError:
+    return AppError(code="GUARDIAN_ALREADY_LINKED", message=message, status_code=409)
+
+
+def invalid_token(message: str = "This link is invalid or has expired.") -> AppError:
+    return AppError(code="INVALID_TOKEN", message=message, status_code=400)
+
+
+def guardian_not_found(message: str = "No parent account uses that email.") -> AppError:
+    return AppError(code="GUARDIAN_NOT_FOUND", message=message, status_code=422)
+
+
 def error_envelope(
     *, code: str, message: str, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:

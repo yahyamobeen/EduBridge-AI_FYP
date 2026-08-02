@@ -110,6 +110,33 @@ describe('the student gate', () => {
     expect(screen.getByText(en.auth.guardian.selfLinkError)).toBeInTheDocument()
   })
 
+  it('tells the student the parent has no account yet, inline on the field', async () => {
+    // The parent signs up first (tdd.md §3.1 decision 2), so this is the
+    // likeliest thing to happen on this screen — not an edge case. Before the
+    // code was catalogued it fell through to the generic banner, which reads as
+    // a fault and offers the student no next step.
+    const user = userEvent.setup()
+    status.mockResolvedValue({
+      required: true,
+      status: null,
+      parent_email: null,
+      invited_at: null,
+    })
+    invite.mockRejectedValue(new ApiError(422, 'GUARDIAN_NOT_FOUND', 'no such parent'))
+    wrap(<GuardianGate />)
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(en.auth.guardian.parentEmailLabel)).toBeVisible(),
+    )
+    await user.type(screen.getByLabelText(en.auth.guardian.parentEmailLabel), 'dad@example.com')
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(en.auth.guardian.sendInvite, 'i') }),
+    )
+
+    expect(screen.getByText(en.auth.guardian.notFoundError)).toBeInTheDocument()
+    expect(screen.queryByText(en.auth.errors.generic)).not.toBeInTheDocument()
+  })
+
   it('shows the verified state when the parent has already approved', async () => {
     status.mockResolvedValue({
       required: true,
@@ -155,6 +182,22 @@ describe('the parent confirmation', () => {
     expect(confirmLink).toHaveBeenCalledWith({ invite_token: 'invite-u-s9' })
     expect(screen.getByText(en.auth.guardianConfirm.confirmedTitle)).toBeInTheDocument()
     expect(screen.getByText(/Aisha Khan/)).toBeInTheDocument()
+  })
+
+  it('still confirms when the student has no name on record', async () => {
+    // `app_user.full_name` is nullable. Typed as a required string this was a
+    // 500 on the SUCCESS path, and the rollback meant the parent retried into
+    // the same 500 forever. Neutral copy instead of a name.
+    const user = userEvent.setup()
+    confirmLink.mockResolvedValue({ status: 'verified', student_name: null })
+    wrap(<GuardianConfirm token="invite-u-s9" signedIn />)
+
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(en.auth.guardianConfirm.confirm, 'i') }),
+    )
+
+    expect(screen.getByText(en.auth.guardianConfirm.confirmedTitle)).toBeInTheDocument()
+    expect(screen.getByText(en.auth.guardianConfirm.confirmedBodyNoName)).toBeInTheDocument()
   })
 
   it('treats an already-linked account as done, not as an error', async () => {

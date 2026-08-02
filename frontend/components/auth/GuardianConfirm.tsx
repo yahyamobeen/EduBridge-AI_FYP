@@ -41,7 +41,9 @@ export function GuardianConfirm({
   const router = useRouter()
 
   const [state, setState] = useState<State>(token === null ? 'invalid' : 'ready')
-  const [studentName, setStudentName] = useState('')
+  // Nullable because `app_user.full_name` is. A confirmation is not worth
+  // failing over a missing name — the copy just stops naming the child.
+  const [studentName, setStudentName] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
@@ -94,7 +96,9 @@ export function GuardianConfirm({
           </h1>
           <p className="text-body-md text-on-surface-variant">
             {state === 'confirmed'
-              ? t('confirmedBody', { student: studentName })
+              ? studentName
+                ? t('confirmedBody', { student: studentName })
+                : t('confirmedBodyNoName')
               : state === 'already'
                 ? t('alreadyBody')
                 : state === 'invalid'
