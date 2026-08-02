@@ -36,9 +36,9 @@ def _make_user(session, email: str, **extra) -> str:
 
     The applied database scopes app_user inserts to the acting user, so an
     unbound insert is refused — which is also why `register()` binds the id it
-    is about to create. (`rls_policies.sql` in the repo shows
-    `app_user_insert ... WITH CHECK (true)`; the live policy is stricter, so the
-    file and the database disagree. Worth reconciling separately.)
+    is about to create. (The repo's 20260801120100 once showed the permissive
+    `WITH CHECK (true)`; migration 20260802150000 reconciled the live database
+    to the stricter owner-scoped form.)
     """
     from uuid import uuid4
 
@@ -46,8 +46,9 @@ def _make_user(session, email: str, **extra) -> str:
 
     user_id = uuid4()
     set_current_user_id(session, user_id)
+    role = extra.get("role", "student")
     columns = "id, email, password_hash, role, full_name"
-    values = ":id, :email, 'x', 'student', 'Test User'"
+    values = f":id, :email, 'x', '{role}', 'Test User'"
     if extra.get("verified"):
         columns += ", email_verified_at"
         values += ", now()"
@@ -173,3 +174,141 @@ class TestSetCurrentUserId:
         set_current_user_id(db, user_id)
         bound = db.execute(text("SELECT current_setting('app.current_user_id', true)")).scalar_one()
         assert bound == user_id
+
+
+class TestUnboundAppUserInsertRefused:
+    """
+    RBAC-002 Phase 1. The app_user INSERT policy is owner-scoped
+    (`WITH CHECK (id = app.current_user_id())`), so an application connection
+    that forgets to bind a user FAILS the insert instead of silently creating a
+    row nobody can read back. `register()` binds before inserting, so this never
+    fires in normal operation.
+    """
+
+    def test_insert_without_a_bound_user_is_refused(self, db, unique_email):
+        from uuid import uuid4
+
+        with pytest.raises((ProgrammingError, DBAPIError)):
+            db.execute(
+                text(
+                    "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
+                    "VALUES (:id, :email, 'x', 'student', 'active', 'unbound')"
+                ),
+                {"id": uuid4(), "email": unique_email("unbound")},
+            )
+            db.flush()
+
+
+class TestPartitionDirectAccessDenied:
+    """
+    RBAC-002 Phase 1. The blanket ENABLE/FORCE loop in 20260801120100 skipped
+    `*_default` partitions, leaving the audit and request-log DEFAULT partitions
+    with RLS disabled — a direct `SELECT * FROM audit_log_default` read the
+    whole audit trail past `audit_admin_read`. The migration enabled+forced RLS
+    on them with no policies, so direct access is default-deny while
+    parent-routed writes still land.
+    """
+
+    def test_audit_log_default_is_not_readable_by_a_bound_non_admin(self, db, unique_email):
+        user_id = _make_user(db, unique_email("audit"))
+        db.flush()
+        set_current_user_id(db, user_id)
+
+        assert db.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 0
+
+    def test_api_request_log_default_is_not_readable_either(self, db, unique_email):
+        user_id = _make_user(db, unique_email("reqlog"))
+        db.flush()
+        set_current_user_id(db, user_id)
+
+        assert db.execute(text("SELECT count(*) FROM api_request_log_default")).scalar_one() == 0
+
+
+class TestParentReadsProgressButNeverChat:
+    """
+    prd.md §4.2 / §21 TEL-3: a verified parent reads a child's PROGRESS
+    (student_profile via is_verified_guardian_of) but never the tutor chat
+    content (chat_session/message are student-owner-only). Asserted per table so
+    the boundary is explicit.
+    """
+
+    def test_verified_parent_reads_progress_but_zero_chat_rows(self, db, unique_email):
+        from uuid import uuid4
+
+        student_id = _make_user(db, unique_email("par"), verified=True)
+        set_current_user_id(db, student_id)
+        db.execute(
+            text(
+                "INSERT INTO student_profile "
+                "(user_id, board, class_level, student_group, medium, language_pref) "
+                "VALUES (:id, 'PCTB', 9, 'science', 'en', 'en')"
+            ),
+            {"id": student_id},
+        )
+        chat_id = uuid4()
+        db.execute(
+            text("INSERT INTO chat_session (id, student_id) VALUES (:id, :sid)"),
+            {"id": chat_id, "sid": student_id},
+        )
+        db.execute(
+            text("INSERT INTO message (session_id, role, content) VALUES (:sid, 'student', 'hi')"),
+            {"sid": chat_id},
+        )
+
+        parent_id = _make_user(db, unique_email("par"), role="parent")
+        set_current_user_id(db, parent_id)
+        db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:id)"), {"id": parent_id})
+        db.execute(
+            text(
+                "INSERT INTO guardian_link (parent_id, student_id, status, "
+                "verification_method, verified_at) "
+                "VALUES (:p, :s, 'verified', 'oob_email', now())"
+            ),
+            {"p": parent_id, "s": student_id},
+        )
+        db.flush()
+
+        set_current_user_id(db, parent_id)
+        progress = db.execute(
+            text("SELECT count(*) FROM student_profile WHERE user_id = :s"), {"s": student_id}
+        ).scalar_one()
+        sessions = db.execute(
+            text("SELECT count(*) FROM chat_session WHERE student_id = :s"), {"s": student_id}
+        ).scalar_one()
+        messages = db.execute(
+            text("SELECT count(*) FROM message WHERE session_id = :c"), {"c": chat_id}
+        ).scalar_one()
+
+        assert progress == 1, "a verified parent must read the child's progress"
+        assert sessions == 0, "a parent must not see the child's chat sessions"
+        assert messages == 0, "a parent must not see the child's messages"
+
+    def test_an_unverified_parent_reads_nothing(self, db, unique_email):
+        student_id = _make_user(db, unique_email("par"))
+        set_current_user_id(db, student_id)
+        db.execute(
+            text(
+                "INSERT INTO student_profile "
+                "(user_id, board, class_level, student_group, medium, language_pref) "
+                "VALUES (:id, 'PCTB', 9, 'science', 'en', 'en')"
+            ),
+            {"id": student_id},
+        )
+        parent_id = _make_user(db, unique_email("par"), role="parent")
+        set_current_user_id(db, parent_id)
+        db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:id)"), {"id": parent_id})
+        db.execute(
+            text(
+                "INSERT INTO guardian_link (parent_id, student_id, status) "
+                "VALUES (:p, :s, 'pending')"
+            ),
+            {"p": parent_id, "s": student_id},
+        )
+        db.flush()
+
+        set_current_user_id(db, parent_id)
+        progress = db.execute(
+            text("SELECT count(*) FROM student_profile WHERE user_id = :s"), {"s": student_id}
+        ).scalar_one()
+
+        assert progress == 0, "a pending (unverified) parent must not read progress"
