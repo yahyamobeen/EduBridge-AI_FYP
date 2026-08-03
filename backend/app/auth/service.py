@@ -85,6 +85,13 @@ from app.models.enums import TokenKind, UserRole
 # referenced by subscription.plan_code.
 _DEFAULT_PLAN_CODE = "standard"
 
+# One hour for both email links (tdd.md §3.1). Long enough for a parent to get
+# to a shared computer, short enough that a forwarded mail goes stale.
+_EMAIL_LINK_TTL_SECONDS = 3600
+
+# Ten minutes for an email OTP, matching the code's own copy.
+_EMAIL_OTP_TTL_SECONDS = 600
+
 
 def register(db: Session, payload: RegisterRequest) -> dict:
     # Two DIFFERENT failures, two different codes. Absent student fields are a
@@ -165,9 +172,26 @@ def register(db: Session, payload: RegisterRequest) -> dict:
             {"user_id": new_id},
         )
 
+    # SEND THE VERIFICATION EMAIL. Registration returned
+    # `email_verification_pending` and issued no token and no mail, so the
+    # client showed "check your email" for a message that was never sent. The
+    # only way to receive the first one was to press Resend on a screen that
+    # exists to say the first one is already on its way.
+    #
+    # The locale comes off the request rather than a read-back: this is the one
+    # moment we know it without asking, and `student_profile` is the only place
+    # it is stored, so a teacher or parent has none at all.
+    email = str(payload.email).lower()
+    locale = web_locale(payload.language_pref.value)
+    token = issue_preauth_token(
+        db, new_id, kind=TokenKind.email_verify, ttl_seconds=_EMAIL_LINK_TTL_SECONDS
+    )
+    subject, body = verification_email(build_verification_url(token, locale), locale)
+    _queue_email(email, subject, body)
+
     return {
         "user_id": str(new_id),
-        "email": str(payload.email).lower(),
+        "email": email,
         "role": payload.role.value,
         "onboarding_state": "email_verification_pending",
     }
@@ -511,13 +535,6 @@ def me(db: Session, user_id: UUID) -> dict:
 # ============================================================================
 # KAN-10b — 2FA Enrolment, Challenge, Email Verification, Password Reset
 # ============================================================================
-
-# One hour for both email links (tdd.md §3.1). Long enough for a parent to get
-# to a shared computer, short enough that a forwarded mail goes stale.
-_EMAIL_LINK_TTL_SECONDS = 3600
-
-# Ten minutes for an email OTP, matching the code's own copy.
-_EMAIL_OTP_TTL_SECONDS = 600
 
 
 def _issue_and_send_email_otp(db: Session, user_id: UUID, recipient: Mapping) -> None:
