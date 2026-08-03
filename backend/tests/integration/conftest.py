@@ -21,6 +21,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.db import engine, service_engine
@@ -135,5 +136,70 @@ def service_conn():
 def unique_email():
     def _make(prefix: str = "test") -> str:
         return f"{prefix}-{uuid.uuid4().hex[:12]}@example.com"
+
+    return _make
+
+
+@pytest.fixture
+def make_link(db):
+    """
+    Build a `guardian_link` in a given state.
+
+    A FIXTURE RATHER THAN A RAW INSERT, because migration 20260803090000 closed
+    the hole that let either participant INSERT a link that was already
+    `verified`: `guardian_link_create` now requires `status = 'pending'` and
+    `guardian_link_update` refuses to produce `verified` at all. A link reaches
+    `verified` through exactly one path — `app.confirm_guardian_link` with a
+    valid one-time invite token — so a test that wants one has to take that
+    path. Which is an improvement: the fixture exercises the real transition
+    instead of asserting against a state the application could never produce.
+
+    Leaves the session bound to the PARENT; rebind before reading as anyone else.
+    """
+    from app.auth.security import hash_token
+    from app.auth.tokens import issue_guardian_invite_token
+    from app.core.db import set_current_user_id
+
+    def _as_uuid(value):
+        return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+    def _make(*, parent_id, student_id, status: str = "pending") -> None:
+        parent, student = _as_uuid(parent_id), _as_uuid(student_id)
+
+        set_current_user_id(db, parent)
+        db.execute(
+            text(
+                "INSERT INTO guardian_link (parent_id, student_id, status) "
+                "VALUES (:p, :s, 'pending')"
+            ),
+            {"p": parent, "s": student},
+        )
+        db.flush()
+        if status == "pending":
+            return
+
+        if status == "verified":
+            token = issue_guardian_invite_token(db, student)
+            db.flush()
+            row = db.execute(
+                text("SELECT status FROM app.confirm_guardian_link(:p, :h)"),
+                {"p": parent, "h": hash_token(token)},
+            ).one_or_none()
+            assert row is not None, "confirm_guardian_link refused a freshly issued token"
+        elif status == "revoked":
+            # Withdrawing consent is the one transition a parent may still write
+            # directly — the asymmetry the gate needs.
+            set_current_user_id(db, parent)
+            affected = db.execute(
+                text(
+                    "UPDATE guardian_link SET status = 'revoked' "
+                    "WHERE student_id = :s AND parent_id = :p"
+                ),
+                {"s": student, "p": parent},
+            ).rowcount
+            assert affected == 1, "a parent must be able to revoke their own link"
+        else:  # pragma: no cover -- programmer error in a test
+            raise ValueError(f"unsupported guardian_link status: {status}")
+        db.flush()
 
     return _make

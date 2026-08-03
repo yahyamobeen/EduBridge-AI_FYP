@@ -347,6 +347,20 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
       if (req.parent_email.toLowerCase() === user.email.toLowerCase()) {
         fail(422, 'SELF_LINK_FORBIDDEN')
       }
+      // The parent must already have an account (tdd.md §3.1 decision 2), so
+      // the commonest outcome on this screen is 422 GUARDIAN_NOT_FOUND. The
+      // mock has to model it or the gate screen's likeliest path is never
+      // exercised in development. Any address ending `@parent.test` resolves;
+      // everything else does not.
+      if (
+        !users.some(
+          (u) =>
+            u.role === 'parent' && u.email.toLowerCase() === req.parent_email.toLowerCase(),
+        ) &&
+        !req.parent_email.toLowerCase().endsWith('@parent.test')
+      ) {
+        fail(422, 'GUARDIAN_NOT_FOUND')
+      }
       user.guardian.parent_email = req.parent_email
       user.guardian.status = 'pending'
       user.guardian.invited_at = new Date().toISOString()

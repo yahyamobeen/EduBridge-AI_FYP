@@ -40,6 +40,14 @@ LOGIN_LIMIT = Limit(max_requests=10, window_seconds=60)
 REGISTER_LIMIT = Limit(max_requests=5, window_seconds=300)
 REFRESH_LIMIT = Limit(max_requests=30, window_seconds=60)
 
+# Guardian gate (RBAC-002). The status endpoint is polled every 15 s by the
+# gate screen (GuardianGate.tsx, pausing while hidden), so its bucket is wide;
+# it is authenticated and not a brute-force surface. Confirm IS a brute-force
+# surface (one-time token guessing) and mirrors LOGIN. Invite mirrors REGISTER.
+GUARDIAN_STATUS_LIMIT = Limit(max_requests=60, window_seconds=60)
+GUARDIAN_INVITE_LIMIT = Limit(max_requests=5, window_seconds=300)
+GUARDIAN_CONFIRM_LIMIT = Limit(max_requests=10, window_seconds=60)
+
 # KAN-10b: 2FA, email verification and password reset.
 #
 # TWO LAYERS, because one address is not one user. The deployment target is

@@ -77,3 +77,29 @@ def test_callers_are_independent():
 
     with pytest.raises(AppError):
         enforce(make_request("1.1.1.1"), bucket="t", limit=limit)
+
+
+def test_a_subject_key_separates_users_behind_one_address():
+    """
+    The deployment target is school labs and carrier NAT, where a whole cohort
+    shares one public address. On an address key, one student polling the
+    guardian screen spends everyone's allowance. Authenticated endpoints pass
+    the acting user instead.
+    """
+    limit = Limit(max_requests=1, window_seconds=60)
+    shared = "203.0.113.7"
+
+    enforce(make_request(shared), bucket="guardian_status", limit=limit, subject="user-a")
+    enforce(make_request(shared), bucket="guardian_status", limit=limit, subject="user-b")
+
+    with pytest.raises(AppError):
+        enforce(make_request(shared), bucket="guardian_status", limit=limit, subject="user-a")
+
+
+def test_a_subject_key_still_limits_one_user_across_addresses():
+    """The other half: switching networks must not reset the counter."""
+    limit = Limit(max_requests=1, window_seconds=60)
+    enforce(make_request("1.1.1.1"), bucket="guardian_invite", limit=limit, subject="user-a")
+
+    with pytest.raises(AppError):
+        enforce(make_request("9.9.9.9"), bucket="guardian_invite", limit=limit, subject="user-a")

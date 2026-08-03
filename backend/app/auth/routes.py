@@ -3,13 +3,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import AuthContext, authenticated, read_refresh_token_cookie
+from app.auth.dependencies import (
+    AuthContext,
+    authenticated,
+    read_refresh_token_cookie,
+    require_role,
+)
 from app.auth.schemas import (
     AccessTokenResponse,
     EmailResendRequest,
     EmailVerifyRequest,
     EmailVerifyResponse,
     EnumsResponse,
+    GuardianConfirmRequest,
+    GuardianConfirmResponse,
+    GuardianInviteRequest,
+    GuardianInviteResponse,
+    GuardianStatusResponse,
     LoginRequest,
     LoginResponse,
     MeResponse,
@@ -29,6 +39,9 @@ from app.auth.schemas import (
 from app.auth.service import (
     enums,
     forgot_password,
+    guardian_confirm,
+    guardian_invite,
+    guardian_status,
     login,
     logout,
     me,
@@ -47,6 +60,9 @@ from app.core.db import get_db
 from app.core.ratelimit import (
     EMAIL_RESEND_LIMIT,
     EMAIL_VERIFY_LIMIT,
+    GUARDIAN_CONFIRM_LIMIT,
+    GUARDIAN_INVITE_LIMIT,
+    GUARDIAN_STATUS_LIMIT,
     LOGIN_LIMIT,
     PASSWORD_FORGOT_LIMIT,
     PASSWORD_RESET_LIMIT,
@@ -58,6 +74,7 @@ from app.core.ratelimit import (
     TWO_FA_VERIFY_LIMIT,
     enforce,
 )
+from app.models.enums import UserRole
 
 router = APIRouter(tags=["auth"])
 
@@ -269,3 +286,58 @@ def password_reset_endpoint(
 ) -> None:
     enforce(request, bucket="password_reset", limit=PASSWORD_RESET_LIMIT)
     reset_password(db, payload)
+
+
+# ---------------------------------------------------------------------------
+# Guardian gate (RBAC-002). Role-gated (NOT guardian-gated — a gated student
+# must be able to reach these). invite/status are student-only; confirm is
+# parent-only, so a student can never confirm their own gate through the API.
+#
+# All three pass `subject=` to the limiter so the bucket is per-USER. These are
+# authenticated, and a shared school-lab or carrier-NAT address would otherwise
+# make one student's polling spend the whole cohort's allowance (ratelimit.py).
+# ---------------------------------------------------------------------------
+
+
+@router.post("/auth/guardian/invite", response_model=GuardianInviteResponse)
+def guardian_invite_endpoint(
+    request: Request,
+    payload: GuardianInviteRequest,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> GuardianInviteResponse:
+    enforce(
+        request,
+        bucket="guardian_invite",
+        limit=GUARDIAN_INVITE_LIMIT,
+        subject=str(ctx.user_id),
+    )
+    return GuardianInviteResponse(**guardian_invite(ctx.session, ctx.user_id, payload))
+
+
+@router.get("/auth/guardian/status", response_model=GuardianStatusResponse)
+def guardian_status_endpoint(
+    request: Request,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> GuardianStatusResponse:
+    enforce(
+        request,
+        bucket="guardian_status",
+        limit=GUARDIAN_STATUS_LIMIT,
+        subject=str(ctx.user_id),
+    )
+    return GuardianStatusResponse(**guardian_status(ctx.session, ctx.user_id))
+
+
+@router.post("/auth/guardian/confirm", response_model=GuardianConfirmResponse)
+def guardian_confirm_endpoint(
+    request: Request,
+    payload: GuardianConfirmRequest,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.parent.value))],
+) -> GuardianConfirmResponse:
+    enforce(
+        request,
+        bucket="guardian_confirm",
+        limit=GUARDIAN_CONFIRM_LIMIT,
+        subject=str(ctx.user_id),
+    )
+    return GuardianConfirmResponse(**guardian_confirm(ctx.session, ctx.user_id, payload))

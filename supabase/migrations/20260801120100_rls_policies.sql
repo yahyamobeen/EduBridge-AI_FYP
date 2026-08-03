@@ -149,10 +149,13 @@ CREATE POLICY app_user_self_update ON public.app_user
   USING (id = app.current_user_id())
   WITH CHECK (id = app.current_user_id());
 
--- Registration happens before a session exists, so INSERT is unrestricted here;
--- the API layer owns validation.
+-- Owner-scoped. `register()` binds the id it is about to create BEFORE the
+-- insert (auth/service.py), so this is satisfied there; a forgotten binding
+-- now FAILS the insert instead of silently creating a row nobody can read
+-- back. Migration 20260802150000 applies this same form to databases that
+-- already ran the older `WITH CHECK (true)` version.
 CREATE POLICY app_user_insert ON public.app_user
-  FOR INSERT TO app_backend WITH CHECK (true);
+  FOR INSERT TO app_backend WITH CHECK (id = app.current_user_id());
 
 CREATE POLICY student_profile_read ON public.student_profile
   FOR SELECT TO app_backend

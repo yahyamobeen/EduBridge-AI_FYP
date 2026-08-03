@@ -135,6 +135,12 @@ export function GuardianGate() {
       if (!(error instanceof ApiError)) setFormError(te('generic'))
       else if (error.code === 'SELF_LINK_FORBIDDEN')
         setFieldErrors({ parent_email: t('selfLinkError') })
+      // The parent has to sign up before they can be invited, so "no account
+      // uses that address" is the most likely thing to happen on this screen.
+      // Inline on the field and it reads as a next step; on the generic banner
+      // it read as a fault and left the student with nothing to do.
+      else if (error.code === 'GUARDIAN_NOT_FOUND')
+        setFieldErrors({ parent_email: t('notFoundError') })
       else if (error.code === 'GUARDIAN_ALREADY_LINKED') void refresh()
       else if (error.code === 'VALIDATION_ERROR') setFieldErrors(error.fieldErrors())
       else if (error.code === 'RATE_LIMITED') setFormError(te('rateLimited'))

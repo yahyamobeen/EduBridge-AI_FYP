@@ -192,7 +192,8 @@ export type GuardianConfirmRequest = { invite_token: string }
 
 export type GuardianConfirmResponse = {
   status: GuardianStatus
-  student_name: string
+  /** Nullable: `app_user.full_name` is, and `MeResponse.full_name` already says so. */
+  student_name: string | null
 }
 
 export type GuardianStatusResponse = {

@@ -170,6 +170,46 @@ class GuardianOut(BaseModel):
     status: Literal["pending", "verified", "revoked"] | None = None
 
 
+# ---------------------------------------------------------------------------
+# Guardian gate (RBAC-002). All shapes mirror frontend/lib/api/types.ts
+# exactly; the parent email is masked before it leaves the API.
+# ---------------------------------------------------------------------------
+
+
+class GuardianInviteRequest(BaseModel):
+    parent_email: EmailStr
+
+
+class GuardianInviteResponse(BaseModel):
+    invite_sent: bool
+    parent_email: str
+    status: Literal["pending"]
+
+
+class GuardianConfirmRequest(BaseModel):
+    # A parent with two children must say WHICH link is being confirmed, so the
+    # token from the email travels in the body (a token is always a body field).
+    invite_token: str = Field(min_length=1)
+
+
+class GuardianConfirmResponse(BaseModel):
+    status: Literal["verified"]
+    # Nullable because `app_user.full_name` is (initial_schema.sql L103) and
+    # `MeResponse` already types it that way. Declared as `str` this raised a
+    # ResponseValidationError -> 500 on the SUCCESS path for any student without
+    # a name, and the generator dependency then rolled the verification back, so
+    # the parent retried into the same 500 forever. The client renders neutral
+    # copy instead of a name.
+    student_name: str | None = None
+
+
+class GuardianStatusResponse(BaseModel):
+    required: bool
+    status: Literal["pending", "verified", "revoked"] | None = None
+    parent_email: str | None = None
+    invited_at: str | None = None
+
+
 class MeResponse(BaseModel):
     user_id: str
     email: str
