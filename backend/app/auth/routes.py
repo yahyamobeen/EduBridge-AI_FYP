@@ -11,6 +11,9 @@ from app.auth.dependencies import (
 )
 from app.auth.schemas import (
     AccessTokenResponse,
+    EmailResendRequest,
+    EmailVerifyRequest,
+    EmailVerifyResponse,
     EnumsResponse,
     GuardianConfirmRequest,
     GuardianConfirmResponse,
@@ -20,11 +23,22 @@ from app.auth.schemas import (
     LoginRequest,
     LoginResponse,
     MeResponse,
+    PasswordForgotRequest,
+    PasswordResetRequest,
     RegisterRequest,
     RegisterResponse,
+    TwoFactorConfirmRequest,
+    TwoFactorConfirmResponse,
+    TwoFactorEnrollRequest,
+    TwoFactorEnrollResponse,
+    TwoFactorResendRequest,
+    TwoFactorResendResponse,
+    TwoFactorVerifyRequest,
+    TwoFactorVerifyResponse,
 )
 from app.auth.service import (
     enums,
+    forgot_password,
     guardian_confirm,
     guardian_invite,
     guardian_status,
@@ -33,16 +47,31 @@ from app.auth.service import (
     me,
     refresh,
     register,
+    resend_email_verification,
+    reset_password,
+    two_factor_confirm,
+    two_factor_enroll,
+    two_factor_resend,
+    two_factor_verify,
+    verify_email,
 )
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.ratelimit import (
+    EMAIL_RESEND_LIMIT,
+    EMAIL_VERIFY_LIMIT,
     GUARDIAN_CONFIRM_LIMIT,
     GUARDIAN_INVITE_LIMIT,
     GUARDIAN_STATUS_LIMIT,
     LOGIN_LIMIT,
+    PASSWORD_FORGOT_LIMIT,
+    PASSWORD_RESET_LIMIT,
     REFRESH_LIMIT,
     REGISTER_LIMIT,
+    TWO_FA_CONFIRM_LIMIT,
+    TWO_FA_ENROLL_LIMIT,
+    TWO_FA_RESEND_LIMIT,
+    TWO_FA_VERIFY_LIMIT,
     enforce,
 )
 from app.models.enums import UserRole
@@ -127,6 +156,136 @@ def enums_endpoint(db: Session = Depends(get_db)) -> EnumsResponse:
     # tables a SELECT policy. Before that they were deny-all, which is why this
     # endpoint needed a privileged connection.
     return EnumsResponse(**enums(db))
+
+
+# ============================================================================
+# KAN-10b — 2FA Enrolment, Challenge, Email Verification, Password Reset
+# ============================================================================
+
+
+@router.post("/auth/2fa/enroll", response_model=TwoFactorEnrollResponse)
+def two_factor_enroll_endpoint(
+    request: Request,
+    payload: TwoFactorEnrollRequest,
+    db: Session = Depends(get_db),
+):
+    enforce(request, bucket="2fa_enroll", limit=TWO_FA_ENROLL_LIMIT)
+    return two_factor_enroll(db, payload)
+
+
+@router.post("/auth/2fa/confirm", response_model=TwoFactorConfirmResponse)
+def two_factor_confirm_endpoint(
+    request: Request,
+    response: Response,
+    payload: TwoFactorConfirmRequest,
+    db: Session = Depends(get_db),
+) -> TwoFactorConfirmResponse:
+    enforce(request, bucket="2fa_confirm", limit=TWO_FA_CONFIRM_LIMIT)
+    result = two_factor_confirm(db, payload)
+
+    # Set refresh token as httpOnly cookie
+    settings = get_settings()
+    response.set_cookie(
+        key="refresh_token",
+        value=result["refresh_token"],
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=settings.refresh_token_ttl_days * 86400,
+        path="/api/auth/refresh",
+    )
+
+    # Return response without refresh_token
+    return TwoFactorConfirmResponse(
+        two_factor=result["two_factor"],
+        backup_codes=result["backup_codes"],
+        onboarding_state=result["onboarding_state"],
+        access_token=result["access_token"],
+        expires_in=result["expires_in"],
+    )
+
+
+@router.post("/auth/2fa/verify", response_model=TwoFactorVerifyResponse)
+def two_factor_verify_endpoint(
+    request: Request,
+    response: Response,
+    payload: TwoFactorVerifyRequest,
+    db: Session = Depends(get_db),
+) -> TwoFactorVerifyResponse:
+    enforce(request, bucket="2fa_verify", limit=TWO_FA_VERIFY_LIMIT)
+    result = two_factor_verify(db, payload)
+
+    # Set refresh token as httpOnly cookie
+    settings = get_settings()
+    response.set_cookie(
+        key="refresh_token",
+        value=result["refresh_token"],
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=settings.refresh_token_ttl_days * 86400,
+        path="/api/auth/refresh",
+    )
+
+    # Return response without refresh_token
+    return TwoFactorVerifyResponse(
+        access_token=result["access_token"],
+        token_type=result["token_type"],
+        expires_in=result["expires_in"],
+        onboarding_state=result["onboarding_state"],
+    )
+
+
+@router.post("/auth/2fa/resend", response_model=TwoFactorResendResponse)
+def two_factor_resend_endpoint(
+    request: Request,
+    payload: TwoFactorResendRequest,
+    db: Session = Depends(get_db),
+) -> TwoFactorResendResponse:
+    enforce(request, bucket="2fa_resend", limit=TWO_FA_RESEND_LIMIT)
+    result = two_factor_resend(db, payload)
+    return TwoFactorResendResponse(**result)
+
+
+@router.post("/auth/email/verify", response_model=EmailVerifyResponse)
+def email_verify_endpoint(
+    request: Request,
+    payload: EmailVerifyRequest,
+    db: Session = Depends(get_db),
+) -> EmailVerifyResponse:
+    enforce(request, bucket="email_verify", limit=EMAIL_VERIFY_LIMIT)
+    result = verify_email(db, payload)
+    return EmailVerifyResponse(**result)
+
+
+@router.post("/auth/email/resend", status_code=status.HTTP_204_NO_CONTENT)
+def email_resend_endpoint(
+    request: Request,
+    payload: EmailResendRequest,
+    db: Session = Depends(get_db),
+) -> None:
+    enforce(request, bucket="email_resend", limit=EMAIL_RESEND_LIMIT)
+    resend_email_verification(db, payload)
+
+
+@router.post("/auth/password/forgot", status_code=status.HTTP_204_NO_CONTENT)
+def password_forgot_endpoint(
+    request: Request,
+    payload: PasswordForgotRequest,
+    db: Session = Depends(get_db),
+) -> None:
+    enforce(request, bucket="password_forgot", limit=PASSWORD_FORGOT_LIMIT)
+    forgot_password(db, payload)
+
+
+@router.post("/auth/password/reset", status_code=status.HTTP_204_NO_CONTENT)
+def password_reset_endpoint(
+    request: Request,
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+) -> None:
+    enforce(request, bucket="password_reset", limit=PASSWORD_RESET_LIMIT)
+    reset_password(db, payload)
 
 
 # ---------------------------------------------------------------------------

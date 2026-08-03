@@ -23,6 +23,10 @@ _TEST_ENV = {
     "JWT_SECRET": "0" * 64,
     "JWT_REFRESH_SECRET": "1" * 64,
     "APP_ENV": "test",
+    # Valid Fernet key for TOTP encryption tests. This is a test-only key —
+    # never used in production. Generated with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    "TOTP_ENCRYPTION_KEY": "ZmDfcTF7_60GrrY167zOSPd1kGKO6g49S0kOZkSOb0A=",
     # The default cost is deliberately expensive; these tests hash repeatedly and
     # are asserting behaviour, not tuning.
     "ARGON2_TIME_COST": "1",

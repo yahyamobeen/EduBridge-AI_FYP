@@ -18,6 +18,9 @@ dependencies = [
     "argon2-cffi>=23.1.0",
     "PyJWT>=2.8.0",
     "email-validator>=2.1.0",
+    "cryptography>=42.0.0",
+    "pyotp>=2.9.0",
+    "qrcode[pil]>=7.4.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +30,13 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.5.0",
 ]
+# The transactional-email provider is NOT settled (tdd.md open items) — the
+# seam in app/auth/email.py is, and `EMAIL_PROVIDER=logging` is the default. So
+# the SDK is an extra, installed only where mail is actually sent:
+#   uv sync --extra email
+# Adding a second provider means one more class and one more extra, not a
+# change to any route or service.
+email = ["resend>=2.0.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -43,6 +53,12 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG", "RET", "S"]
 # S101 stays ignored for pytest's assert; ARG001/ARG002 and B008 for FastAPI's
 # dependency-injection signatures.
 ignore = ["S101", "S311", "ARG001", "ARG002", "B008", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# Email bodies are inline-styled HTML, because that is what mail clients
+# render. Wrapping the style attributes to 100 columns would make them harder
+# to read, not easier, and changes nothing about the output.
+"app/auth/email_templates.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

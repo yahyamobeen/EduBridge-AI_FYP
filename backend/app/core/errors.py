@@ -81,6 +81,22 @@ def guardian_not_found(message: str = "No parent account uses that email.") -> A
     return AppError(code="GUARDIAN_NOT_FOUND", message=message, status_code=422)
 
 
+def two_factor_invalid() -> AppError:
+    return AppError(code="TWO_FACTOR_INVALID", message="Invalid or expired code.", status_code=401)
+
+
+def pending_token_expired() -> AppError:
+    return AppError(
+        code="PENDING_TOKEN_EXPIRED",
+        message="Challenge expired. Please sign in again.",
+        status_code=401,
+    )
+
+
+def token_expired(message: str = "This link has expired.") -> AppError:
+    return AppError(code="TOKEN_EXPIRED", message=message, status_code=410)
+
+
 def error_envelope(
     *, code: str, message: str, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -116,12 +132,12 @@ def _unhandled_error_response(request: Request, exc: Exception) -> JSONResponse:
 
     THE EXCEPTION IS LOGGED, WHICH IT PREVIOUSLY WAS NOT. This handler used to
     return the envelope and drop the exception entirely, with no logger
-    configured anywhere — so every crash in production was invisible and the
+    configured anywhere â€” so every crash in production was invisible and the
     first symptom would have been a user reporting it.
 
     The response body still says nothing: a stack or a database message can
     carry an email address, a token fragment or an internal path, and this is
-    reachable by anyone. The request id is the bridge — meaningless to a
+    reachable by anyone. The request id is the bridge â€” meaningless to a
     caller, and enough to find the log line.
     """
     request_id = getattr(request.state, "request_id", None)
