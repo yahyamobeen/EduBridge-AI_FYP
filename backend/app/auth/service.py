@@ -271,12 +271,18 @@ def login(db: Session, payload: LoginRequest) -> dict:
 
     user_id = row["id"]
 
+    # THROUGH THE SECURITY DEFINER FUNCTION, not a plain SELECT. Login has no
+    # bound user, so reading `two_factor_enrollment` directly matched
+    # `two_factor_enrollment_owner` against an unset `app.current_user_id()` and
+    # returned zero rows for EVERY account — which this code then read as "no
+    # second factor yet". A user with active TOTP was handed an enrolment token,
+    # `/2fa/enroll` refused because its own read happens after binding and saw
+    # the truth, and the account became unreachable with the correct password
+    # and the correct authenticator. The lockout check below was dead for the
+    # same reason.
     twofa = (
         db.execute(
-            text(
-                "SELECT method, status, locked_until FROM two_factor_enrollment "
-                "WHERE user_id = :uid"
-            ),
+            text("SELECT method, status, locked_until FROM app.lookup_2fa_for_login(:uid)"),
             {"uid": user_id},
         )
         .mappings()
