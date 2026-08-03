@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { useRouter } from '@/i18n/navigation'
 import { getMe } from '@/lib/api/endpoints'
@@ -38,17 +38,22 @@ export function SessionGuard({
   const router = useRouter()
   const [me, setMe] = useState<MeResponse | null>(null)
   const [checked, setChecked] = useState(false)
-  const started = useRef(false)
 
   useEffect(() => {
-    // ONE identity check per mount. `router` is a fresh object on every render,
-    // so an effect keyed on it re-runs continuously -- which on a metered
-    // connection is a stream of duplicate requests nobody asked for
-    // (prd.md A11Y-2). Remounting still re-checks, which is the point: the
-    // state is re-read on entry, never remembered across one.
-    if (started.current) return
-    started.current = true
-
+    // ONE identity check per mount, expressed as an EMPTY dependency array
+    // rather than a `started` ref.
+    //
+    // THE REF VERSION DEADLOCKED IN DEVELOPMENT. `reactStrictMode` makes React
+    // mount, unmount and remount every component. The unmount set `cancelled`,
+    // discarding the in-flight response; the remount found `started.current`
+    // still true -- refs survive the double-invoke -- and returned early. So
+    // the first request's result was thrown away, the second request was never
+    // made, and neither `setMe` nor `setChecked` ever ran. Every dashboard sat
+    // on "Loading..." forever, for every role, with a perfectly healthy 200
+    // sitting in the network tab.
+    //
+    // It only happened in development, which is the worst place for a bug to
+    // hide: the production build was fine, so nothing in CI could see it.
     let cancelled = false
 
     void (async () => {
@@ -78,10 +83,18 @@ export function SessionGuard({
     return () => {
       cancelled = true
     }
-    // `allow` is a literal at every call site, so it is intentionally not a
-    // dependency -- listing it would re-run the check on every render.
+    // Deliberately empty. `allow` is a literal at every call site, and
+    // `router` is a fresh object on every render -- keying on it would re-run
+    // the identity check continuously, a stream of duplicate requests nobody
+    // asked for on a connection prd.md A11Y-2 says to respect. Capturing it
+    // from the first render is safe: its methods delegate to the app-router
+    // singleton, not to the object.
+    //
+    // Remounting still re-checks, which is the point: onboarding is not
+    // monotonic, so the state is re-read on entry and never remembered across
+    // one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router])
+  }, [])
 
   if (me === null) {
     return (
