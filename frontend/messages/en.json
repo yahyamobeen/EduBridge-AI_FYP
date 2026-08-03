@@ -246,7 +246,8 @@
       "resend": "Send it again",
       "resending": "Sending…",
       "resent": "Sent — check your inbox",
-      "backToSignIn": "Back to sign in"
+      "backToSignIn": "Back to sign in",
+      "resendIn": "Send again in {seconds}s"
     },
     "verifyEmail": {
       "verifyingTitle": "Verifying your email",

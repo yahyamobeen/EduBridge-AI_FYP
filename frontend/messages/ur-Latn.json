@@ -246,7 +246,8 @@
       "resend": "Dobara bhejein",
       "resending": "Bheja ja raha hai…",
       "resent": "Bhej diya — apna inbox dekhein",
-      "backToSignIn": "Sign in par wapas jayein"
+      "backToSignIn": "Sign in par wapas jayein",
+      "resendIn": "{seconds} second baad dobara bhejein"
     },
     "verifyEmail": {
       "verifyingTitle": "Aap ki email ki tasdeeq ho rahi hai",

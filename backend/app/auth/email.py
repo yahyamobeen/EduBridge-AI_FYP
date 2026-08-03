@@ -19,7 +19,9 @@ The factory picks based on ``settings.email_provider``.
 from __future__ import annotations
 
 import atexit
+import html
 import logging
+import re
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Protocol
 
@@ -34,19 +36,43 @@ class EmailSender(Protocol):
     def send(self, to: str, subject: str, html_body: str) -> None: ...
 
 
+def _readable(html_body: str) -> str:
+    """
+    Strip the markup so the code or link is findable in a terminal.
+
+    Development only — see `LoggingEmailSender`. Deliberately crude: this is a
+    debugging aid, not an HTML parser, and pulling in one for it would be a
+    dependency the project does not otherwise need.
+    """
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html_body, flags=re.S | re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(f"  | {line}" for line in lines if line)
+
+
 class LoggingEmailSender:
     """
-    Development: log every email's metadata. The token is in the HTML body,
-    which is deliberately NOT logged — only the recipient, subject, and body
-    length are recorded, so secrets do not leak into log aggregators.
+    Development and CI: write the message to the log instead of sending it.
+
+    THE BODY IS LOGGED, INCLUDING THE ONE-TIME CODE OR LINK, and that is the
+    point. This sender is selected only when `EMAIL_PROVIDER=logging`, which
+    `Settings` REFUSES in production — so there is no deployment in which this
+    line can reach a log aggregator holding real users' codes.
+
+    It was metadata-only, which sounds safer and made the email flows
+    impossible to exercise: the OTP is stored as an HMAC hash, so a code that is
+    neither delivered nor logged cannot be recovered by anyone, and 2FA
+    enrolment by email simply could not be completed on a developer machine.
+    A control that only stops the honest developer is not a control.
     """
 
     def send(self, to: str, subject: str, html_body: str) -> None:
         logger.info(
-            "EMAIL  to=%s  subject=%r  body_length=%d",
+            "EMAIL (not sent - EMAIL_PROVIDER=logging)\n  to:      %s\n  subject: %s\n%s",
             to,
             subject,
-            len(html_body),
+            _readable(html_body),
         )
 
 

@@ -246,7 +246,8 @@
       "resend": "دوبارہ بھیجیں",
       "resending": "بھیجا جا رہا ہے…",
       "resent": "بھیج دیا — اپنا اِن باکس دیکھیں",
-      "backToSignIn": "سائن اِن پر واپس جائیں"
+      "backToSignIn": "سائن اِن پر واپس جائیں",
+      "resendIn": "{seconds} سیکنڈ بعد دوبارہ بھیجیں"
     },
     "verifyEmail": {
       "verifyingTitle": "آپ کی ای میل کی تصدیق ہو رہی ہے",

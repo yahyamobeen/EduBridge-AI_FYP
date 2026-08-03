@@ -66,7 +66,15 @@ $$;
 
 -- ----------------------------------------------------------------------------
 -- 2. Activation records the consumed TOTP counter (NULL for email_otp).
+--
+--    THE DROP IS LOAD-BEARING. Adding a parameter does not replace a function,
+--    it OVERLOADS it — `CREATE OR REPLACE` would have happily left both
+--    `activate_2fa(uuid)` and `activate_2fa(uuid, bigint DEFAULT NULL)` in
+--    place, and a one-argument call then matches both and fails at runtime with
+--    "function name is not unique". Dropping the old arity first is what makes
+--    this a replacement rather than an ambush.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS app.activate_2fa(uuid);
 CREATE OR REPLACE FUNCTION app.activate_2fa(p_user_id uuid, p_counter bigint DEFAULT NULL)
 RETURNS void
 LANGUAGE sql VOLATILE SECURITY DEFINER
@@ -85,7 +93,15 @@ $$;
 
 -- ----------------------------------------------------------------------------
 -- 3. Token status, now including revocation.
+--
+--    ALSO NEEDS THE DROP, for a different reason: `RETURNS TABLE` columns are
+--    OUT parameters, so adding `token_revoked` changes the function's return
+--    type, and PostgreSQL refuses that outright —
+--    "cannot change return type of existing function" (SQLSTATE 42P13).
+--    Unlike the overload above this one fails loudly, which is the better of
+--    the two failure modes and is how it was caught.
 -- ----------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS app.check_token_status(text, token_kind);
 CREATE OR REPLACE FUNCTION app.check_token_status(
   p_token_hash text,
   p_kind       token_kind

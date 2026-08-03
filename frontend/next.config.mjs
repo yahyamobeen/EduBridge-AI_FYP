@@ -28,6 +28,34 @@ import createNextIntlPlugin from 'next-intl/plugin'
  * confines API calls, and `img-src` still allows only self and the `data:` URI
  * that renders the 2FA QR.
  */
+const isDev = process.env.NODE_ENV !== 'production'
+
+/**
+ * The API's origin, when it is not our own.
+ *
+ * `connect-src 'self'` alone is wrong the moment the backend is a separate
+ * origin, which it is in development: the app is served from :3000 and calls
+ * :8000, so EVERY fetch is blocked by CSP before it leaves the browser. The
+ * symptom is a login screen that appears to do nothing.
+ *
+ * Derived from the same variable the client reads, so the two cannot disagree.
+ * Empty when the API is same-origin (a relative `/api`, or a reverse proxy in
+ * production), in which case `'self'` already covers it and nothing is widened.
+ */
+const apiOrigin = (() => {
+  const raw = process.env.NEXT_PUBLIC_API_BASE_URL
+  if (!raw) return ''
+  try {
+    const { origin, protocol } = new URL(raw)
+    // Only a real http(s) origin is a CSP source. Anything else parses to the
+    // opaque origin "null", and emitting that would put a literal `null` into
+    // the directive -- which allows nothing and reads like a bug.
+    return protocol === 'http:' || protocol === 'https:' ? origin : ''
+  } catch {
+    return '' // relative path -- same origin, already covered by 'self'
+  }
+})()
+
 const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -36,13 +64,20 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
+      // `'unsafe-eval'` is DEVELOPMENT ONLY and must stay that way. React uses
+      // eval() in dev to reconstruct call stacks across the server/client
+      // boundary; without it the error overlay reports the CSP violation
+      // instead of the actual bug. React never uses eval() in a production
+      // build, so shipping the directive would weaken script-src for a feature
+      // that is not there. `NODE_ENV` is set by `next build`, not by us.
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
       "style-src 'self' 'unsafe-inline'",
       // Self-hosted via next/font, plus the data: URI used to render the
       // server-supplied 2FA QR without injecting markup (tdd.md §6.11).
       "font-src 'self'",
       "img-src 'self' data:",
-      "connect-src 'self'",
+      // `ws:` in dev only, for Turbopack's hot-reload socket.
+      `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ''}${isDev ? ' ws: wss:' : ''}`,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
