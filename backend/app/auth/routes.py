@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import AuthContext, authenticated, read_refresh_token_cookie
 from app.auth.schemas import (
     AccessTokenResponse,
-    BackupCodesRegenerateResponse,
     EmailResendRequest,
     EmailVerifyRequest,
     EmailVerifyResponse,
@@ -39,7 +38,6 @@ from app.auth.service import (
     reset_password,
     two_factor_confirm,
     two_factor_enroll,
-    two_factor_regenerate_backup_codes,
     two_factor_resend,
     two_factor_verify,
     verify_email,
@@ -47,7 +45,6 @@ from app.auth.service import (
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.ratelimit import (
-    BACKUP_CODES_REGENERATE_LIMIT,
     EMAIL_RESEND_LIMIT,
     EMAIL_VERIFY_LIMIT,
     LOGIN_LIMIT,
@@ -272,16 +269,3 @@ def password_reset_endpoint(
 ) -> None:
     enforce(request, bucket="password_reset", limit=PASSWORD_RESET_LIMIT)
     reset_password(db, payload)
-
-
-@router.post(
-    "/auth/2fa/backup-codes",
-    response_model=BackupCodesRegenerateResponse,
-)
-def backup_codes_regenerate_endpoint(
-    request: Request,
-    ctx: Annotated[AuthContext, Depends(authenticated)],
-) -> BackupCodesRegenerateResponse:
-    enforce(request, bucket="backup_codes_regenerate", limit=BACKUP_CODES_REGENERATE_LIMIT)
-    result = two_factor_regenerate_backup_codes(ctx.session, ctx.user_id)
-    return BackupCodesRegenerateResponse(**result)

@@ -10,9 +10,11 @@ Tests cover:
 - TOTP code verification with ±1 window and replay guard
 """
 
-import pytest
+from datetime import UTC, datetime, timedelta
+
 import pyotp
-from datetime import UTC, datetime
+import pytest
+from cryptography.fernet import InvalidToken
 
 from app.auth.totp import (
     build_otpauth_uri,
@@ -22,6 +24,10 @@ from app.auth.totp import (
     generate_totp_secret,
     verify_totp_code,
 )
+
+# A published RFC-6238 example secret. Hardcoded on purpose: these tests
+# assert TOTP arithmetic, which needs a fixed input.
+TEST_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105 -- test vector, not a credential
 
 
 class TestGenerateTotpSecret:
@@ -42,22 +48,22 @@ class TestGenerateTotpSecret:
 
 class TestBuildOtpauthUri:
     def test_starts_with_otpauth(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         uri = build_otpauth_uri(secret, "test@example.com")
         assert uri.startswith("otpauth://totp/")
 
     def test_contains_secret(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         uri = build_otpauth_uri(secret, "test@example.com")
         assert secret in uri
 
     def test_contains_issuer(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         uri = build_otpauth_uri(secret, "test@example.com")
         assert "EduBridge%20AI" in uri or "EduBridge AI" in uri
 
     def test_contains_email(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         uri = build_otpauth_uri(secret, "test@example.com")
         assert "test@example.com" in uri or "test%40example.com" in uri
 
@@ -103,7 +109,7 @@ class TestFernetEncryption:
         encrypted = encrypt_secret(plaintext)
         # Tamper with a byte in the middle
         tampered = encrypted[:10] + bytes([encrypted[10] ^ 0xFF]) + encrypted[11:]
-        with pytest.raises(Exception):  # InvalidToken
+        with pytest.raises(InvalidToken):
             decrypt_secret(tampered)
 
     def test_different_ciphertexts_for_same_plaintext(self):
@@ -116,7 +122,7 @@ class TestFernetEncryption:
 
 class TestVerifyTotpCode:
     def test_valid_code(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         totp = pyotp.TOTP(secret)
         code = totp.now()
         counter = verify_totp_code(secret, code)
@@ -124,14 +130,23 @@ class TestVerifyTotpCode:
         assert isinstance(counter, int)
 
     def test_wrong_code(self):
-        secret = "JBSWY3DPEHPK3PXP"
-        counter = verify_totp_code(secret, "000000")
-        # May or may not be None depending on whether "000000" happens to be
-        # valid in the current window. If it is, that's fine.
-        # We can't reliably test "wrong code" without controlling time.
+        """
+        A code that is none of the three the guard accepts.
+
+        The previous version passed "000000" and then asserted NOTHING, with a
+        comment explaining that it could not tell whether the result was right.
+        A pinned clock makes it decidable: compute every code the +/-1 window
+        would accept, then submit one that is not among them.
+        """
+        anchor = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+        totp = pyotp.TOTP(TEST_SECRET)
+        accepted = {totp.at(anchor.timestamp() + offset * totp.interval) for offset in (-1, 0, 1)}
+        wrong = next(f"{n:06d}" for n in range(1_000_000) if f"{n:06d}" not in accepted)
+
+        assert verify_totp_code(TEST_SECRET, wrong, now=anchor) is None
 
     def test_replay_guard(self):
-        secret = "JBSWY3DPEHPK3PXP"
+        secret = TEST_SECRET
         totp = pyotp.TOTP(secret)
         code = totp.now()
 
@@ -143,21 +158,43 @@ class TestVerifyTotpCode:
         counter2 = verify_totp_code(secret, code, last_counter=counter1)
         assert counter2 is None
 
-    def test_window_tolerance(self):
-        """Test that ±1 window tolerance works."""
-        secret = "JBSWY3DPEHPK3PXP"
-        totp = pyotp.TOTP(secret)
+    def test_a_code_from_the_previous_step_is_still_accepted(self):
+        """
+        The +/-1 tolerance, asserted rather than hoped for. The old test built
+        codes for the previous and next steps and then checked only the CURRENT
+        one -- which `test_valid_code` already covers -- because without a
+        pinned clock the other two could not be relied on.
+        """
+        anchor = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+        totp = pyotp.TOTP(TEST_SECRET)
 
-        # Get current time and generate codes for previous, current, and next windows
-        now = datetime.now(UTC)
-        prev_time = now.timestamp() - totp.interval
-        next_time = now.timestamp() + totp.interval
+        previous = totp.at(anchor.timestamp() - totp.interval)
+        upcoming = totp.at(anchor.timestamp() + totp.interval)
 
-        prev_code = totp.at(prev_time)
-        curr_code = totp.now()
-        next_code = totp.at(next_time)
+        assert verify_totp_code(TEST_SECRET, previous, now=anchor) is not None
+        assert verify_totp_code(TEST_SECRET, upcoming, now=anchor) is not None
 
-        # All three should be valid (within ±1 window)
-        # Note: due to timing, we might be at a window boundary, so we check
-        # that at least the current code works
-        assert verify_totp_code(secret, curr_code) is not None
+    def test_a_code_two_steps_old_is_rejected(self):
+        """The window is +/-1, not "recently"."""
+        anchor = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+        totp = pyotp.TOTP(TEST_SECRET)
+        stale = totp.at(anchor.timestamp() - 2 * totp.interval)
+
+        assert verify_totp_code(TEST_SECRET, stale, now=anchor) is None
+
+    def test_the_replay_guard_still_admits_a_later_step(self):
+        """
+        Fail-closed must not mean fail-stuck: consuming step N blocks N, not
+        everything after it.
+        """
+        anchor = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+        totp = pyotp.TOTP(TEST_SECRET)
+
+        used = verify_totp_code(TEST_SECRET, totp.at(anchor.timestamp()), now=anchor)
+        assert used is not None
+
+        later = anchor + timedelta(seconds=totp.interval)
+        assert (
+            verify_totp_code(TEST_SECRET, totp.at(later.timestamp()), last_counter=used, now=later)
+            is not None
+        )

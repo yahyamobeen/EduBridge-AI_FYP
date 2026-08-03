@@ -8,8 +8,6 @@ Tests cover:
 - Case-insensitive verification
 """
 
-import pytest
-
 from app.auth.backup_codes import (
     _ALPHABET,
     generate_backup_codes,

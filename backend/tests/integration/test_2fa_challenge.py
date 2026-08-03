@@ -10,12 +10,9 @@ Tests the verification lifecycle:
 - /auth/2fa/resend (email_otp only)
 """
 
-import pytest
-import pyotp
-from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
+import pyotp
 from sqlalchemy import text
 
 from app.auth.tokens import issue_challenge_token
@@ -27,15 +24,26 @@ def _make_user(session, email: str, *, verified: bool = True) -> str:
     """Create a test user, optionally with email verified."""
     user_id = uuid4()
     set_current_user_id(session, user_id)
-    columns = "id, email, password_hash, role, full_name"
-    values = ":id, :email, 'x', 'student', 'Test User'"
+    # Two fixed statements rather than one built by string concatenation. The
+    # value is not attacker-controlled, but building SQL out of f-strings is the
+    # pattern this repo removed from core/db.py and it should not creep back in
+    # through the tests.
     if verified:
-        columns += ", email_verified_at"
-        values += ", now()"
-    session.execute(
-        text(f"INSERT INTO app_user ({columns}) VALUES ({values})"),
-        {"id": user_id, "email": email},
-    )
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name, "
+                "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', now())"
+            ),
+            {"id": user_id, "email": email},
+        )
+    else:
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name) "
+                "VALUES (:id, :email, 'x', 'student', 'Test User')"
+            ),
+            {"id": user_id, "email": email},
+        )
     session.flush()
     set_current_user_id(session, user_id)
     return str(user_id)
@@ -64,9 +72,7 @@ def _enroll_and_activate_totp(client, db, user_id: str) -> tuple[str, list[str]]
 
 def _get_pending_token(db, user_id: str) -> str:
     """Issue a pending token for /2fa/verify."""
-    return issue_challenge_token(
-        db, user_id, kind=TokenKind.two_factor_pending, ttl_seconds=300
-    )
+    return issue_challenge_token(db, user_id, kind=TokenKind.two_factor_pending, ttl_seconds=300)
 
 
 class TestVerifyTotp:
@@ -90,7 +96,7 @@ class TestVerifyTotp:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "access_token" in body
-        assert body["token_type"] == "bearer"
+        assert body["token_type"] == "bearer"  # noqa: S105 -- a scheme name
         assert "expires_in" in body
         assert "onboarding_state" in body
 

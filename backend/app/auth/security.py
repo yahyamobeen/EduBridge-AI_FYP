@@ -58,7 +58,7 @@ def hash_token(token: str) -> str:
 def create_access_token(
     user_id: UUID,
     *,
-    token_type: str = "access",
+    token_type: str = "access",  # noqa: S107 -- a JWT claim value, not a secret
     now: datetime | None = None,
 ) -> tuple[str, int]:
     settings = get_settings()
@@ -86,7 +86,7 @@ def create_onboarding_token(user_id: UUID, *, now: datetime | None = None) -> tu
     enforcement mechanism for the tdd.md §3.1 rule that the email-verify
     token must not reach protected resources.
     """
-    return create_access_token(user_id, token_type="onboarding", now=now)
+    return create_access_token(user_id, token_type="onboarding", now=now)  # noqa: S106
 
 
 def decode_access_token(token: str, *, expected_type: str = "access") -> UUID:

@@ -1,3 +1,5 @@
+import secrets
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from uuid import UUID, uuid4
@@ -7,8 +9,31 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.auth import gate
+from app.auth.backup_codes import generate_backup_codes, hash_backup_code, verify_backup_code
+from app.auth.email import send_async as _queue_email
+from app.auth.email_templates import (
+    build_password_reset_url,
+    build_verification_url,
+    password_reset_email,
+    two_factor_otp_email,
+    verification_email,
+    web_locale,
+)
 from app.auth.onboarding import derive_onboarding_state
-from app.auth.schemas import GROUP_LABELS, LoginRequest, RegisterRequest
+from app.auth.schemas import (
+    GROUP_LABELS,
+    EmailResendRequest,
+    EmailVerifyRequest,
+    LoginRequest,
+    PasswordForgotRequest,
+    PasswordResetRequest,
+    RegisterRequest,
+    TwoFactorConfirmRequest,
+    TwoFactorEnrollRequest,
+    TwoFactorResendRequest,
+    TwoFactorVerifyRequest,
+)
 from app.auth.security import create_access_token, hash_password, hash_token, verify_password
 from app.auth.tokens import (
     RefreshTokenReuseError,
@@ -20,18 +45,33 @@ from app.auth.tokens import (
     revoke_user_tokens,
     rotate_refresh_token,
 )
+from app.auth.totp import (
+    build_otpauth_uri,
+    decrypt_secret,
+    encrypt_secret,
+    generate_qr_svg,
+    generate_totp_secret,
+    verify_totp_code,
+)
 from app.core.config import get_settings
 from app.core.db import set_current_user_id
 from app.core.errors import (
     AppError,
     email_already_registered,
-    forbidden_scope,
     invalid_token,
     pending_token_expired,
     token_expired,
     two_factor_invalid,
     two_factor_locked,
     unauthenticated,
+    validation_error,
+)
+from app.core.ratelimit import (
+    TWO_FA_CONFIRM_USER_LIMIT,
+    TWO_FA_ENROLL_USER_LIMIT,
+    TWO_FA_RESEND_USER_LIMIT,
+    TWO_FA_VERIFY_USER_LIMIT,
+    enforce_subject,
 )
 from app.models.enums import TokenKind, UserRole
 
@@ -347,6 +387,52 @@ _ME_QUERY = text(
 )
 
 
+def onboarding_state_for(
+    db: Session, user_id: UUID, *, two_factor_active: bool | None = None
+) -> str:
+    """
+    The single derivation used by every endpoint that reports `onboarding_state`.
+
+    THIS EXISTS BECAUSE THERE WERE FOUR COPIES. `/2fa/confirm`, `/2fa/verify` and
+    `/email/verify` each rebuilt the derivation inline, each carrying its own
+    `class_level in (9, 10)` and its own guardian lookup. That is one field the
+    frontend routes on being computed four ways: the copies did NOT apply the
+    fail-closed rule in `gate.py`, so a student whose `student_profile` row is
+    missing or unreadable would have been told `active` by `/email/verify` and
+    `guardian_link_pending` by `/auth/me` in the same session.
+
+    `two_factor_active` overrides what the row says. The 2FA endpoints call this
+    in the same transaction that activates the enrolment, and an override is
+    honest about that ordering — re-reading a row we just wrote in order to
+    learn what we wrote is the kind of thing that silently breaks when the
+    binding or the isolation level changes.
+    """
+    row = db.execute(_ME_QUERY, {"uid": user_id}).mappings().one_or_none()
+    if row is None:
+        raise unauthenticated()
+
+    is_student = str(row["role"]) == "student"
+    resolved_2fa = (
+        two_factor_active
+        if two_factor_active is not None
+        else (row["tf_status"] is not None and str(row["tf_status"]) == "active")
+    )
+    return derive_onboarding_state(
+        email_verified=row["email_verified_at"] is not None,
+        two_factor_active=resolved_2fa,
+        is_student=is_student,
+        guardian_required=gate.guardian_required(
+            is_student=is_student, class_level=row["class_level"]
+        ),
+        guardian_status=(
+            str(row["guardian_status"]) if row["guardian_status"] is not None else None
+        ),
+        subscription_status=(
+            str(row["subscription_status"]) if row["subscription_status"] is not None else None
+        ),
+    )
+
+
 def me(db: Session, user_id: UUID) -> dict:
     """
     Identity plus the derived `onboarding_state`.
@@ -362,8 +448,9 @@ def me(db: Session, user_id: UUID) -> dict:
     is_student = str(row["role"]) == "student"
     class_level = row["class_level"]
 
-    # prd.md §4.3: Classes 9-10 only.
-    guardian_required = is_student and class_level in (9, 10)
+    # prd.md §4.3: Classes 9-10 only. Delegated to gate.py so `me()` and
+    # GET /api/auth/guardian/status cannot drift apart on this rule.
+    guardian_required = gate.guardian_required(is_student=is_student, class_level=class_level)
     # `null`, not the string "none": the contract types this as
     # `GuardianStatus | null`, and `revoked` is a real value that has to pass
     # through rather than being flattened away.
@@ -413,7 +500,148 @@ def me(db: Session, user_id: UUID) -> dict:
 # KAN-10b — 2FA Enrolment, Challenge, Email Verification, Password Reset
 # ============================================================================
 
-def two_factor_enroll(db: Session, payload) -> dict:
+# One hour for both email links (tdd.md §3.1). Long enough for a parent to get
+# to a shared computer, short enough that a forwarded mail goes stale.
+_EMAIL_LINK_TTL_SECONDS = 3600
+
+# Ten minutes for an email OTP, matching the code's own copy.
+_EMAIL_OTP_TTL_SECONDS = 600
+
+
+def _issue_and_send_email_otp(db: Session, user_id: UUID, recipient: Mapping) -> None:
+    """
+    Mint a six-digit OTP, store it hashed, and queue the mail.
+
+    The code is stored under the KEYED hash (`hash_token`, HMAC-SHA256 with the
+    app secret), not a bare digest. Six digits is a million possibilities — a
+    plain SHA of that space is a rainbow table, whereas an HMAC is useless to
+    anyone holding a database dump but not the application secret.
+
+    `app.issue_email_otp` revokes any earlier unrevoked OTP in the same
+    statement, so exactly one is live at a time.
+    """
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    db.execute(
+        text("SELECT app.issue_email_otp(:uid, :hash, :expires)"),
+        {
+            "uid": user_id,
+            "hash": hash_token(otp_code),
+            "expires": datetime.now(UTC) + timedelta(seconds=_EMAIL_OTP_TTL_SECONDS),
+        },
+    )
+    locale = _locale_of(recipient)
+    subject, html = two_factor_otp_email(
+        otp_code, expires_minutes=_EMAIL_OTP_TTL_SECONDS // 60, locale=locale
+    )
+    _queue_email(str(recipient["email"]), subject, html)
+
+
+def _raise_for_token_status(db: Session, token: str, kind: TokenKind) -> None:
+    """
+    Turn "the consume function returned nothing" into the RIGHT error code.
+
+    Three outcomes the client renders differently (tdd.md §7.3), and they must
+    not be conflated:
+      * never existed   -> 400 INVALID_TOKEN   ("this link is not valid")
+      * already spent   -> 400 INVALID_TOKEN   (it worked once; it is not stale)
+      * lapsed unused   -> 410 TOKEN_EXPIRED   ("ask for a new one" + a resend)
+
+    Offering a resend for a token that was already used sends the user round a
+    loop they have in fact already completed. `revoked` is what separates the
+    two, which is why `check_token_status` now returns it.
+
+    Always raises; typed as `-> None` because the caller has nothing to do after.
+    """
+    status_row = (
+        db.execute(
+            text("SELECT * FROM app.check_token_status(:hash, :kind)"),
+            {"hash": hash_token(token), "kind": kind.value},
+        )
+        .mappings()
+        .first()
+    )
+    if status_row and status_row["token_expired"] and not status_row["token_revoked"]:
+        raise token_expired()
+    raise invalid_token()
+
+
+def _lookup_for_email_flow(db: Session, email: str) -> Mapping | None:
+    """
+    The read behind `password/forgot` and `email/resend`, plus the constant-time
+    filler.
+
+    The argon2 verify runs on BOTH paths so an unknown address costs what a
+    known one does. It is not sufficient on its own — see `email.send_async` for
+    the part that actually mattered — but it is still the right floor, because
+    it makes the two branches expensive in the same way.
+    """
+    row = (
+        db.execute(
+            text("SELECT * FROM app.lookup_user_for_email_flow(:email)"),
+            {"email": email},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    verify_password("dummy", _dummy_password_hash())
+    # A suspended or deleted account is treated exactly like an unknown one:
+    # nothing is sent, and the caller cannot tell the two apart.
+    if row is None or str(row["status"]) != "active":
+        return None
+    return row
+
+
+def _locale_of(row: Mapping) -> str:
+    """Recipient's locale for links and templates; English when unknown."""
+    return web_locale(row["language_pref"])
+
+
+def _lockout_after(failed_attempts: int) -> datetime | None:
+    """
+    The lockout ladder (tdd.md §6.9 D7). Thresholds are evaluated in order and
+    the HIGHEST one met wins, so the penalty escalates. `None` means the first
+    threshold has not been reached yet.
+    """
+    settings = get_settings()
+    locked_until = None
+    for threshold, lockout_seconds in settings.two_factor_lockout_thresholds:
+        if failed_attempts >= threshold:
+            locked_until = datetime.now(UTC) + timedelta(seconds=lockout_seconds)
+    return locked_until
+
+
+def _record_2fa_failure(db: Session, user_id: UUID, failed_attempts: int) -> None:
+    """
+    Persist a wrong code and any lockout it triggers, then COMMIT.
+
+    The commit is the whole point. The caller raises immediately afterwards, and
+    that exception unwinds through `get_db`, which rolls the session back — so a
+    lockout written and not committed is a lockout that never happened, and the
+    attacker gets unlimited attempts while the code looks correct. Same shape as
+    the refresh-reuse handler in `refresh()`.
+
+    Shared by /2fa/confirm and /2fa/verify so enrolment and challenge cannot
+    drift apart on the threshold table.
+    """
+    db.execute(
+        text("SELECT app.verify_2fa_failure(:uid, :failed, :locked)"),
+        {
+            "uid": user_id,
+            "failed": failed_attempts,
+            "locked": _lockout_after(failed_attempts),
+        },
+    )
+    db.execute(
+        text(
+            "INSERT INTO audit_log (actor_id, action, target) "
+            "VALUES (:uid, '2fa_verify_failed', 'two_factor_enrollment')"
+        ),
+        {"uid": user_id},
+    )
+    db.commit()
+
+
+def two_factor_enroll(db: Session, payload: TwoFactorEnrollRequest) -> dict:
     """
     POST /auth/2fa/enroll
 
@@ -444,8 +672,8 @@ def two_factor_enroll(db: Session, payload) -> dict:
 
     user_id = token_row.user_id
 
-    # Bind user to transaction
     set_current_user_id(db, user_id)
+    enforce_subject(bucket="2fa_enroll", subject=str(user_id), limit=TWO_FA_ENROLL_USER_LIMIT)
 
     # Reject if 2FA is already active (cannot re-enroll)
     enrollment_check = db.execute(
@@ -459,74 +687,46 @@ def two_factor_enroll(db: Session, payload) -> dict:
             message="2FA is already active. Cannot re-enroll.",
         )
 
-    if payload.method == "totp":
-        # Generate TOTP secret
-        from app.auth.totp import build_otpauth_uri, encrypt_secret, generate_qr_svg, generate_totp_secret
-        secret = generate_totp_secret()
-        encrypted = encrypt_secret(secret)
+    recipient = (
+        db.execute(
+            text(
+                "SELECT u.email, sp.language_pref FROM app_user u "
+                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one()
+    )
 
-        # Upsert enrollment (re-calling /2fa/enroll regenerates the secret)
+    if payload.method == "totp":
+        secret = generate_totp_secret()
         db.execute(
             text("SELECT app.upsert_2fa_enrollment(:uid, :method, :secret)"),
-            {"uid": user_id, "method": "totp", "secret": encrypted},
+            {"uid": user_id, "method": "totp", "secret": encrypt_secret(secret)},
         )
 
-        # Build response
-        user_row = db.execute(
-            text("SELECT email FROM app_user WHERE id = :uid"),
-            {"uid": user_id},
-        ).first()
-        otpauth_uri = build_otpauth_uri(secret, user_row.email)
-        qr_svg = generate_qr_svg(otpauth_uri)
-
+        otpauth_uri = build_otpauth_uri(secret, str(recipient["email"]))
         return {
             "method": "totp",
             "secret": secret,
             "otpauth_uri": otpauth_uri,
-            "qr_svg": qr_svg,
+            "qr_svg": generate_qr_svg(otpauth_uri),
         }
 
-    else:  # email_otp
-        import secrets
-        from app.auth.email import get_email_sender
-        from app.auth.email_templates import two_factor_otp_email
-        from app.auth.security import hash_token as hash_otp
-
-        # Upsert enrollment (no secret for email_otp)
-        db.execute(
-            text("SELECT app.upsert_2fa_enrollment(:uid, :method, NULL)"),
-            {"uid": user_id, "method": "email_otp"},
-        )
-
-        # Generate 6-digit OTP
-        otp_code = f"{secrets.randbelow(1000000):06d}"
-        otp_hash = hash_otp(otp_code)
-
-        # Get user email
-        user_row = db.execute(
-            text("SELECT email FROM app_user WHERE id = :uid"),
-            {"uid": user_id},
-        ).first()
-
-        # Store OTP (revokes prior OTPs, inserts new one)
-        expires_at = datetime.now(UTC) + timedelta(minutes=10)
-        db.execute(
-            text("SELECT app.issue_email_otp(:uid, :hash, :expires)"),
-            {"uid": user_id, "hash": otp_hash, "expires": expires_at},
-        )
-
-        # Send email
-        subject, html = two_factor_otp_email(otp_code, expires_minutes=10)
-        get_email_sender().send(user_row.email, subject, html)
-
-        return {
-            "method": "email_otp",
-            "sent_to": _mask_email(user_row.email),
-            "expires_in": 600,
-        }
+    db.execute(
+        text("SELECT app.upsert_2fa_enrollment(:uid, :method, NULL)"),
+        {"uid": user_id, "method": "email_otp"},
+    )
+    _issue_and_send_email_otp(db, user_id, recipient)
+    return {
+        "method": "email_otp",
+        "sent_to": _mask_email(str(recipient["email"])),
+        "expires_in": _EMAIL_OTP_TTL_SECONDS,
+    }
 
 
-def two_factor_confirm(db: Session, payload) -> dict:
+def two_factor_confirm(db: Session, payload: TwoFactorConfirmRequest) -> dict:
     """
     POST /auth/2fa/confirm
 
@@ -554,54 +754,65 @@ def two_factor_confirm(db: Session, payload) -> dict:
 
     user_id = token_row.user_id
 
-    # Bind user to transaction
     set_current_user_id(db, user_id)
+    enforce_subject(bucket="2fa_confirm", subject=str(user_id), limit=TWO_FA_CONFIRM_USER_LIMIT)
 
-    # Get enrollment data
-    enrollment = db.execute(
-        text("""
-            SELECT method, totp_secret_encrypted
-            FROM two_factor_enrollment
-            WHERE user_id = :uid AND status = 'pending'
-        """),
-        {"uid": user_id},
-    ).first()
+    enrollment = (
+        db.execute(
+            text(
+                "SELECT method, totp_secret_encrypted, failed_attempts, locked_until "
+                "FROM two_factor_enrollment WHERE user_id = :uid AND status = 'pending'"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
 
-    if not enrollment:
+    if enrollment is None:
         raise unauthenticated("2FA enrollment not found or already active")
 
-    method = str(enrollment.method)
+    # ENROLMENT IS RATE-LIMITED THE SAME WAY THE CHALLENGE IS. It was not: this
+    # endpoint verified a code and raised, never touching `failed_attempts`, so
+    # a six-digit email OTP was guessable with only the per-address limiter in
+    # the way and the account never locked. tdd.md §6.9 D7 makes no distinction
+    # between enrolment and challenge, and neither does an attacker.
+    locked_until = enrollment["locked_until"]
+    if locked_until is not None and locked_until > datetime.now(UTC):
+        raise two_factor_locked(locked_until.isoformat())
 
-    # Verify code based on method
+    method = str(enrollment["method"])
+    counter: int | None = None
+
     if method == "totp":
-        from app.auth.totp import decrypt_secret, verify_totp_code
-        secret = decrypt_secret(enrollment.totp_secret_encrypted)
+        secret = decrypt_secret(enrollment["totp_secret_encrypted"])
         counter = verify_totp_code(secret, payload.code)
         if counter is None:
+            _record_2fa_failure(db, user_id, enrollment["failed_attempts"] + 1)
             raise two_factor_invalid()
 
     else:  # email_otp
-        otp_hash = hash_token(payload.code)
         otp_row = db.execute(
             text("SELECT id FROM app.lookup_email_otp(:uid, :hash)"),
-            {"uid": user_id, "hash": otp_hash},
+            {"uid": user_id, "hash": hash_token(payload.code)},
         ).first()
         if not otp_row:
+            _record_2fa_failure(db, user_id, enrollment["failed_attempts"] + 1)
             raise two_factor_invalid()
-        # Revoke the OTP
         db.execute(
             text("UPDATE auth_token SET revoked = true WHERE id = :id"),
             {"id": otp_row.id},
         )
 
-    # Activate 2FA
+    # Activate, recording the TOTP counter that was just consumed. Without the
+    # counter the code that completed enrolment stayed replayable at
+    # /2fa/verify for its whole +/-1 window, because the replay guard there has
+    # nothing to compare against until the first successful challenge.
     db.execute(
-        text("SELECT app.activate_2fa(:uid)"),
-        {"uid": user_id},
+        text("SELECT app.activate_2fa(:uid, :counter)"),
+        {"uid": user_id, "counter": counter},
     )
 
-    # Generate 10 backup codes
-    from app.auth.backup_codes import generate_backup_codes, hash_backup_code
     codes = generate_backup_codes(10)
     code_hashes = [hash_backup_code(c) for c in codes]
     db.execute(
@@ -619,57 +830,17 @@ def two_factor_confirm(db: Session, payload) -> dict:
     access_token, expires_in = create_access_token(user_id)
     refresh_plain, _ = issue_refresh_token(db, user_id)
 
-    # Derive onboarding_state
-    user_row = db.execute(
-        text("SELECT * FROM app_user WHERE id = :uid"),
-        {"uid": user_id},
-    ).first()
-
-    profile_row = None
-    if str(user_row.role) == "student":
-        profile_row = db.execute(
-            text("SELECT board, class_level, student_group, medium, language_pref FROM student_profile WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-
-    is_student = str(user_row.role) == "student"
-    guardian_required = is_student and profile_row and profile_row.class_level in (9, 10)
-    guardian_status = None
-    if guardian_required:
-        guardian_row = db.execute(
-            text("SELECT status FROM guardian_link WHERE student_id = :uid AND status = 'verified'"),
-            {"uid": user_id},
-        ).first()
-        guardian_status = "verified" if guardian_row else None
-
-    subscription_status = None
-    if is_student:
-        sub_row = db.execute(
-            text("SELECT status FROM subscription WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-        subscription_status = str(sub_row.status) if sub_row else None
-
-    onboarding_state = derive_onboarding_state(
-        email_verified=user_row.email_verified_at is not None,
-        two_factor_active=True,
-        is_student=is_student,
-        guardian_required=guardian_required,
-        guardian_status=guardian_status,
-        subscription_status=subscription_status,
-    )
-
     return {
         "two_factor": {"enabled": True, "method": method},
         "backup_codes": codes,
-        "onboarding_state": onboarding_state,
+        "onboarding_state": onboarding_state_for(db, user_id, two_factor_active=True),
         "access_token": access_token,
         "expires_in": expires_in,
         "refresh_token": refresh_plain,
     }
 
 
-def two_factor_verify(db: Session, payload) -> dict:
+def two_factor_verify(db: Session, payload: TwoFactorVerifyRequest) -> dict:
     """
     POST /auth/2fa/verify
 
@@ -682,38 +853,36 @@ def two_factor_verify(db: Session, payload) -> dict:
     REJECTS enrollment_tokens (kind='two_factor_enrollment') — only pending
     tokens are valid here.
     """
-    # Validate pending_token (MUST be two_factor_pending, NOT two_factor_enrollment)
-    token_row = db.execute(
-        text("SELECT * FROM app.lookup_challenge_token(:hash, :kind)"),
-        {
-            "hash": hash_token(payload.pending_token),
-            "kind": TokenKind.two_factor_pending.value,
-        },
-    ).first()
-
-    if not token_row:
-        raise pending_token_expired()
-
-    # The SQL function does NOT check expiry or revocation — enforce it here
-    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
-        raise pending_token_expired()
-
-    # Get enrollment data
-    enrollment_row = db.execute(
-        text("SELECT * FROM app.start_2fa_challenge(:hash, :kind)"),
-        {
-            "hash": hash_token(payload.pending_token),
-            "kind": TokenKind.two_factor_pending.value,
-        },
-    ).mappings().first()
+    # ONE round trip, not two. `start_2fa_challenge` already filters on kind,
+    # `revoked = false` and `expires_at > now()` in SQL — which is what makes an
+    # enrolment token presented here return zero rows rather than a session. The
+    # separate `lookup_challenge_token` call it used to make first re-checked the
+    # same three things in Python and could only ever agree.
+    enrollment_row = (
+        db.execute(
+            text("SELECT * FROM app.start_2fa_challenge(:hash, :kind)"),
+            {
+                "hash": hash_token(payload.pending_token),
+                "kind": TokenKind.two_factor_pending.value,
+            },
+        )
+        .mappings()
+        .first()
+    )
 
     if not enrollment_row:
         raise pending_token_expired()
 
     user_id = enrollment_row["token_user_id"]
 
-    # Bind user to transaction
     set_current_user_id(db, user_id)
+    enforce_subject(bucket="2fa_verify", subject=str(user_id), limit=TWO_FA_VERIFY_USER_LIMIT)
+
+    # A challenge only exists for a COMPLETED enrolment. Defensive: `login()`
+    # hands out a pending token only when the enrolment is active, so reaching
+    # here otherwise means something upstream changed.
+    if str(enrollment_row["status"]) != "active":
+        raise pending_token_expired()
 
     # Check lockout
     locked_until = enrollment_row["locked_until"]
@@ -729,7 +898,6 @@ def two_factor_verify(db: Session, payload) -> dict:
     if payload.type == "totp":
         if method != "totp":
             raise two_factor_invalid()
-        from app.auth.totp import decrypt_secret, verify_totp_code
         secret = decrypt_secret(enrollment_row["totp_secret_encrypted"])
         counter = verify_totp_code(
             secret,
@@ -755,8 +923,6 @@ def two_factor_verify(db: Session, payload) -> dict:
             verified = True
 
     elif payload.type == "backup_code":
-        from app.auth.backup_codes import verify_backup_code
-
         # Backup codes are argon2id-hashed, so we must retrieve all unused
         # hashes and compare with verify_backup_code (not a simple hash
         # lookup like HMAC tokens). This is deliberate: argon2id is
@@ -776,32 +942,7 @@ def two_factor_verify(db: Session, payload) -> dict:
                 break
 
     if not verified:
-        # Increment failed_attempts
-        failed_attempts = enrollment_row["failed_attempts"] + 1
-
-        # Compute lockout
-        settings = get_settings()
-        locked_until = None
-        for threshold, lockout_seconds in settings.two_factor_lockout_thresholds:
-            if failed_attempts >= threshold:
-                locked_until = datetime.now(UTC) + timedelta(seconds=lockout_seconds)
-
-        db.execute(
-            text("SELECT app.verify_2fa_failure(:uid, :failed, :locked)"),
-            {"uid": user_id, "failed": failed_attempts, "locked": locked_until},
-        )
-
-        # Audit log
-        db.execute(
-            text("""
-                INSERT INTO audit_log (actor_id, action, target)
-                VALUES (:uid, '2fa_verify_failed', 'two_factor_enrollment')
-            """),
-            {"uid": user_id},
-        )
-
-        # Commit BEFORE raising so the lockout persists (same pattern as refresh reuse)
-        db.commit()
+        _record_2fa_failure(db, user_id, enrollment_row["failed_attempts"] + 1)
         raise two_factor_invalid()
 
     # Success: reset failed_attempts, update last_used
@@ -813,63 +954,23 @@ def two_factor_verify(db: Session, payload) -> dict:
     # Revoke pending_token
     db.execute(
         text("UPDATE auth_token SET revoked = true WHERE id = :id"),
-        {"id": token_row.id},
+        {"id": enrollment_row["token_id"]},
     )
 
     # Issue access + refresh tokens
     access_token, expires_in = create_access_token(user_id)
     refresh_plain, _ = issue_refresh_token(db, user_id)
 
-    # Derive onboarding_state
-    user_row = db.execute(
-        text("SELECT * FROM app_user WHERE id = :uid"),
-        {"uid": user_id},
-    ).first()
-
-    profile_row = None
-    if str(user_row.role) == "student":
-        profile_row = db.execute(
-            text("SELECT board, class_level, student_group, medium, language_pref FROM student_profile WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-
-    is_student = str(user_row.role) == "student"
-    guardian_required = is_student and profile_row and profile_row.class_level in (9, 10)
-    guardian_status = None
-    if guardian_required:
-        guardian_row = db.execute(
-            text("SELECT status FROM guardian_link WHERE student_id = :uid AND status = 'verified'"),
-            {"uid": user_id},
-        ).first()
-        guardian_status = "verified" if guardian_row else None
-
-    subscription_status = None
-    if is_student:
-        sub_row = db.execute(
-            text("SELECT status FROM subscription WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-        subscription_status = str(sub_row.status) if sub_row else None
-
-    onboarding_state = derive_onboarding_state(
-        email_verified=user_row.email_verified_at is not None,
-        two_factor_active=True,
-        is_student=is_student,
-        guardian_required=guardian_required,
-        guardian_status=guardian_status,
-        subscription_status=subscription_status,
-    )
-
     return {
         "access_token": access_token,
-        "token_type": "bearer",
+        "token_type": "bearer",  # noqa: S106 -- the OAuth scheme name, not a secret
         "expires_in": expires_in,
-        "onboarding_state": onboarding_state,
+        "onboarding_state": onboarding_state_for(db, user_id, two_factor_active=True),
         "refresh_token": refresh_plain,
     }
 
 
-def two_factor_resend(db: Session, payload) -> dict:
+def two_factor_resend(db: Session, payload: TwoFactorResendRequest) -> dict:
     """
     POST /auth/2fa/resend
 
@@ -878,73 +979,67 @@ def two_factor_resend(db: Session, payload) -> dict:
 
     The pending_token must be kind='two_factor_pending'.
     """
-    # Validate pending_token
-    token_row = db.execute(
-        text("SELECT * FROM app.lookup_challenge_token(:hash, :kind)"),
-        {
-            "hash": hash_token(payload.pending_token),
-            "kind": TokenKind.two_factor_pending.value,
-        },
-    ).first()
-
-    if not token_row:
+    challenge = (
+        db.execute(
+            text("SELECT * FROM app.start_2fa_challenge(:hash, :kind)"),
+            {
+                "hash": hash_token(payload.pending_token),
+                "kind": TokenKind.two_factor_pending.value,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    if not challenge:
         raise pending_token_expired()
 
-    # The SQL function does NOT check expiry or revocation — enforce it here
-    if token_row.revoked or token_row.expires_at <= datetime.now(UTC):
-        raise pending_token_expired()
-
-    user_id = token_row.user_id
-
-    # Bind user to transaction
+    user_id = challenge["token_user_id"]
     set_current_user_id(db, user_id)
+    enforce_subject(bucket="2fa_resend", subject=str(user_id), limit=TWO_FA_RESEND_USER_LIMIT)
 
-    # Check method is email_otp
-    enrollment = db.execute(
-        text("SELECT method FROM two_factor_enrollment WHERE user_id = :uid"),
-        {"uid": user_id},
-    ).first()
+    # A lockout has to cover the resend too, or it buys nothing: an attacker who
+    # cannot guess can still make the victim's inbox unusable, and the whole
+    # point of `locked_until` is that the challenge goes quiet.
+    locked_until = challenge["locked_until"]
+    if locked_until is not None and locked_until > datetime.now(UTC):
+        raise two_factor_locked(locked_until.isoformat())
 
-    if not enrollment or str(enrollment.method) != "email_otp":
-        raise AppError(
-            status_code=400,
-            code="INVALID_METHOD",
-            message="Resend is only available for email_otp method",
+    # `/2fa/resend` re-sends to the ENROLLED method; nothing sends a first OTP to
+    # a TOTP user (tdd.md §14.4 finding 3), so this is the client asking for
+    # something the contract does not offer. `VALIDATION_ERROR` with a field is
+    # the catalogued way to say that — the previous `INVALID_METHOD` appears in
+    # neither tdd.md §7.3 nor the client's ERROR_CODES, so it rendered as the
+    # generic "something went wrong".
+    if str(challenge["method"]) != "email_otp":
+        raise validation_error(
+            message="Resend is not available for this second factor.",
+            details={
+                "fields": {
+                    "type": "Resend is only available when the second factor is an emailed code."
+                }
+            },
         )
 
-    # Generate new OTP
-    import secrets
-    from app.auth.email import get_email_sender
-    from app.auth.email_templates import two_factor_otp_email
-    from app.auth.security import hash_token as hash_otp
-
-    otp_code = f"{secrets.randbelow(1000000):06d}"
-    otp_hash = hash_otp(otp_code)
-
-    # Get user email
-    user_row = db.execute(
-        text("SELECT email FROM app_user WHERE id = :uid"),
-        {"uid": user_id},
-    ).first()
-
-    # Store OTP (revokes prior OTPs, inserts new one)
-    expires_at = datetime.now(UTC) + timedelta(minutes=10)
-    db.execute(
-        text("SELECT app.issue_email_otp(:uid, :hash, :expires)"),
-        {"uid": user_id, "hash": otp_hash, "expires": expires_at},
+    recipient = (
+        db.execute(
+            text(
+                "SELECT u.email, sp.language_pref FROM app_user u "
+                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one()
     )
-
-    # Send email
-    subject, html = two_factor_otp_email(otp_code, expires_minutes=10)
-    get_email_sender().send(user_row.email, subject, html)
+    _issue_and_send_email_otp(db, user_id, recipient)
 
     return {
-        "sent_to": _mask_email(user_row.email),
-        "expires_in": 600,
+        "sent_to": _mask_email(str(recipient["email"])),
+        "expires_in": _EMAIL_OTP_TTL_SECONDS,
     }
 
 
-def verify_email(db: Session, payload) -> dict:
+def verify_email(db: Session, payload: EmailVerifyRequest) -> dict:
     """
     POST /auth/email/verify
 
@@ -961,20 +1056,9 @@ def verify_email(db: Session, payload) -> dict:
     ).first()
 
     if not result:
-        # Distinguish expired from invalid using the SECURITY DEFINER function
-        # (direct SELECT on auth_token returns zero rows under RLS with no user bound)
-        status_row = db.execute(
-            text("SELECT * FROM app.check_token_status(:hash, :kind)"),
-            {"hash": hash_token(payload.token), "kind": "email_verify"},
-        ).mappings().first()
-
-        if status_row and status_row["token_expired"]:
-            raise token_expired()
-        else:
-            raise invalid_token()
+        _raise_for_token_status(db, payload.token, TokenKind.email_verify)
 
     user_id = result.user_id
-    already_verified = result.already_verified
 
     # Bind user to transaction
     set_current_user_id(db, user_id)
@@ -982,7 +1066,7 @@ def verify_email(db: Session, payload) -> dict:
     # Issue onboarding-scoped access_token
     access_token, expires_in = create_access_token(
         user_id,
-        token_type="onboarding",
+        token_type="onboarding",  # noqa: S106 -- a JWT claim value, not a secret
     )
 
     # Issue enrollment_token for 2FA
@@ -994,132 +1078,63 @@ def verify_email(db: Session, payload) -> dict:
         ttl_seconds=settings.enrollment_token_ttl_seconds,
     )
 
-    # Derive onboarding_state
-    user_row = db.execute(
-        text("SELECT * FROM app_user WHERE id = :uid"),
-        {"uid": user_id},
-    ).first()
-
-    profile_row = None
-    if str(user_row.role) == "student":
-        profile_row = db.execute(
-            text("SELECT board, class_level, student_group, medium, language_pref FROM student_profile WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-
-    is_student = str(user_row.role) == "student"
-    guardian_required = is_student and profile_row and profile_row.class_level in (9, 10)
-    guardian_status = None
-    if guardian_required:
-        guardian_row = db.execute(
-            text("SELECT status FROM guardian_link WHERE student_id = :uid AND status = 'verified'"),
-            {"uid": user_id},
-        ).first()
-        guardian_status = "verified" if guardian_row else None
-
-    # Check 2FA status
-    two_factor_row = db.execute(
-        text("SELECT status FROM two_factor_enrollment WHERE user_id = :uid"),
-        {"uid": user_id},
-    ).first()
-    two_factor_active = two_factor_row and str(two_factor_row.status) == "active"
-
-    subscription_status = None
-    if is_student:
-        sub_row = db.execute(
-            text("SELECT status FROM subscription WHERE user_id = :uid"),
-            {"uid": user_id},
-        ).first()
-        subscription_status = str(sub_row.status) if sub_row else None
-
-    onboarding_state = derive_onboarding_state(
-        email_verified=True,
-        two_factor_active=two_factor_active,
-        is_student=is_student,
-        guardian_required=guardian_required,
-        guardian_status=guardian_status,
-        subscription_status=subscription_status,
-    )
-
     return {
         "email_verified": True,
-        "onboarding_state": onboarding_state,
+        "onboarding_state": onboarding_state_for(db, user_id),
         "access_token": access_token,
         "expires_in": expires_in,
         "enrollment_token": enrollment_plain,
     }
 
 
-def resend_email_verification(db: Session, payload) -> None:
+def resend_email_verification(db: Session, payload: EmailResendRequest) -> None:
     """
     POST /auth/email/resend
 
     Resends the email verification link. Constant-time whether or not the
     address exists (prevents enumeration).
     """
-    # Look up user (constant-time: dummy hash if not found)
-    user_row = db.execute(
-        text("SELECT id, email_verified_at FROM app.lookup_user_for_login(:email)"),
-        {"email": payload.email},
-    ).first()
+    user_row = _lookup_for_email_flow(db, payload.email)
 
-    # Dummy verify for constant-time (whether found or not)
-    verify_password("dummy", _dummy_password_hash())
-
-    if user_row and not user_row.email_verified_at:
-        # Issue new email_verify token
-        settings = get_settings()
-        verify_plain = issue_preauth_token(
+    if user_row is not None and not user_row["email_verified_at"]:
+        token = issue_preauth_token(
             db,
-            user_row.id,
+            user_row["id"],
             kind=TokenKind.email_verify,
-            ttl_seconds=3600,  # 1 hour
+            ttl_seconds=_EMAIL_LINK_TTL_SECONDS,
         )
-
-        # Send email
-        from app.auth.email import get_email_sender
-        from app.auth.email_templates import build_verification_url, verification_email
-
-        url = build_verification_url(verify_plain)
-        subject, html = verification_email(url)
-        get_email_sender().send(payload.email, subject, html)
+        locale = _locale_of(user_row)
+        subject, html = verification_email(build_verification_url(token, locale), locale)
+        _queue_email(str(user_row["email"]), subject, html)
 
 
-def forgot_password(db: Session, payload) -> None:
+def forgot_password(db: Session, payload: PasswordForgotRequest) -> None:
     """
     POST /auth/password/forgot
 
-    Initiates password reset. Constant-time whether or not the address exists
-    (prevents enumeration).
+    Identical response for a known and an unknown address — body, status AND
+    timing (tdd.md §6.11). See `_lookup_for_email_flow` for why the dummy hash
+    alone was not enough.
+
+    Deliberately requires a VERIFIED address: a reset link mailed to an
+    unverified one would let whoever controls that mailbox take an account they
+    never proved they own. An unverified user re-verifies first.
     """
-    # Look up user (constant-time: dummy hash if not found)
-    user_row = db.execute(
-        text("SELECT id, email_verified_at FROM app.lookup_user_for_login(:email)"),
-        {"email": payload.email},
-    ).first()
+    user_row = _lookup_for_email_flow(db, payload.email)
 
-    # Dummy verify for constant-time (whether found or not)
-    verify_password("dummy", _dummy_password_hash())
-
-    if user_row and user_row.email_verified_at:
-        # Issue password_reset token
-        reset_plain = issue_preauth_token(
+    if user_row is not None and user_row["email_verified_at"]:
+        token = issue_preauth_token(
             db,
-            user_row.id,
+            user_row["id"],
             kind=TokenKind.password_reset,
-            ttl_seconds=3600,  # 1 hour
+            ttl_seconds=_EMAIL_LINK_TTL_SECONDS,
         )
-
-        # Send email
-        from app.auth.email import get_email_sender
-        from app.auth.email_templates import build_password_reset_url, password_reset_email
-
-        url = build_password_reset_url(reset_plain)
-        subject, html = password_reset_email(url)
-        get_email_sender().send(payload.email, subject, html)
+        locale = _locale_of(user_row)
+        subject, html = password_reset_email(build_password_reset_url(token, locale), locale)
+        _queue_email(str(user_row["email"]), subject, html)
 
 
-def reset_password(db: Session, payload) -> None:
+def reset_password(db: Session, payload: PasswordResetRequest) -> None:
     """
     POST /auth/password/reset
 
@@ -1136,58 +1151,4 @@ def reset_password(db: Session, payload) -> None:
     ).scalar()
 
     if not result:
-        # Distinguish expired from invalid using the SECURITY DEFINER function
-        # (direct SELECT on auth_token returns zero rows under RLS with no user bound)
-        status_row = db.execute(
-            text("SELECT * FROM app.check_token_status(:hash, :kind)"),
-            {"hash": hash_token(payload.token), "kind": "password_reset"},
-        ).mappings().first()
-
-        if status_row and status_row["token_expired"]:
-            raise token_expired()
-
-        raise invalid_token()
-
-
-def two_factor_regenerate_backup_codes(db: Session, user_id: UUID) -> dict:
-    """
-    POST /auth/2fa/backup-codes
-
-    Regenerates backup codes. Requires active 2FA enrollment. Invalidates
-    the old set and generates 10 new codes.
-
-    This endpoint is authenticated (requires access_token).
-    """
-    # Bind user to transaction
-    set_current_user_id(db, user_id)
-
-    # Check 2FA is active
-    enrollment = db.execute(
-        text("SELECT status FROM two_factor_enrollment WHERE user_id = :uid"),
-        {"uid": user_id},
-    ).first()
-
-    if not enrollment or str(enrollment.status) != "active":
-        raise forbidden_scope("2FA is not active; enroll first")
-
-    # Generate 10 new backup codes
-    from app.auth.backup_codes import generate_backup_codes, hash_backup_code
-    codes = generate_backup_codes(10)
-    code_hashes = [hash_backup_code(c) for c in codes]
-
-    # Replace backup codes (deletes old set, inserts new set)
-    db.execute(
-        text("SELECT app.replace_backup_codes(:uid, :hashes)"),
-        {"uid": user_id, "hashes": code_hashes},
-    )
-
-    # Audit log
-    db.execute(
-        text("""
-            INSERT INTO audit_log (actor_id, action, target)
-            VALUES (:uid, 'backup_codes_regenerated', 'two_factor_backup_code')
-        """),
-        {"uid": user_id},
-    )
-
-    return {"backup_codes": codes}
+        _raise_for_token_status(db, payload.token, TokenKind.password_reset)

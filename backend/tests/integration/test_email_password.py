@@ -9,10 +9,8 @@ Tests:
 - Onboarding token cannot call /auth/me
 """
 
-import pytest
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.auth.tokens import issue_preauth_token
@@ -24,15 +22,25 @@ def _make_user(session, email: str, *, verified: bool = False) -> str:
     """Create a test user."""
     user_id = uuid4()
     set_current_user_id(session, user_id)
-    columns = "id, email, password_hash, role, full_name"
-    values = ":id, :email, '$argon2id$v=19$m=8192,t=1,p=1$test$hash', 'student', 'Test User'"
+    # Fixed statements, not string concatenation -- see the note in
+    # test_2fa_enrollment.py.
+    pw = "$argon2id$v=19$m=8192,t=1,p=1$test$hash"  # noqa: S105 -- a hash, not a password
     if verified:
-        columns += ", email_verified_at"
-        values += ", now()"
-    session.execute(
-        text(f"INSERT INTO app_user ({columns}) VALUES ({values})"),
-        {"id": user_id, "email": email},
-    )
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name, "
+                "email_verified_at) VALUES (:id, :email, :pw, 'student', 'Test User', now())"
+            ),
+            {"id": user_id, "email": email, "pw": pw},
+        )
+    else:
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name) "
+                "VALUES (:id, :email, :pw, 'student', 'Test User')"
+            ),
+            {"id": user_id, "email": email, "pw": pw},
+        )
     session.flush()
     set_current_user_id(session, user_id)
     return str(user_id)
@@ -42,9 +50,7 @@ class TestEmailVerify:
     def test_email_verify_succeeds(self, client, db, unique_email):
         """POST /email/verify with valid token → 200."""
         user_id = _make_user(db, unique_email("verify-ok"))
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600)
 
         resp = client.post(
             "/api/auth/email/verify",
@@ -60,9 +66,7 @@ class TestEmailVerify:
     def test_email_verify_idempotent(self, client, db, unique_email):
         """Second call with spent token → 200 (already verified)."""
         user_id = _make_user(db, unique_email("verify-idempotent"))
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600)
 
         # First verify
         resp1 = client.post(
@@ -84,9 +88,7 @@ class TestEmailVerify:
         user_id = _make_user(db, unique_email("verify-expired"))
         # Use -3600 (1 hour ago) to ensure token is definitively expired
         # and visible across transaction boundaries
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.email_verify, ttl_seconds=-3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.email_verify, ttl_seconds=-3600)
         db.flush()  # Ensure token is visible to HTTP request's session
 
         resp = client.post(
@@ -112,9 +114,7 @@ class TestOnboardingTokenScoping:
     def test_onboarding_token_cannot_call_me(self, client, db, unique_email):
         """Onboarding token (type='onboarding') rejected by /auth/me."""
         user_id = _make_user(db, unique_email("onboarding-me"))
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.email_verify, ttl_seconds=3600)
 
         resp = client.post(
             "/api/auth/email/verify",
@@ -157,7 +157,7 @@ class TestPasswordForgot:
     def test_password_forgot_constant_time(self, client, db, unique_email):
         """POST /password/forgot returns same response for known/unknown emails."""
         known_email = unique_email("forgot-known")
-        user_id = _make_user(db, known_email, verified=True)
+        _make_user(db, known_email, verified=True)
 
         # Known email
         resp1 = client.post(
@@ -179,9 +179,7 @@ class TestPasswordReset:
         """POST /password/reset with valid token → 204, new password works."""
         email = unique_email("reset-ok")
         user_id = _make_user(db, email, verified=True)
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.password_reset, ttl_seconds=3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.password_reset, ttl_seconds=3600)
 
         resp = client.post(
             "/api/auth/password/reset",
@@ -203,6 +201,7 @@ class TestPasswordReset:
 
         # Issue a refresh token
         from app.auth.tokens import issue_refresh_token
+
         set_current_user_id(db, user_id)
         refresh_plain, _ = issue_refresh_token(db, user_id)
 
@@ -228,9 +227,7 @@ class TestPasswordReset:
         user_id = _make_user(db, unique_email("reset-expired"), verified=True)
         # Use -3600 (1 hour ago) to ensure token is definitively expired
         # and visible across transaction boundaries
-        token = issue_preauth_token(
-            db, user_id, kind=TokenKind.password_reset, ttl_seconds=-3600
-        )
+        token = issue_preauth_token(db, user_id, kind=TokenKind.password_reset, ttl_seconds=-3600)
         db.flush()  # Ensure token is visible to HTTP request's session
 
         resp = client.post(

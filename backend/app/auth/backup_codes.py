@@ -27,10 +27,7 @@ _CODE_LENGTH = 8
 
 def generate_backup_codes(count: int = 10) -> list[str]:
     """Generate ``count`` random 8-character codes."""
-    return [
-        "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
-        for _ in range(count)
-    ]
+    return ["".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH)) for _ in range(count)]
 
 
 def hash_backup_code(code: str) -> str:

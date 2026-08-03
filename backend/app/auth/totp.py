@@ -57,6 +57,7 @@ def verify_totp_code(
     code: str,
     *,
     last_counter: int | None = None,
+    now: datetime | None = None,
 ) -> int | None:
     """
     Verify a 6-digit TOTP code with ±1 window tolerance (tdd.md §6.9).
@@ -65,9 +66,15 @@ def verify_totp_code(
     ``last_used_counter`` as a replay guard. Returns ``None`` if the code is
     invalid or if its counter is at or below ``last_counter`` (already consumed
     within its window).
+
+    ``now`` is injectable for the same reason it is on ``issue_refresh_token``:
+    without it, a test for the ±1 tolerance has to generate a code for the
+    previous step and hope the clock does not cross a 30-second boundary before
+    the assertion runs — which makes the test either flaky or, as it was,
+    written to assert nothing.
     """
     totp = pyotp.TOTP(secret)
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
 
     for offset in (-1, 0, 1):
         # Compute the time for this offset, then get the counter for that time.

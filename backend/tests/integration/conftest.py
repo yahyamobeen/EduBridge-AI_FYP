@@ -73,6 +73,33 @@ def isolate_database(db_connection, monkeypatch):
     return TestSessionLocal
 
 
+@pytest.fixture(autouse=True)
+def never_send_real_email(monkeypatch):
+    """
+    THE SUITE MUST NOT TALK TO A MAIL PROVIDER.
+
+    This is not hypothetical. A developer `.env` with `EMAIL_PROVIDER=resend`
+    and a live key made a full test run fire real API calls — Resend rejected
+    them only because the fixtures use `@example.com`, which is luck, not a
+    control. A run that happened to use a deliverable address would have mailed
+    a stranger a password-reset link and spent production quota doing it.
+
+    Patched at the sender rather than through the environment, because
+    `get_settings` is `lru_cache`d and already built by the time any fixture
+    runs — setting the variable here would be too late and would look like it
+    worked.
+
+    Also drains the dispatch queue after each test: `send_async` returns before
+    delivery, so without this a message could surface during an unrelated test
+    and be attributed to it.
+    """
+    import app.auth.email as email_module
+
+    monkeypatch.setattr(email_module, "get_email_sender", email_module.LoggingEmailSender)
+    yield
+    email_module.drain_pending_emails()
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

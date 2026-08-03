@@ -8,11 +8,10 @@ Tests the full enrollment lifecycle:
 - Backup code generation and display-once semantics
 """
 
-import pytest
-import pyotp
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
+import pyotp
+import pytest
 from sqlalchemy import text
 
 from app.auth.tokens import issue_challenge_token
@@ -24,15 +23,26 @@ def _make_user(session, email: str, *, verified: bool = True) -> str:
     """Create a test user, optionally with email verified."""
     user_id = uuid4()
     set_current_user_id(session, user_id)
-    columns = "id, email, password_hash, role, full_name"
-    values = ":id, :email, 'x', 'student', 'Test User'"
+    # Two fixed statements rather than one built by string concatenation. The
+    # value is not attacker-controlled, but building SQL out of f-strings is the
+    # pattern this repo removed from core/db.py and it should not creep back in
+    # through the tests.
     if verified:
-        columns += ", email_verified_at"
-        values += ", now()"
-    session.execute(
-        text(f"INSERT INTO app_user ({columns}) VALUES ({values})"),
-        {"id": user_id, "email": email},
-    )
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name, "
+                "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', now())"
+            ),
+            {"id": user_id, "email": email},
+        )
+    else:
+        session.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, full_name) "
+                "VALUES (:id, :email, 'x', 'student', 'Test User')"
+            ),
+            {"id": user_id, "email": email},
+        )
     session.flush()
     set_current_user_id(session, user_id)
     return str(user_id)
@@ -40,7 +50,11 @@ def _make_user(session, email: str, *, verified: bool = True) -> str:
 
 def _get_enrollment_token(db, user_id: str, *, kind: str = "two_factor_enrollment") -> str:
     """Issue a challenge token for testing."""
-    token_kind = TokenKind.two_factor_enrollment if kind == "two_factor_enrollment" else TokenKind.two_factor_pending
+    token_kind = (
+        TokenKind.two_factor_enrollment
+        if kind == "two_factor_enrollment"
+        else TokenKind.two_factor_pending
+    )
     return issue_challenge_token(db, user_id, kind=token_kind, ttl_seconds=900)
 
 
@@ -76,6 +90,7 @@ class TestEnrollTotp:
         secret = resp.json()["secret"]
         # Verify it's valid base32 by decoding
         import base64
+
         base64.b32decode(secret + "=" * (-len(secret) % 8))
 
 
@@ -199,7 +214,6 @@ class TestConfirmTotp:
         assert resp.status_code == 200
 
         # Get the OTP from the database (in a real scenario, it would be emailed)
-        from app.auth.security import hash_token
         otp_row = db.execute(
             text("""
                 SELECT token_hash FROM auth_token

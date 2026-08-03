@@ -8,8 +8,9 @@ This is the enforcement mechanism for tdd.md §3.1: the email/verify endpoint
 issues an onboarding token that cannot call /auth/me or any business endpoint.
 """
 
-import pytest
 from uuid import uuid4
+
+import pytest
 
 from app.auth.security import (
     create_access_token,

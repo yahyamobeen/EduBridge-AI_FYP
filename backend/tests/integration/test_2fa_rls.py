@@ -6,7 +6,6 @@ Tests that two_factor_enrollment and two_factor_backup_code tables are:
 - Owner-only (user A cannot see user B's rows)
 """
 
-import pytest
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -35,6 +34,7 @@ def _create_2fa_enrollment(session, user_id: str, method: str = "totp") -> None:
     set_current_user_id(session, user_id)
     if method == "totp":
         from app.auth.totp import encrypt_secret
+
         secret = encrypt_secret("JBSWY3DPEHPK3PXP")
         session.execute(
             text("SELECT app.upsert_2fa_enrollment(:uid, 'totp', :secret)"),
@@ -51,6 +51,7 @@ def _create_2fa_enrollment(session, user_id: str, method: str = "totp") -> None:
 def _create_backup_codes(session, user_id: str, codes: list[str]) -> None:
     """Create backup code rows using the SECURITY DEFINER function."""
     from app.auth.backup_codes import hash_backup_code
+
     # Must bind the user for RLS
     set_current_user_id(session, user_id)
     hashes = [hash_backup_code(c) for c in codes]
@@ -70,9 +71,7 @@ class TestTwoFactorEnrollmentRls:
         # Clear the bound user
         db.execute(text("SELECT set_config('app.current_user_id', '', true)"))
 
-        count = db.execute(
-            text("SELECT count(*) FROM two_factor_enrollment")
-        ).scalar_one()
+        count = db.execute(text("SELECT count(*) FROM two_factor_enrollment")).scalar_one()
         assert count == 0
 
     def test_owner_only(self, db, unique_email):
@@ -86,9 +85,7 @@ class TestTwoFactorEnrollmentRls:
         # Bind user A
         set_current_user_id(db, user_a)
 
-        rows = db.execute(
-            text("SELECT user_id FROM two_factor_enrollment")
-        ).fetchall()
+        rows = db.execute(text("SELECT user_id FROM two_factor_enrollment")).fetchall()
 
         # Should only see user A's row
         assert len(rows) == 1
@@ -117,9 +114,7 @@ class TestTwoFactorBackupCodeRls:
         # Clear the bound user
         db.execute(text("SELECT set_config('app.current_user_id', '', true)"))
 
-        count = db.execute(
-            text("SELECT count(*) FROM two_factor_backup_code")
-        ).scalar_one()
+        count = db.execute(text("SELECT count(*) FROM two_factor_backup_code")).scalar_one()
         assert count == 0
 
     def test_owner_only(self, db, unique_email):
@@ -133,9 +128,7 @@ class TestTwoFactorBackupCodeRls:
         # Bind user A
         set_current_user_id(db, user_a)
 
-        rows = db.execute(
-            text("SELECT user_id FROM two_factor_backup_code")
-        ).fetchall()
+        rows = db.execute(text("SELECT user_id FROM two_factor_backup_code")).fetchall()
 
         # Should only see user A's rows
         assert len(rows) == 2

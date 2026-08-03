@@ -200,6 +200,7 @@ class MeResponse(BaseModel):
 
 # --- 2FA Enrolment (A) -------------------------------------------------------
 
+
 class TwoFactorEnrollRequest(BaseModel):
     method: Literal["totp", "email_otp"]
     enrollment_token: str
@@ -236,6 +237,7 @@ class TwoFactorConfirmResponse(BaseModel):
 
 # --- 2FA Challenge (B) -------------------------------------------------------
 
+
 class TwoFactorVerifyRequest(BaseModel):
     pending_token: str
     code: str
@@ -260,6 +262,7 @@ class TwoFactorResendResponse(BaseModel):
 
 # --- Email Verification (C) --------------------------------------------------
 
+
 class EmailVerifyRequest(BaseModel):
     token: str
 
@@ -278,6 +281,7 @@ class EmailResendRequest(BaseModel):
 
 # --- Password Reset (D) ------------------------------------------------------
 
+
 class PasswordForgotRequest(BaseModel):
     email: EmailStr
 
@@ -285,9 +289,3 @@ class PasswordForgotRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
-
-
-# --- Backup Code Regeneration (E) --------------------------------------------
-
-class BackupCodesRegenerateResponse(BaseModel):
-    backup_codes: list[str]
