@@ -71,15 +71,21 @@ _hits: dict[str, list[float]] = defaultdict(list)
 
 
 def _client_key(request: Request, bucket: str, subject: str | None = None) -> str:
-    # An AUTHENTICATED or token-identified endpoint keys on the acting user, not
-    # the address — see the note above the limits. Pre-identification buckets
-    # (register, login, refresh, and the first pass at every KAN-10b endpoint)
-    # have no user yet and stay on the address.
+    # An AUTHENTICATED endpoint keys on the acting user, not the address. The
+    # deployment target is Pakistani school labs and mobile carriers, where a
+    # whole cohort shares one public IP: on an IP key, fifteen students polling
+    # the guardian screen every 15 s exhaust a 60/min bucket and everyone gets a
+    # 429, and five invitations throttle the entire lab. Keying on the user is
+    # both correct and available here, because the auth dependency has already
+    # resolved one. It does mean one address can hold N buckets with N accounts
+    # — acceptable, because creating those accounts goes through `register`,
+    # which is still IP-limited.
     #
-    # `request.client.host` is the socket peer. Behind a proxy that is the
-    # proxy, so the deployment must either set trusted-host forwarding or accept
-    # that the limit is per-proxy. Noted rather than silently trusting an
-    # X-Forwarded-For header, which any caller can set.
+    # Pre-authentication buckets (register, login, refresh) have no user yet and
+    # stay on the address. `request.client.host` is the socket peer; behind a
+    # proxy that is the proxy, so the deployment must either set trusted-host
+    # forwarding or accept that the limit is per-proxy. Noted rather than
+    # silently trusting an X-Forwarded-For header, which any caller can set.
     if subject is not None:
         return f"{bucket}:u:{subject}"
     host = request.client.host if request.client else "unknown"
