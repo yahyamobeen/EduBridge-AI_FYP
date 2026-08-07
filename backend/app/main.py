@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.routes import router as auth_router
 from app.core.config import get_settings
-from app.core.db import assert_backend_role_cannot_bypass_rls
+from app.core.db import DatabaseUnreachableError, assert_backend_role_cannot_bypass_rls
 from app.core.errors import register_exception_handlers
 
 logger = logging.getLogger("edubridge")
@@ -28,7 +28,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Refuse to start rather than run with every Row Level Security policy
     # silently inert. This is the check that turns "connect as app_backend,
     # never as postgres" from a comment into a guarantee.
-    assert_backend_role_cannot_bypass_rls()
+    #
+    # A connectivity failure here used to surface as ~150 lines of SQLAlchemy
+    # pool internals ending in `getaddrinfo failed`, which reads like a code
+    # fault and is not one. The message is logged plainly and the traceback
+    # dropped: nothing in those frames helps, and the actual cause is one line.
+    try:
+        assert_backend_role_cannot_bypass_rls()
+    except DatabaseUnreachableError as exc:
+        logger.error("%s", exc)
+        raise SystemExit(1) from None
     logger.info("database role verified: cannot bypass row level security")
 
     yield
