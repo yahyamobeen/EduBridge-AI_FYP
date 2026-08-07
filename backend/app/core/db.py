@@ -2,6 +2,7 @@ from collections.abc import Generator
 from uuid import UUID
 
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -103,6 +104,18 @@ class UnsafeDatabaseRoleError(RuntimeError):
     """The application is connected as a role that can bypass RLS."""
 
 
+class DatabaseUnreachableError(RuntimeError):
+    """
+    The database could not be reached at startup.
+
+    DISTINCT FROM `UnsafeDatabaseRoleError` on purpose. Both stop the app, but
+    they mean opposite things: one is "the configuration is dangerous", the
+    other is "nothing is wrong with the configuration, the network is down".
+    Collapsing them into one traceback sent people looking for a credentials bug
+    when their hotspot had dropped a DNS lookup.
+    """
+
+
 def assert_backend_role_cannot_bypass_rls() -> None:
     """
     Refuse to start if the primary connection can bypass Row Level Security.
@@ -112,11 +125,30 @@ def assert_backend_role_cannot_bypass_rls() -> None:
     application works, every test passes, and the entire authorization layer is
     simply inert. A superuser, or any role with `rolbypassrls`, has that effect.
     Cheap to check once at boot; impossible to notice otherwise.
+
+    Being unable to CHECK is also a refusal to start — an unverified role is not
+    a safe one — but it is reported as its own error, because "cannot resolve
+    the host" and "you are connected as postgres" need completely different
+    responses from whoever is reading the log.
     """
-    with engine.connect() as conn:
-        row = conn.execute(
-            text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
-        ).one_or_none()
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            ).one_or_none()
+    except OperationalError as exc:
+        # The useful part is the driver's own message; the SQLAlchemy wrapper
+        # around it adds five frames of pool internals and no information.
+        detail = str(exc.orig or exc).strip().splitlines()[0]
+        raise DatabaseUnreachableError(
+            # ASCII only: this goes to a terminal, and the Windows console
+            # renders an em dash as a replacement character under cp1252.
+            f"Cannot reach the database: {detail}\n"
+            "  This is a connectivity or DATABASE_URL problem, not a code problem.\n"
+            "  Check the network first (a dropped DNS lookup looks exactly like this),\n"
+            "  then that DATABASE_URL host and port are right, and that the Supabase\n"
+            "  project is not paused."
+        ) from exc
 
     if row is None:
         raise UnsafeDatabaseRoleError(
