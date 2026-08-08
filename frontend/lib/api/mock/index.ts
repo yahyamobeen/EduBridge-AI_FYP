@@ -88,6 +88,8 @@ function applyScenario(path: string): void {
   switch (code) {
     case 'RATE_LIMITED':
       fail(429, 'RATE_LIMITED', { retry_after: 30 })
+    case 'CAPTCHA_FAILED':
+      fail(400, 'CAPTCHA_FAILED')
     case 'TWO_FACTOR_LOCKED':
       fail(423, 'TWO_FACTOR_LOCKED', {
         locked_until: new Date(Date.now() + 900_000).toISOString(),
@@ -172,6 +174,14 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
 
     case 'POST /auth/register': {
       const req = body as unknown as RegisterRequest
+      // Mirror the contract's shape: a missing token is VALIDATION_ERROR on
+      // the real API. The mock never VERIFIES the token — shape parity, not
+      // security, is the point of dev mode.
+      if (typeof req.turnstile_token !== 'string' || req.turnstile_token === '') {
+        fail(400, 'VALIDATION_ERROR', {
+          fields: { turnstile_token: 'This field is required.' },
+        })
+      }
       if (findByEmail(req.email)) fail(409, 'EMAIL_ALREADY_REGISTERED')
       if (req.role === 'student') {
         const allowed = ENUMS.groups_by_class[String(req.class_level)] ?? []
@@ -222,6 +232,11 @@ export async function mockRequest<T>(path: string, init: ApiRequestInit): Promis
 
     case 'POST /auth/login': {
       const req = body as unknown as LoginRequest
+      if (typeof req.turnstile_token !== 'string' || req.turnstile_token === '') {
+        fail(400, 'VALIDATION_ERROR', {
+          fields: { turnstile_token: 'This field is required.' },
+        })
+      }
       const user = findByEmail(req.email)
       // A wrong password is the ONLY credential failure, and the response must
       // not reveal whether the address exists.

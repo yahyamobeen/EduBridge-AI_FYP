@@ -8,6 +8,7 @@ import type { BoardCode, EnumsResponse, Medium, StudentGroup } from '@/lib/api/t
 import { toApiLanguage, type Locale } from '@/i18n/routing'
 import { useRouter } from '@/i18n/navigation'
 import { FormBanner } from '@/components/ui/FormFeedback'
+import { Turnstile } from '@/components/auth/Turnstile'
 import { RadioCards, TextField, type Option } from './fields'
 
 const STEPS = ['step1', 'step2', 'step3'] as const
@@ -39,6 +40,8 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
   const router = useRouter()
 
   const [step, setStep] = useState(0)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaNonce, setCaptchaNonce] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -90,6 +93,11 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
 
   const needsGuardian = draft.class_level === '9' || draft.class_level === '10'
 
+  // Review is the only step that submits, so the captcha lives there. The step
+  // 1/2 "Continue" buttons do NOT gate on it: credentials come first, the
+  // security check is met at review, keeping the flow's existing shape.
+  const reviewComplete = captchaToken !== null
+
   async function submit() {
     setSubmitting(true)
     setFormError(null)
@@ -106,11 +114,16 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
         student_group: draft.student_group as StudentGroup,
         medium: draft.medium as Medium,
         language_pref: draft.language_pref as Draft['language_pref'] & 'en',
+        turnstile_token: captchaToken ?? '',
       })
       // Registration issues no session: the account starts at
       // email_verification_pending (tdd.md §3.1).
       router.push('/onboarding/email')
     } catch (error) {
+      // Any failed submit means siteverify consumed the token. Drop it and
+      // force a fresh solve; never re-enable submit with a dead token.
+      setCaptchaToken(null)
+      setCaptchaNonce((n) => n + 1)
       if (!(error instanceof ApiError)) {
         setFormError(te('generic'))
       } else if (error.code === 'EMAIL_ALREADY_REGISTERED') {
@@ -122,6 +135,8 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
       } else if (error.code === 'INVALID_CLASS_GROUP') {
         setFormError(te('invalidClassGroup'))
         setStep(1)
+      } else if (error.code === 'CAPTCHA_FAILED') {
+        setFormError(te('captchaFailed'))
       } else if (error.code === 'RATE_LIMITED') {
         setFormError(te('rateLimited'))
       } else {
@@ -341,6 +356,17 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
                     </div>
                   ))}
                 </dl>
+
+                <div className="mt-6">
+                  <p className="mb-1 text-body-sm text-on-surface-variant">
+                    {tc('turnstileLabel')}
+                  </p>
+                  <Turnstile
+                    onVerify={setCaptchaToken}
+                    onExpired={() => setCaptchaToken(null)}
+                    resetNonce={captchaNonce}
+                  />
+                </div>
               </section>
             )}
           </div>
@@ -375,7 +401,7 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
             ) : (
               <button
                 type="button"
-                disabled={submitting || !basicComplete || !academicComplete}
+                disabled={submitting || !basicComplete || !academicComplete || !reviewComplete}
                 onClick={submit}
                 className="rounded bg-primary-container px-6 py-3 text-body-md font-semibold text-on-primary transition-colors hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
               >

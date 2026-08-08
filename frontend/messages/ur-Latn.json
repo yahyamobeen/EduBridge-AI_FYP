@@ -98,7 +98,8 @@
       "stepOf": "Marhala {current} az {total}",
       "required": "Ye khana zaroori hai.",
       "invalidEmail": "Durust email address darj karein.",
-      "passwordTooShort": "Kam az kam aath huroof istemal karein."
+      "passwordTooShort": "Kam az kam aath huroof istemal karein.",
+      "turnstileLabel": "Security check"
     },
     "student": {
       "title": "Talib ilm ka account banayein",
@@ -135,6 +136,7 @@
     "errors": {
       "emailTaken": "Is email par pehle se account mojood hai.",
       "invalidClassGroup": "Ye group aap ki muntakhab class ke liye dastyab nahi.",
+      "captchaFailed": "Security check mukammal nahi hua, phir se koshish karain.",
       "rateLimited": "Bohat zyada koshishein. Barah-e-karam thori dair baad dobara koshish karein.",
       "generic": "Kuch ghalat ho gaya. Dobara koshish karein.",
       "enumsTitle": "Class aur mazameen ke ikhtiyarat load nahi ho sake",
@@ -157,6 +159,9 @@
       "submitting": "Sign in ho raha hai…",
       "noAccount": "Account nahi hai?",
       "createAccount": "Account banayein"
+    },
+    "turnstile": {
+      "label": "Security check"
     },
     "twoFactor": {
       "brand": "EduBridge AI",
@@ -194,6 +199,7 @@
     },
     "errors": {
       "badCredentials": "Ye email aur password kisi account se mel nahi khaate.",
+      "captchaFailed": "Security check mukammal nahi hua, phir se koshish karain.",
       "invalidCode": "Ye code durust nahi. Dobara koshish karein.",
       "rateLimited": "Bohot ziyada koshishein. Baraye meherbani thori der baad dobara koshish karein.",
       "rateLimitedIn": "Bohot ziyada koshishein. Aap dobara koshish kar sakte hain",

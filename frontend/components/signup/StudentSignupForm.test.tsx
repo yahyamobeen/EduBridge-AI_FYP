@@ -11,6 +11,17 @@ const registerAccount = vi.fn()
 
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => ({ push }) }))
 vi.mock('@/lib/api/endpoints', () => ({ register: (...a: unknown[]) => registerAccount(...a) }))
+vi.mock('@/components/auth/Turnstile', () => ({
+  Turnstile: ({
+    onVerify,
+  }: {
+    onVerify: (token: string) => void
+    onExpired?: () => void
+    resetNonce?: number
+  }) => (
+    <button type="button" data-testid="turnstile" onClick={() => onVerify('mock-token')} />
+  ),
+}))
 
 function renderForm() {
   return render(
@@ -36,6 +47,16 @@ async function completeBasicStep(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
   await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
   await user.click(screen.getByRole('button', { name: en.signup.common.continue }))
+}
+
+/** Walks through to the review step and solves the security check. */
+async function completeAcademicStep(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('radio', { name: /PCTB/ }))
+  await user.click(screen.getByRole('radio', { name: 'Class 11' }))
+  await user.click(screen.getByRole('radio', { name: 'ICS' }))
+  await pickMedium(user)
+  await user.click(screen.getByRole('button', { name: en.signup.common.continue }))
+  await user.click(screen.getByTestId('turnstile'))
 }
 
 beforeEach(() => {
@@ -131,16 +152,27 @@ describe('parental consent notice', () => {
 })
 
 describe('submission', () => {
-  it('sends the class level as a number and the group alongside it', async () => {
+  it('keeps submit disabled on the review step until the captcha is solved', async () => {
     const user = userEvent.setup()
     renderForm()
     await completeBasicStep(user)
-
     await user.click(screen.getByRole('radio', { name: /PCTB/ }))
     await user.click(screen.getByRole('radio', { name: 'Class 11' }))
     await user.click(screen.getByRole('radio', { name: 'ICS' }))
     await pickMedium(user)
     await user.click(screen.getByRole('button', { name: en.signup.common.continue }))
+
+    expect(screen.getByRole('button', { name: en.signup.common.submit })).toBeDisabled()
+
+    await user.click(screen.getByTestId('turnstile'))
+    expect(screen.getByRole('button', { name: en.signup.common.submit })).toBeEnabled()
+  })
+
+  it('sends the class level as a number and the group alongside it', async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await completeBasicStep(user)
+    await completeAcademicStep(user)
     await user.click(screen.getByRole('button', { name: en.signup.common.submit }))
 
     expect(registerAccount).toHaveBeenCalledTimes(1)
@@ -148,10 +180,10 @@ describe('submission', () => {
     expect(body).toMatchObject({
       role: 'student',
       board: 'PCTB',
-      // A string here would fail the contract, which types class_levels as numbers.
       class_level: 11,
       student_group: 'ics',
       medium: 'en',
+      turnstile_token: 'mock-token',
     })
     expect(typeof body.class_level).toBe('number')
   })
@@ -165,6 +197,7 @@ describe('submission', () => {
     await user.click(screen.getByRole('radio', { name: 'Science' }))
     await pickMedium(user)
     await user.click(screen.getByRole('button', { name: en.signup.common.continue }))
+    await user.click(screen.getByTestId('turnstile'))
     await user.click(screen.getByRole('button', { name: en.signup.common.submit }))
 
     expect(push).toHaveBeenCalledWith('/onboarding/email')

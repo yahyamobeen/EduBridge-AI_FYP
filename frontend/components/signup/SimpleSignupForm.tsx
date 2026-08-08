@@ -6,6 +6,7 @@ import { register as registerAccount } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import { useRouter } from '@/i18n/navigation'
 import { FormBanner } from '@/components/ui/FormFeedback'
+import { Turnstile } from '@/components/auth/Turnstile'
 import { TextField } from './fields'
 
 /**
@@ -26,11 +27,14 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaNonce, setCaptchaNonce] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  const complete = fullName.trim() !== '' && email.trim() !== '' && password.length >= 8
+  const complete =
+    fullName.trim() !== '' && email.trim() !== '' && password.length >= 8 && captchaToken !== null
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -38,13 +42,18 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
     setFormError(null)
     setFieldErrors({})
     try {
-      await registerAccount({ email, password, full_name: fullName, role })
+      await registerAccount({ email, password, full_name: fullName, role, turnstile_token: captchaToken ?? '' })
       router.push('/onboarding/email')
     } catch (error) {
+      // Any failed submit means siteverify consumed the token. Drop it and
+      // force a fresh solve; never re-enable submit with a dead token.
+      setCaptchaToken(null)
+      setCaptchaNonce((n) => n + 1)
       if (!(error instanceof ApiError)) setFormError(te('generic'))
       else if (error.code === 'EMAIL_ALREADY_REGISTERED')
         setFieldErrors({ email: te('emailTaken') })
       else if (error.code === 'VALIDATION_ERROR') setFieldErrors(error.fieldErrors())
+      else if (error.code === 'CAPTCHA_FAILED') setFormError(te('captchaFailed'))
       else if (error.code === 'RATE_LIMITED') setFormError(te('rateLimited'))
       else setFormError(te('generic'))
     } finally {
@@ -106,6 +115,14 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
                   setPassword(e.target.value),
               }}
             />
+            <div>
+            <p className="mb-1 text-body-sm text-on-surface-variant">{tc('turnstileLabel')}</p>
+            <Turnstile
+              onVerify={setCaptchaToken}
+              onExpired={() => setCaptchaToken(null)}
+              resetNonce={captchaNonce}
+            />
+          </div>
           </div>
 
           <div className="mt-10 flex items-center justify-between gap-4">

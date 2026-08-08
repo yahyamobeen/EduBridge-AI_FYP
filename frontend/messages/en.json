@@ -96,10 +96,11 @@
       "haveAccount": "Already have an account?",
       "signIn": "Sign In",
       "stepOf": "Step {current} of {total}",
-      "required": "This field is required.",
-      "invalidEmail": "Enter a valid email address.",
-      "passwordTooShort": "Use at least 8 characters."
-    },
+"required": "This field is required.",
+        "invalidEmail": "Enter a valid email address.",
+        "passwordTooShort": "Use at least 8 characters.",
+        "turnstileLabel": "Security check"
+      },
     "student": {
       "title": "Create Student Account",
       "subtitle": "Enter your details to access the curriculum.",
@@ -135,6 +136,7 @@
     "errors": {
       "emailTaken": "That email already has an account.",
       "invalidClassGroup": "That group is not offered for the class you selected.",
+      "captchaFailed": "The security check did not go through. Please try again.",
       "rateLimited": "Too many attempts. Please wait a moment and try again.",
       "generic": "Something went wrong. Please try again.",
       "enumsTitle": "Could not load the class and subject options",
@@ -157,6 +159,9 @@
       "submitting": "Signing in…",
       "noAccount": "Don't have an account?",
       "createAccount": "Create an account"
+    },
+    "turnstile": {
+      "label": "Security check"
     },
     "twoFactor": {
       "brand": "EduBridge AI",
@@ -194,6 +199,7 @@
     },
     "errors": {
       "badCredentials": "That email and password do not match an account.",
+      "captchaFailed": "The security check did not go through. Please try again.",
       "invalidCode": "That code is not valid. Please try again.",
       "rateLimited": "Too many attempts. Please wait a moment and try again.",
       "rateLimitedIn": "Too many attempts. You can try again in",

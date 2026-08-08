@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { AuthField } from '@/components/auth/AuthField'
 import { CountdownReadout } from '@/components/auth/Countdown'
 import { LockedPanel } from '@/components/auth/LockedPanel'
+import { Turnstile } from '@/components/auth/Turnstile'
 import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowIcon, LockIcon, MailIcon, TeachIcon } from '@/components/ui/Icon'
@@ -35,10 +36,13 @@ import {
 export function LoginForm() {
   const t = useTranslations('auth.login')
   const te = useTranslations('auth.errors')
+  const tt = useTranslations('auth.turnstile')
   const router = useRouter()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaNonce, setCaptchaNonce] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -49,7 +53,8 @@ export function LoginForm() {
   const clearRateLimit = useCallback(() => setRetryAtMs(null), [])
 
   const rateLimited = retryAtMs !== null
-  const canSubmit = email.trim() !== '' && password !== '' && !submitting && !rateLimited
+  const canSubmit =
+    email.trim() !== '' && password !== '' && captchaToken !== null && !submitting && !rateLimited
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -58,7 +63,11 @@ export function LoginForm() {
     setFieldErrors({})
 
     try {
-      const result = await login({ email: email.trim(), password })
+      const result = await login({
+        email: email.trim(),
+        password,
+        turnstile_token: captchaToken ?? '',
+      })
 
       switch (result.status) {
         case 'two_factor_required':
@@ -90,6 +99,10 @@ export function LoginForm() {
       // No `finally`: on every branch above the screen is navigating away, and
       // re-enabling the button mid-transition invites a second submission.
     } catch (error) {
+      // Any failed submit means siteverify consumed the token. Drop it and
+      // force a fresh solve; never re-enable the button with a dead token.
+      setCaptchaToken(null)
+      setCaptchaNonce((n) => n + 1)
       setSubmitting(false)
 
       if (!(error instanceof ApiError)) {
@@ -112,6 +125,11 @@ export function LoginForm() {
 
       if (error.code === 'VALIDATION_ERROR') {
         setFieldErrors(error.fieldErrors())
+        return
+      }
+
+      if (error.code === 'CAPTCHA_FAILED') {
+        setFormError(te('captchaFailed'))
         return
       }
 
@@ -226,6 +244,15 @@ export function LoginForm() {
                     </Link>
                   }
                 />
+
+                <div className="mt-1">
+                  <p className="mb-1 text-body-sm text-on-surface-variant">{tt('label')}</p>
+                  <Turnstile
+                    onVerify={setCaptchaToken}
+                    onExpired={() => setCaptchaToken(null)}
+                    resetNonce={captchaNonce}
+                  />
+                </div>
 
                 <button
                   type="submit"

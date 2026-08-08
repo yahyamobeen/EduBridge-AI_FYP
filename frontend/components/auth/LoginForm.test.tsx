@@ -25,6 +25,21 @@ vi.mock('@/i18n/navigation', () => ({
   ),
 }))
 vi.mock('@/lib/api/endpoints', () => ({ login: (...a: unknown[]) => signIn(...a) }))
+vi.mock('@/components/auth/Turnstile', () => ({
+  // The real widget makes a network call; in tests a button stands in for it
+  // and issues a fresh token on click, exactly like a solved challenge.
+  Turnstile: ({
+    onVerify,
+    className,
+  }: {
+    onVerify: (token: string) => void
+    onExpired?: () => void
+    resetNonce?: number
+    className?: string
+  }) => (
+    <button type="button" data-testid="turnstile" className={className} onClick={() => onVerify('mock-token')} />
+  ),
+}))
 
 function renderForm() {
   return render(
@@ -37,6 +52,8 @@ function renderForm() {
 async function signInAs(user: ReturnType<typeof userEvent.setup>, email = 'aisha@example.com') {
   await user.type(screen.getByLabelText(en.auth.login.emailLabel), email)
   await user.type(screen.getByLabelText(en.auth.login.passwordLabel), 'Password123')
+  // The security check must be solved before the button arms.
+  await user.click(screen.getByTestId('turnstile'))
   await user.click(screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }))
 }
 
@@ -165,6 +182,58 @@ describe('failures', () => {
     const field = screen.getByLabelText(en.auth.login.emailLabel)
     expect(field).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid email address.')
+  })
+})
+
+describe('captcha', () => {
+  it('arms the submit button only after a token is issued', async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await user.type(screen.getByLabelText(en.auth.login.emailLabel), 'aisha@example.com')
+    await user.type(screen.getByLabelText(en.auth.login.passwordLabel), 'Password123')
+
+    expect(
+      screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }),
+    ).toBeDisabled()
+
+    await user.click(screen.getByTestId('turnstile'))
+    expect(
+      screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }),
+    ).toBeEnabled()
+  })
+
+  it('sends the captcha token with the credentials', async () => {
+    signIn.mockResolvedValue({
+      status: 'email_verification_required',
+      email: 'a***@example.com',
+    })
+    const user = userEvent.setup()
+    renderForm()
+    await signInAs(user)
+
+    expect(signIn.mock.calls[0]?.[0]).toMatchObject({
+      email: 'aisha@example.com',
+      turnstile_token: 'mock-token',
+    })
+  })
+
+  it('a CAPTCHA_FAILED submit consumes the token and forces a fresh solve', async () => {
+    signIn.mockRejectedValue(new ApiError(400, 'CAPTCHA_FAILED', 'no'))
+    const user = userEvent.setup()
+    renderForm()
+    await signInAs(user)
+
+    expect(screen.getByRole('alert')).toHaveTextContent(en.auth.errors.captchaFailed)
+
+    // The consumed token is gone: the button does NOT re-arm on its own, and
+    // clicking it again does nothing until the widget issues a new token.
+    await user.click(screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }))
+    expect(signIn).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByTestId('turnstile'))
+    await user.click(screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }))
+    expect(signIn).toHaveBeenCalledTimes(2)
+    expect(signIn.mock.calls[1]?.[0]).toMatchObject({ turnstile_token: 'mock-token' })
   })
 })
 
