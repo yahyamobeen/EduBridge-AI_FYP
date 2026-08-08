@@ -87,6 +87,8 @@
       "email": "ای میل ایڈریس",
       "password": "پاس ورڈ",
       "passwordHint": "کم از کم آٹھ حروف ہونے چاہئیں۔",
+      "confirmPassword": "پاس ورڈ کی تصدیق",
+      "confirmPasswordHint": "اوپر والے پاس ورڈ سے میل کھانا چاہیے۔",
       "showPassword": "پاس ورڈ دکھائیں",
       "hidePassword": "پاس ورڈ چھپائیں",
       "back": "واپس",
@@ -98,7 +100,8 @@
       "stepOf": "مرحلہ {current} از {total}",
       "required": "یہ خانہ ضروری ہے۔",
       "invalidEmail": "درست ای میل ایڈریس درج کریں۔",
-      "passwordTooShort": "کم از کم آٹھ حروف استعمال کریں۔"
+      "passwordTooShort": "کم از کم آٹھ حروف استعمال کریں۔",
+      "mismatch": "دونوں پاس ورڈ ایک جیسے ہونے چاہئیں۔"
     },
     "student": {
       "title": "طالب علم کا اکاؤنٹ بنائیں",

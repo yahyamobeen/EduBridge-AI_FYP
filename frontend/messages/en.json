@@ -87,6 +87,8 @@
       "email": "Email Address",
       "password": "Password",
       "passwordHint": "Must be at least 8 characters.",
+      "confirmPassword": "Confirm Password",
+      "confirmPasswordHint": "Must match the password above.",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
       "back": "Back",
@@ -98,7 +100,8 @@
       "stepOf": "Step {current} of {total}",
       "required": "This field is required.",
       "invalidEmail": "Enter a valid email address.",
-      "passwordTooShort": "Use at least 8 characters."
+      "passwordTooShort": "Use at least 8 characters.",
+      "mismatch": "Both passwords must match."
     },
     "student": {
       "title": "Create Student Account",

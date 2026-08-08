@@ -87,6 +87,8 @@
       "email": "Email address",
       "password": "Password",
       "passwordHint": "Kam az kam aath huroof hone chahiye.",
+      "confirmPassword": "Password ki tasdeeq",
+      "confirmPasswordHint": "Upar wale password se match karna chahiye.",
       "showPassword": "Password dikhayein",
       "hidePassword": "Password chupayein",
       "back": "Wapas",
@@ -98,7 +100,8 @@
       "stepOf": "Marhala {current} az {total}",
       "required": "Ye khana zaroori hai.",
       "invalidEmail": "Durust email address darj karein.",
-      "passwordTooShort": "Kam az kam aath huroof istemal karein."
+      "passwordTooShort": "Kam az kam aath huroof istemal karein.",
+      "mismatch": "Dono passwords aik jaise hone chahiyen."
     },
     "student": {
       "title": "Talib ilm ka account banayein",
