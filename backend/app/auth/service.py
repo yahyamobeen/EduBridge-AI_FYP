@@ -56,10 +56,12 @@ from app.auth.totp import (
     generate_totp_secret,
     verify_totp_code,
 )
+from app.auth.turnstile import verify_turnstile_token
 from app.core.config import get_settings
 from app.core.db import set_current_user_id
 from app.core.errors import (
     AppError,
+    captcha_failed,
     email_already_registered,
     guardian_already_linked,
     guardian_not_found,
@@ -94,6 +96,12 @@ _EMAIL_OTP_TTL_SECONDS = 600
 
 
 def register(db: Session, payload: RegisterRequest) -> dict:
+    # Captcha BEFORE any schema/DB work and before issuing anything: a client
+    # asserting "I solved the captcha" is never trusted alone, and a rejected
+    # token must waste no account machinery and, especially, no hash.
+    if not verify_turnstile_token(payload.turnstile_token):
+        raise captcha_failed()
+
     # Two DIFFERENT failures, two different codes. Absent student fields are a
     # 400 VALIDATION_ERROR with per-field detail; a class/group pair that does
     # not exist is a 422 INVALID_CLASS_GROUP. Collapsing both into the second
@@ -272,6 +280,13 @@ def login(db: Session, payload: LoginRequest) -> dict:
     SECURITY DEFINER function rather than an RLS-bypassing connection: there is
     no `app.current_user_id()` yet to satisfy `app_user_self_read` with.
     """
+    # 1) CAPTCHA, FIRST — before the lookup and before the dummy-hash branch,
+    #    so the captcha is a constant cost for every account and never tells
+    #    a caller whether an address exists (tdd.md §6.11, timing side).
+    if not verify_turnstile_token(payload.turnstile_token):
+        raise captcha_failed()
+
+    # 2) ... then the existing lookup.
     row = (
         db.execute(
             text(

@@ -37,6 +37,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
     role: UserRole
+    # Required Cloudflare Turnstile token (register + login only).
+    turnstile_token: str = Field(min_length=1)
 
     board: BoardCode | None = None
     class_level: int | None = Field(default=None, ge=9, le=12)
@@ -120,6 +122,9 @@ class EnumsResponse(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    # Required Cloudflare Turnstile token; a missing or empty value is a 400
+    # VALIDATION_ERROR like any other missing required field.
+    turnstile_token: str = Field(min_length=1)
 
 
 class EmailVerificationRequired(BaseModel):
