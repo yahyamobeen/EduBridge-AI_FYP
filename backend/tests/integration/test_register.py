@@ -13,6 +13,7 @@ def test_register_student(client):
             "email": email,
             "password": "password123",
             "full_name": "Ayesha Khan",
+            "turnstile_token": "test-turnstile-token",
             "role": "student",
             "board": "PCTB",
             "class_level": 9,
@@ -37,6 +38,7 @@ def test_register_teacher(client):
             "email": email,
             "password": "password123",
             "full_name": "Sir Imran",
+            "turnstile_token": "test-turnstile-token",
             "role": "teacher",
             "institution": "Govt High School",
         },
@@ -53,6 +55,7 @@ def test_register_parent(client):
             "email": email,
             "password": "password123",
             "full_name": "Mrs. Fatima",
+            "turnstile_token": "test-turnstile-token",
             "role": "parent",
         },
     )
@@ -66,6 +69,7 @@ def test_register_duplicate_email_conflict(client):
         "email": email,
         "password": "password123",
         "full_name": "Dup User",
+            "turnstile_token": "test-turnstile-token",
         "role": "parent",
     }
     first = client.post("/api/auth/register", json=payload)
@@ -84,6 +88,7 @@ def test_register_bad_group_for_class(client):
             "email": email,
             "password": "password123",
             "full_name": "Bad Group",
+            "turnstile_token": "test-turnstile-token",
             "role": "student",
             "board": "PCTB",
             "class_level": 9,
@@ -110,6 +115,7 @@ def test_register_student_missing_fields_validation(client):
             "email": email,
             "password": "password123",
             "full_name": "No Fields",
+            "turnstile_token": "test-turnstile-token",
             "role": "student",
         },
     )
@@ -134,6 +140,7 @@ def test_register_student_creates_a_trial_subscription(client):
             "email": email,
             "password": "password123",
             "full_name": "Trial Student",
+            "turnstile_token": "test-turnstile-token",
             "role": "student",
             "board": "PCTB",
             "class_level": 9,

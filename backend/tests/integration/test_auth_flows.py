@@ -14,6 +14,7 @@ def _register_student(client) -> tuple[str, str]:
             "class_level": 9,
             "student_group": "science",
             "medium": "en",
+            "turnstile_token": "test-turnstile-token",
         },
     )
     assert resp.status_code == 201, resp.text
@@ -22,7 +23,14 @@ def _register_student(client) -> tuple[str, str]:
 
 def test_login_wrong_password_401(client):
     email, _ = _register_student(client)
-    resp = client.post("/api/auth/login", json={"email": email, "password": "wrong-password"})
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": email,
+            "password": "wrong-password",
+            "turnstile_token": "test-turnstile-token",
+        },
+    )
     assert resp.status_code == 401
     assert resp.json()["error"]["code"] == "UNAUTHENTICATED"
 
@@ -30,7 +38,11 @@ def test_login_wrong_password_401(client):
 def test_login_unknown_email_same_401_wording(client):
     resp = client.post(
         "/api/auth/login",
-        json={"email": f"{uuid4().hex[:12]}@nobody.com", "password": "whatever"},
+        json={
+            "email": f"{uuid4().hex[:12]}@nobody.com",
+            "password": "whatever",
+            "turnstile_token": "test-turnstile-token",
+        },
     )
     assert resp.status_code == 401
     body = resp.json()
@@ -40,7 +52,14 @@ def test_login_unknown_email_same_401_wording(client):
 
 def test_login_email_verification_required_no_session(client):
     email, _ = _register_student(client)
-    resp = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": email,
+            "password": "password123",
+            "turnstile_token": "test-turnstile-token",
+        },
+    )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "email_verification_required"
@@ -52,7 +71,14 @@ def test_login_email_verification_required_no_session(client):
 
 def test_login_never_sets_session_cookie(client):
     email, _ = _register_student(client)
-    resp = client.post("/api/auth/login", json={"email": email, "password": "password123"})
+    resp = client.post(
+        "/api/auth/login",
+        json={
+            "email": email,
+            "password": "password123",
+            "turnstile_token": "test-turnstile-token",
+        },
+    )
     assert resp.status_code == 200
     assert not any(h.lower() == "set-cookie" for h in resp.headers)
 
