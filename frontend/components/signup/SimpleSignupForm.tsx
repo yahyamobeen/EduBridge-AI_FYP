@@ -26,11 +26,18 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  const complete = fullName.trim() !== '' && email.trim() !== '' && password.length >= 8
+  const mismatch = confirmPassword !== '' && confirmPassword !== password
+  const complete =
+    fullName.trim() !== '' &&
+    email.trim() !== '' &&
+    password.length >= 8 &&
+    confirmPassword === password &&
+    confirmPassword !== ''
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -104,6 +111,20 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
                 value: password,
                 onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
                   setPassword(e.target.value),
+              }}
+            />
+            <TextField
+              label={tc('confirmPassword')}
+              name="confirm_password"
+              type="password"
+              autoComplete="new-password"
+              hint={tc('confirmPasswordHint')}
+              required
+              error={mismatch ? tc('mismatch') : fieldErrors.confirm_password}
+              register={{
+                value: confirmPassword,
+                onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+                  setConfirmPassword(e.target.value),
               }}
             />
           </div>
