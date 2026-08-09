@@ -2,9 +2,9 @@
 
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform for Secondary & Higher-Secondary Students
 
-**Version:** 0.3.4
+**Version:** 0.3.5
 **Status:** Draft — under section-by-section review
-**Last Updated:** August 2, 2026
+**Last Updated:** August 9, 2026
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen)
 **Supervisor:** Dr. Muhammad Arif Butt — Department of Data Science, FCIT, University of the Punjab
 **Authors:** Osairum Ahmad Khan (BSDSF23A019), Muhammad Mujtaba (BSDSF23A026), Abdul Muneeb (BSDSF23A036), Yahya Mobeen (BSDSF23A039)
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial PRD draft derived from the approved FYP proposal and the agreed planning blueprint. Adopts supervisor PRD format; extended to engineering depth for TDD derivation. |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Added **TEL-5** endpoint access logging + admin daily-logs view; entity `ApiRequestLog`; RBAC + Admin-dashboard updates (kept in sync with TDD v0.1.1). |
+| 0.3.5 | 2026-08-09 | EduBridge AI Team | **Consistency pass, driven by writing the User Stories & Epics deliverable.** Three capabilities that the product had promised but never specified gain requirements: **FR-A7** password reset (built and fully designed in `tdd.md`, yet no FR had ever covered it), **FR-A8** manage own account (granted to every role by the §4.2 matrix since v0.1.0, with no requirement and no endpoint behind it), and **FR-18** the English-language subject under a new **Epic C3** (one of four `content_strategy` values the router has dispatched on since v0.2.0). Three §4.2 cells that could not work are closed: a **parent can no longer create spaces, issue join codes or post announcements**, because the `guardian_link` write boundary makes the student-initiated invite the only route to a verified link — a join code produces no invite token. **§15 CL-2** loses "chat history" as a digest input; chat is owner-only and a teacher has no read path, so the digest carries no tutor-derived signal at all. **§15 CL-3** recasts "replay an avatar explanation" as a recommendation rather than a parent control. **§4.3 and §6.1** gain the **fail-closed rule** for an unknown class level, which had existed only in `tdd.md`. The **P0 Definition of Done** now includes second-factor enrolment and plan selection, both P0 and both previously missing, and the P0 scope list gains Epic C2. Record fixes: §12.2 retitled (it describes four strategies, not two), Epic C tiered P1 rather than P2, §2.3 and §29 aligned on O1's epics, and §19 reordered so I18N-4a precedes I18N-5 and the RTL mirroring rule sits with I18N-4 instead of inside the identifier rule. |
 | 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend build complete.** §19 gains **I18N-4a**: the RTL rule is now enforced by an automated sweep rather than by reviewer memory, because every supplied prototype is written with physical direction properties that look correct in English and silently break Urdu. No scope change. |
 | 0.3.3 | 2026-08-02 | EduBridge AI Team | **Accessibility rules made testable** during frontend build: **A11Y-1a** (errors carried by icon + text + colour, and countdowns announced per minute rather than per second) and **A11Y-1b** (focus moves to a step's single field, and returns to it after a rejected code). No scope change; both make A11Y-1 checkable in review rather than aspirational. |
 | 0.3.2 | 2026-08-02 | EduBridge AI Team | **Access is now paid** — new §2.6 defines a single tier (Rs. 999/month, PKR) with a **14-day trial and no free tier**, students only; onboarding gains the derived state **`plan_selection_pending`** after the parental gate, and it is **re-entrant** (a student returns to it when the trial lapses). **Parental-gate mechanism resolved to a student-initiated email invite** (§4.3, §6.1, §6.2), closing open decision 4. **Teachers no longer have tutor access** (§4.2) — aligns the matrix with `tdd.md` §3.2, which scoped `/api/tutor/ask` to students. **FR-A1** now captures `student_group` and `language_pref`; **FR-A5** (plan selection) and **FR-A6** (social sign-in, deferred) added. §19 records the RTL implementation rule; §26 flags minors as the subscriber of record. |
@@ -75,7 +76,7 @@ The proposal defines **seven objectives**; this PRD carries all of them, priorit
 
 | # | Objective | Primary epic(s) | Tier |
 |---|-----------|-----------------|------|
-| O1 | Class-specific **Board Curriculum Chatbots** (Classes 9, 10, 11/FSc-I, 12/FSc-II) for NCP-aligned PCTB and STBB, loaded from official textbooks; understand short informal queries and adapt language to class level. | B, C | P0 |
+| O1 | Class-specific **Board Curriculum Chatbots** (Classes 9, 10, 11/FSc-I, 12/FSc-II) for NCP-aligned PCTB and STBB, loaded from official textbooks; understand short informal queries and adapt language to class level. | B, C, C2, C3 | P0 |
 | O2 | **Adaptive quiz-evaluation engine** that scores attempts and adjusts difficulty/content by performance. | E | P1 |
 | O3 | **Syllabus-coverage tracking** + auto-generated **weekly performance report**. | F | P1 |
 | O4 | **Classroom space** where teachers enroll students, create/conduct subject-wise quizzes, and receive post-quiz collective weak-area reports. | G | P1 |
@@ -236,15 +237,15 @@ Legend: ✅ allowed · 🔵 read-only · ⛔ not allowed · *scope notes inline*
 | Reset another user's 2FA (identity-verified, audited) | ⛔ | ⛔ | ⛔ | ✅ |
 | Use tutor chatbot (ask, voice, visuals, avatar) | ✅ | ⛔ *(see note)* | ⛔ | ⛔ |
 | View own progress / coverage / exam-readiness | ✅ (own) | — | 🔵 (linked child, all subjects) | ⛔ |
-| Create / edit class space | ⛔ | ✅ | ✅ (as guardian space) | ✅ |
-| Enroll students / issue join codes | ⛔ | ✅ (own space) | ✅ (link own child) | ✅ |
+| Create / edit class space | ⛔ | ✅ | ⛔ *(see note)* | ✅ |
+| Enroll students / issue join codes | ⛔ | ✅ (own space) | ⛔ *(see note)* | ✅ |
 | Create & run quizzes | ⛔ | ✅ (**own subject only**) | ⛔ | ✅ |
 | View quiz/class reports | 🔵 (own results) | 🔵 (**own subject**, collective + individual) | 🔵 (linked child, all subjects) | 🔵 (aggregate) |
 | View a student's chat content | 🔵 (own) | ⛔ | ⛔ | ⛔ (audit metadata only) |
 | Manage curriculum KB / run auto-update | ⛔ | ⛔ | ⛔ | ✅ |
 | Review security (vetting, AgentSBOM), set rate limits/quotas | ⛔ | ⛔ | ⛔ | ✅ |
 | View daily endpoint access logs (traffic, status codes, messages) | ⛔ | ⛔ | ⛔ | ✅ |
-| Post announcements to a space | ⛔ | ✅ (own space) | ✅ (own space) | ✅ |
+| Post announcements to a space | ⛔ | ✅ (own space) | ⛔ *(see note)* | ✅ |
 
 > **Note on teacher tutor access (changed in v0.3.2).** Through v0.3.1 this cell read *"✅ (own testing)"*,
 > which contradicted `tdd.md` §3.2, where `POST /api/tutor/ask` has always been scoped to
@@ -253,12 +254,20 @@ Legend: ✅ allowed · 🔵 read-only · ⛔ not allowed · *scope notes inline*
 > If teachers are later given a way to evaluate the tutor, it should be a separate, quota-limited endpoint
 > rather than a widening of this one.
 
+> **Note on parent spaces and join codes (changed in v0.3.5).** Through v0.3.4 these three cells granted a
+> parent a "guardian space" with its own join code, as a second way to link to a child. That path can no
+> longer work: the `guardian_link` write boundary added in `tdd.md` v0.3.5 makes `verified` reachable
+> **only** through `app.confirm_guardian_link`, which demands an unexpired one-time invite token — and a
+> join code never produces one. The **student-initiated email invite is the sole route** to a verified
+> link (§4.3). Parents therefore create no spaces, issue no join codes and post no announcements; their
+> visibility comes from the guardian link alone.
+
 **Cross-cutting rules:**
 - **The UI must not offer what the matrix forbids.** Navigation and controls are derived per role from this
   matrix — a role never renders a control it cannot use, even disabled. This is a requirement, not a
   presentation preference: a parent dashboard that shows a "replay this tutor session" button advertises a
   capability the matrix denies, and a shared component tree makes that failure easy to introduce by copying.
-- **Consent by joining** — a viewer (teacher/parent) sees a student only after the student joins their space via a revocable **join code**. The student can see who can view them and can **leave any space at any time**.
+- **Consent by joining** — a **teacher** sees a student only after the student joins their space via a revocable **join code**. The student can see who can view them and can **leave any space at any time**. A **parent's** visibility comes from a verified guardian link (§4.3), not from a space.
 - **Read-only viewers** — teachers/parents can see progress but can never chat as the student or change the student's settings.
 - **Subject-scoped teacher** — a teacher declares the subject they teach; their reports are limited to that subject only (least-privilege).
 - **Parent all-subject read-only** — a linked parent sees an all-subject report for their child plus a how-to-help plan.
@@ -270,7 +279,8 @@ To protect younger minors, parental linkage is **required by class level** for i
 | Student class | Parent/guardian link | Effect |
 |---|---|---|
 | **Class 9–10** | **Mandatory** | The student must have a **signed-up, linked, verified** parent/guardian to use the app; the parent can view the student's progress. Enforced at onboarding as a **hard gate** — no grace period (§6.1). |
-| **Class 11–12** | **Optional** | Parent linkage is offered but not required; the student can use the app without it. |
+| **Class 11–12** | **Optional** | Parent linkage is **offered** but not required; the student can use the app without it, and the gate is never displayed to them. |
+| **Class level unknown** | **Mandatory** | **Fails closed** — the student is gated exactly as a Class 9–10 student is. See below. |
 
 **Mechanism (resolved in v0.3.2).** The link is created by a **student-initiated email invite**: the student
 enters a parent's email address, the parent receives an invite, **signs up**, and confirms the link from
@@ -284,6 +294,13 @@ The direction and the channel both matter:
 - **A student must not be able to satisfy their own gate.** The parent account is distinct and separately
   authenticated, backed by the `CHECK (parent_id <> student_id)` constraint and a parent-role check in the
   service layer.
+
+**The gate fails closed on an unknown class level (added in v0.3.5).** A student whose class level cannot
+be read is **gated**, not waved through. Under Row Level Security an unreadable `student_profile` row is
+indistinguishable from an absent one, and the two failure modes are not symmetric: gating an eighteen-year-old
+in error costs them an invite they did not need, while releasing a fourteen-year-old in error serves a minor
+without consent. `onboarding_state` must report `guardian_link_pending` whenever the gate holds, so the
+student lands on a screen that can resolve it rather than on a dead end.
 
 This gate reinforces the platform's minors'-data and consent posture (§26) and is keyed on the student's class level *(self-declared vs. verified at signup — **[PROPOSED — confirm]**)*.
 
@@ -354,8 +371,8 @@ register ──► email_verification_pending
 1. Student signs up (self-serve) with minimal PII; selects **board**, **class (9–12)**, **elective group**, **medium**, and **interface language**.
 1a. **Email verification** — the student confirms their address before proceeding.
 1b. **Two-factor enrolment (mandatory, FR-A4)** — the student chooses TOTP or email-OTP **as equally weighted options**, confirms one challenge, and saves the 10 backup codes shown once. Full access is withheld until this completes.
-2. **If Class 9–10:** the student must link a parent/guardian. The student enters a parent's **email address**; the parent signs up and confirms, and the link becomes **verified** (§4.3). *Full tutor access is gated until then — a hard gate.*
-3. **If Class 11–12:** parental linkage is offered but optional; the student proceeds directly. A Class 11–12 student is **never** shown the gate.
+2. **If Class 9–10, or if the class level cannot be read:** the student must link a parent/guardian. The student enters a parent's **email address**; the parent signs up and confirms, and the link becomes **verified** (§4.3). *Full tutor access is gated until then — a hard gate.* **An unknown class level fails closed and is gated** — see §4.3.
+3. **If Class 11–12:** parental linkage is **offered but optional**; the student proceeds directly. A Class 11–12 student is **never** shown the gate, and may still choose to invite a parent later.
 4. **Plan selection (FR-A5)** — reached only once the 14-day trial lapses without an active subscription (§2.6). New students pass straight through to step 5 and meet this later.
 5. Student lands on the student dashboard (progress, recent chats, avatar entry point).
 
@@ -424,17 +441,24 @@ Requirements are grouped by **Epic** (A–K). Each carries the proposal's `FR-ID
   > which concern multi-tenant/institutional identity and remain out of scope for v1. The supporting table
   > (`oauth_identity`) is in the schema so it is stable when the feature is built; nothing writes to it yet.
 
+- **FR-A7 (P0):** **Self-service password reset.** *As a user who has forgotten my password, I want a secure self-service way to set a new one, so that I can regain access without contacting anyone.* *AC:* the request response is identical in body, status and timing whether or not the address exists; a single-use, time-limited link is issued; completing a reset never bypasses the second factor. *Role:* all. *Deps:* SEC-14. *Edge:* a spent token and a lapsed token are distinguishable, so a resend is offered only for the latter. *(Added in v0.3.5 — the endpoints, error semantics and constant-time behaviour were fully specified in `tdd.md` §3.1/§7.3 and built, but no functional requirement had ever covered them.)*
+
+- **FR-A8 (P1):** **Manage own account.** *As any user, I want to change my password, my language and my details from inside my account, so that I am not forced through a reset email to change something I already know.* *AC:* a signed-in user can change their password after re-authenticating with the current one; the **stored language preference** can be changed and governs the language of subsequent outgoing email; own second-factor **status** is visible but the secret never is; everything is scoped to the acting user. *Role:* all. *Deps:* §4.2. *Edge:* the stored language preference and the interface locale are distinct settings and must be presented as such. *(Added in v0.3.5 — §4.2 has granted this to every role since v0.1.0, but no requirement described it and `tdd.md` routed nothing for it.)*
+
 ### Epic B — Board Curriculum Chatbot *(P0)*
 - **FR-1 (P0):** *As a Class-9 student, I want to type "math 9 chp 4 ex 4.5 q 3" and get the exact question with a step-by-step solution.* **AC:** right question found; step-wise solution; option to explain a step. *Role:* Student. *Deps:* KB (§12), retrieval (§11). *Edge:* question not in KB → graceful "not found / closest match"; ambiguous reference → clarify.
 - **FR-2 (P0):** *As an FSc student, I want answers in more technical English so they match my class level.* **AC:** vocabulary adapts to the class level. *Edge:* class mismatch → adapt to enrolled class.
 - **FR-7 (P0):** *As an Urdu-medium student, I want answers in Urdu that use my textbook's exact terms.* **AC:** generate-in-Urdu; board-aligned terminology glossary applied. *Deps:* glossary (§12). *Edge:* missing glossary term → flag + fallback term.
 
-### Epic C — Urdu-Lazmi Subject *(P0 partial → P2 full)*
+### Epic C — Urdu-Lazmi Subject *(P0 partial → P1 full)*
 - **FR-8 (P0):** *As a student, I want the tashreeh of a couplet in the standard exam format.* **AC:** retrieved/structured template: intro → meaning → tashreeh → devices → central idea. *Deps:* Urdu notes corpus (§12). *Edge:* couplet not in corpus → no fabrication; return closest + note.
 - **FR-9 (P1):** *As a student, I want an essay or letter of the right length and structure.* **AC:** length is controlled; intro → body → conclusion. *Edge:* topic outside corpus → template scaffold only, flagged.
 
 ### Epic C2 — Religious Content (Quran Translation) *(P0)*
 - **FR-17 (P0):** *As a student, I want the Quran translation exactly as it appears in my board-approved textbook, so that what I study and reproduce in the exam is authentic.* **AC:** the stored board-approved text is returned **word-for-word**; the model may format or locate a verse but **generation/paraphrase is disabled** for this subject; a retrieval miss returns an explicit "not found in the knowledge base" rather than an answer; the response cites the source reference. *Role:* Student. *Deps:* §12, §2.4.2. *Edge:* partial/ambiguous verse reference → ask to clarify, never guess. *Rationale:* an invented or paraphrased Quranic translation is an ethical failure, not merely an accuracy one — this subject therefore has stricter handling than any other.
+
+### Epic C3 — English-Language Subject *(P1)*
+- **FR-18 (P1):** *As an English-subject student, I want grammar, comprehension and composition answered in my examination's format, so that I practise the form the paper actually asks for.* **AC:** items are answered from the structured English corpus against fixed exam formats, mirroring the Urdu treatment but in English; fixed and objective items are returned from the corpus rather than freely composed; composition items (essay, letter, application) are built from a template scaffold with controlled length; comprehension is answered against the retrieved passage. *Role:* Student. *Deps:* §2.4.2 (`english_language`), §12.2. *Edge:* topic outside the corpus → scaffold only, flagged. *(Added in v0.3.5 — `english_language` has been one of four `content_strategy` values since v0.2.0 and the agent router dispatches on it, but no functional requirement had ever covered it.)*
 
 ### Epic D — Multimodal: Visual Aids + Avatar/Voice *(P0)*
 - **FR-5 (P0):** *As a student, I want the avatar to explain a topic out loud in my language so it feels guided.* **AC:** avatar with Fish S2 Pro TTS in Urdu/English; MuseTalk lip-sync. *Edge:* Urdu TTS quality low → ur-PK/local Urdu TTS fallback (§20).
@@ -675,7 +699,7 @@ User 1–1 profile; Parent M–N Student via GuardianLink; Teacher/Parent 1–N 
 ### 12.1 Flagship build-own dataset
 No open, structured dataset of Pakistani board curricula exists; building a **multi-board (PCTB/STBB), class- and chapter-indexed** dataset of questions, worked solutions, SLO links, and indexed textbook figures is part of the project's contribution. We **reuse** mature open datasets where they exist and **build-own** the curriculum dataset.
 
-### 12.2 Two-branch language strategy
+### 12.2 Content strategies (four)
 Every subject carries a `content_strategy` (§2.4.2) that the agent router reads to decide **whether generation is permitted at all**.
 
 - **`branch_a_english_source` — dual-medium subjects (Maths, Physics, Chemistry, Biology, Computer Science, Islamiat, Pakistan Studies):** keep **one English-medium KB** (digital text) as the source of truth; retrieval is **cross-lingual** (BGE-M3) so an Urdu question finds the right English content; the answer is **generated in the student's language**; a **board-aligned Urdu terminology glossary** keeps Urdu wording identical to the student's book. These subjects are all published in parallel English and Urdu editions with the same syllabus, so a single source of truth serves both. Halves the data work.
@@ -733,12 +757,12 @@ Every subject carries a `content_strategy` (§2.4.2) that the agent router reads
 
 ## 15. Classroom & Collaboration Requirements
 
-- **CL-1 — Spaces & join codes:** a teacher or parent creates a **space** and shares a unique, **revocable** join code; the student enters the code to join. **Joining is the consent step.** The student can see who can view them and can **leave any space at any time**; every viewer is **read-only**.
-- **CL-2 — Teacher view (subject-scoped):** a teacher declares the subject they teach; reports are limited to that subject (least-privilege). Each week the system produces a **class digest** (from chat history, practice results, coverage gaps) naming the topics/weak points to focus on.
-- **CL-3 — Parent view (all subjects):** a linked parent gets an all-subject report of strengths/weak spots plus a short, curriculum-grounded **how-to-help** plan (revisit a chapter, practise specific questions, replay an avatar explanation).
+- **CL-1 — Spaces & join codes:** a **teacher** creates a **space** and shares a unique, **revocable** join code; the student enters the code to join. **Joining is the consent step.** The student can see who can view them and can **leave any space at any time**; every viewer is **read-only**. *(Parents create no spaces — their visibility comes from a verified guardian link, §4.3. Changed in v0.3.5.)*
+- **CL-2 — Teacher view (subject-scoped):** a teacher declares the subject they teach; reports are limited to that subject (least-privilege). Each week the system produces a **class digest** — from **practice results and coverage gaps** — naming the topics/weak points to focus on. *(Through v0.3.4 this read "from chat history, practice results, coverage gaps". Chat content is **owner-only** with no teacher read path (§4.2), so the digest carries **no tutor-derived signal of any kind** — not conversation text and not counts derived from it. Corrected in v0.3.5.)*
+- **CL-3 — Parent view (all subjects):** a linked parent gets an all-subject report of strengths/weak spots plus a short, curriculum-grounded **how-to-help** plan. The plan **recommends** actions for the student to take — revisit a chapter, practise specific questions, replay an explanation — and gives the parent **no control that opens any of them** on the student's account. *(Through v0.3.4 this listed "replay an avatar explanation" as a parent action, which §4.2 denies. Corrected in v0.3.5.)*
 - **CL-4 — Secure assessments:** teachers create time-limited, Google-form-style quizzes (optionally **agent-drafted** from the chapter/SLOs, then **teacher-approved**). Delivery is secure: fixed time window with **auto-submit**, **one attempt**, **shuffled** questions, and **answer keys kept server-side** (never sent to the browser); auto-graded. After a quiz the teacher gets each student's score and a class weak-point summary.
 - **CL-5 — Announcements:** teachers can post one-way announcements to a space. Direct guardrail-moderated student↔teacher chat is a **stretch goal** (out of v1 scope).
-- **CL-6 — Institutional attach:** institutions use the platform through the classroom layer — teachers/parents create spaces and roll out access via join codes; **[PROPOSED — confirm]** no separate SSO/multi-tenant system in v1 (§2.5).
+- **CL-6 — Institutional attach:** institutions use the platform through the classroom layer — teachers create spaces and roll out access via join codes; **[PROPOSED — confirm]** no separate SSO/multi-tenant system in v1 (§2.5).
 
 ---
 
@@ -810,9 +834,9 @@ Verbatim from the proposal NFR table (Table 3.2), each with an added **verificat
 - **I18N-1a:** **English is the default for every visitor.** The interface language is **never negotiated** from the browser's language settings or a stored preference — a device configured for Urdu, which is unremarkable in this audience, must not be pushed into Urdu before the user has chosen. Language is an explicit choice, made through the switcher, and it persists through navigation because every route carries its locale.
 - **I18N-2:** **RTL** layout for Urdu; correct rendering of Urdu script and mixed EN/UR content.
 - **I18N-3:** accept both **Urdu script and Roman-Urdu** input without a separate transliteration step (model handles both).
-- **I18N-4 (implementation rule):** **Urdu (`ur`) is the only right-to-left locale.** **Roman-Urdu is Latin script and stays left-to-right** — mirroring it would be a defect, not a feature.
-- **I18N-5 (identifier rule):** the stored language value and the web locale tag are **not the same string**. The database and API use `roman_ur` (the `language_code` enum). That is not a valid BCP-47 tag: locale-aware date, number and plural formatting rejects it, and `lang="roman_ur"` tells assistive technology nothing. The web layer therefore uses **`ur-Latn`** — the correct tag for Urdu in Latin script — and converts at the API boundary. Neither side changes for the other; the conversion lives in one place. Mirroring must be achieved with **direction-agnostic layout primitives** (logical start/end spacing and alignment) rather than per-locale overrides, so a new screen is RTL-correct by construction instead of by remembering. Directional icons (arrows, chevrons) flip; non-directional ones (mail, lock, person) must not. Content that is inherently left-to-right inside an RTL page — one-time codes, backup codes, numerals in a countdown — is pinned LTR so its characters cannot reorder.
+- **I18N-4 (implementation rule):** **Urdu (`ur`) is the only right-to-left locale.** **Roman-Urdu is Latin script and stays left-to-right** — mirroring it would be a defect, not a feature. Mirroring must be achieved with **direction-agnostic layout primitives** (logical start/end spacing and alignment) rather than per-locale overrides, so a new screen is RTL-correct by construction instead of by remembering. Directional icons (arrows, chevrons) flip; non-directional ones (mail, lock, person) must not. Content that is inherently left-to-right inside an RTL page — one-time codes, backup codes, numerals in a countdown — is pinned LTR so its characters cannot reorder.
 - **I18N-4a (implementation rule):** the RTL requirement is **enforced automatically, not by review**. Every source file is swept for physical direction properties (`ml`/`mr`, `pl`/`pr`, `left`/`right`, `text-left`/`text-right`, `border-l`/`border-r`); only logical equivalents are permitted. This is a rule about human attention, not about CSS: all fifteen supplied prototypes are written physically, so a class copied verbatim renders perfectly in English and quietly breaks the Urdu layout — a defect nobody sees until an Urdu-reading user does.
+- **I18N-5 (identifier rule):** the stored language value and the web locale tag are **not the same string**. The database and API use `roman_ur` (the `language_code` enum). That is not a valid BCP-47 tag: locale-aware date, number and plural formatting rejects it, and `lang="roman_ur"` tells assistive technology nothing. The web layer therefore uses **`ur-Latn`** — the correct tag for Urdu in Latin script — and converts at the API boundary. Neither side changes for the other; the conversion lives in one place.
 - **A11Y-1:** WCAG-oriented targets — sufficient contrast, keyboard navigation, readable typography for Urdu/English; captions/text alongside avatar audio.
 - **A11Y-1a (implementation rule):** an **error is conveyed by icon, text and colour together**, never by colour alone, and is tied to its control so assistive technology announces it. A **countdown is announced coarsely, not per second** — a lockout or code-expiry timer that updates a live region every second interrupts a screen-reader user continuously for its whole duration, which technically satisfies "announced" while making the page unusable. The precise timer is presented visually and a separate live region reports "about N minutes left", changing only when the minute changes.
 - **A11Y-1b (implementation rule):** where a step's whole purpose is one field — a one-time code, a backup code — **focus moves to that field**, and returns to it after a rejected attempt clears it. A rejected code that leaves focus on the submit button strands keyboard and screen-reader users on a control they have just been told did not work.
@@ -868,8 +892,8 @@ Targets marked **[PROPOSED]** start from proposal NFR targets and are to be conf
 Spread across **~1 full academic year**, following Spec-Driven Development (**constitution → specify → plan → tasks → implement**), tracked on a project board. Version control: `main` protected; feature branches `feature/<epic>-<desc>`; PR = unit of review; only the team lead merges after CI passes (tests + Secure Skills & MCP scanner + container build).
 
 ### P0 — Individual Student Tutor MVP *(demo-able core)*
-Auth + student dashboard (Epic A, K) · Board Curriculum Chatbot EN/UR/Roman-Urdu, class/board-adaptive, text+voice-in (B) · partial Urdu-Lazmi (C) · retrieval-first visual aids + avatar/voice (D) · **baseline safety** SEC-1/2/3 + rate-limit (I) · curriculum KB across both boards × all classes (subject breadth per data rollout).
-**Definition of Done (P0):** a student can self-serve sign up (9–10 with verified parent), ask a curriculum question in any of the 3 languages, receive a grounded answer + retrieval-first visual + talking avatar, all within guardrails and rate limits.
+Auth + student dashboard (Epic A, K) · Board Curriculum Chatbot EN/UR/Roman-Urdu, class/board-adaptive, text+voice-in (B) · partial Urdu-Lazmi (C) · **Quran-Translation verbatim mode (C2)** · retrieval-first visual aids + avatar/voice (D) · **baseline safety** SEC-1/2/3 + rate-limit (I) · curriculum KB across both boards × all classes (subject breadth per data rollout).
+**Definition of Done (P0):** a student can self-serve sign up, verify their email, **enrol a second factor** (FR-A4), clear the parental gate if Class 9–10, and reach the dashboard on an active trial — then ask a curriculum question in any of the 3 languages and receive a grounded answer + retrieval-first visual + talking avatar, all within guardrails and rate limits. **A student whose trial has lapsed is routed to plan selection** (FR-A5) rather than into the product. *(Through v0.3.4 this omitted 2FA and plan selection, both of which are P0; corrected in v0.3.5.)*
 
 ### P1 — Assessment, Classroom & Full Security
 Adaptive quiz engine (E: FR-3/15) · coverage + exam-readiness reports (F: FR-4/16) · Classroom & Spaces (G: FR-10/11) · parent reports · **full Secure Skills & MCP Layer** (H: FR-13, SEC-4…8/11/12).
@@ -973,14 +997,14 @@ Proves 100% coverage: every objective (and its gap) maps to epics, FRs, tier, an
 
 | Objective | Gap | Epic(s) | FR-IDs | NFR/SEC | Tier |
 |---|---|---|---|---|---|
-| O1 Board Curriculum Chatbots | G-1, G-2 | B, C, C2 | FR-1, FR-2, FR-7, FR-8, FR-9, **FR-17** | NFR-1/2/7 | P0 (FR-9 P1) |
+| O1 Board Curriculum Chatbots | G-1, G-2 | B, C, C2, C3 | FR-1, FR-2, FR-7, FR-8, FR-9, **FR-17**, **FR-18** | NFR-1/2/7 | P0 (FR-9, FR-18 P1) |
 | O2 Adaptive Quiz Engine | G-4 | E | FR-3, FR-15 | NFR-8 | P1 |
 | O3 Coverage Tracking & Reports | G-5 | F | FR-4, FR-16 | NFR-2 | P1 |
 | O4 Classroom Space | G-6 | G | FR-10, FR-11 | NFR-8 | P1 |
 | O5 Multimodal Layer | G-3 | D | FR-5, FR-6 | SEC-2, NFR-3 | P0 |
 | O6 Self-Updating Pipeline | G-7 | J | FR-12 | SEC-9 | P2 |
 | O7 Secure Skills & MCP Layer | G-8 | H, I | FR-13, FR-14 | SEC-1…12, NFR-4/5 | P1 (baseline P0) |
-| (Platform foundation) | — | A, K | FR-A1/A2/A3, **FR-A4**, **FR-A5**, FR-K1 *(FR-A6 deferred)* | SEC-10, **SEC-13**, **SEC-14**, NFR-2/6 | P0 |
+| (Platform foundation) | — | A, K | FR-A1/A2/A3, **FR-A4**, **FR-A5**, **FR-A7**, **FR-A8**, FR-K1 *(FR-A6 deferred)* | SEC-10, **SEC-13**, **SEC-14**, NFR-2/6 | P0 (FR-A8 P1) |
 
 ---
 
