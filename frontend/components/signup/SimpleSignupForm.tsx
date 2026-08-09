@@ -34,7 +34,7 @@ export function SimpleSignupForm({ role }: { role: 'teacher' | 'parent' }) {
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-const mismatch = confirmPassword !== '' && confirmPassword !== password
+  const mismatch = confirmPassword !== '' && confirmPassword !== password
   const complete =
     fullName.trim() !== '' &&
     email.trim() !== '' &&
@@ -49,7 +49,13 @@ const mismatch = confirmPassword !== '' && confirmPassword !== password
     setFormError(null)
     setFieldErrors({})
     try {
-      await registerAccount({ email, password, full_name: fullName, role, turnstile_token: captchaToken ?? '' })
+      await registerAccount({
+        email,
+        password,
+        full_name: fullName,
+        role,
+        turnstile_token: captchaToken ?? '',
+      })
       router.push('/onboarding/email')
     } catch (error) {
       // Any failed submit means siteverify consumed the token. Drop it and
@@ -122,7 +128,7 @@ const mismatch = confirmPassword !== '' && confirmPassword !== password
                   setPassword(e.target.value),
               }}
             />
-<TextField
+            <TextField
               label={tc('confirmPassword')}
               name="confirm_password"
               type="password"
@@ -137,7 +143,9 @@ const mismatch = confirmPassword !== '' && confirmPassword !== password
               }}
             />
             <div>
-              <p className="mb-1 text-body-sm text-on-surface-variant">{tc('turnstileLabel')}</p>
+              <p className="mb-1 text-body-sm text-on-surface-variant">
+                {tc('turnstileLabel')}
+              </p>
               <Turnstile
                 onVerify={setCaptchaToken}
                 onExpired={() => setCaptchaToken(null)}

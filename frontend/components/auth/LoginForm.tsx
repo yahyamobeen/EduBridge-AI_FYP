@@ -54,7 +54,11 @@ export function LoginForm() {
 
   const rateLimited = retryAtMs !== null
   const canSubmit =
-    email.trim() !== '' && password !== '' && captchaToken !== null && !submitting && !rateLimited
+    email.trim() !== '' &&
+    password !== '' &&
+    captchaToken !== null &&
+    !submitting &&
+    !rateLimited
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()

@@ -88,7 +88,7 @@ const securityHeaders = [
       `connect-src 'self' https://challenges.cloudflare.com${apiOrigin ? ` ${apiOrigin}` : ''}${isDev ? ' ws: wss:' : ''}`,
       // What we may FRAME (the Turnstile iframe), distinct from frame-ancestors
       // below, which says who may frame US. Both coexist.
-      "frame-src https://challenges.cloudflare.com",
+      'frame-src https://challenges.cloudflare.com',
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

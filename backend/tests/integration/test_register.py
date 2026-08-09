@@ -69,7 +69,7 @@ def test_register_duplicate_email_conflict(client):
         "email": email,
         "password": "password123",
         "full_name": "Dup User",
-            "turnstile_token": "test-turnstile-token",
+        "turnstile_token": "test-turnstile-token",
         "role": "parent",
     }
     first = client.post("/api/auth/register", json=payload)

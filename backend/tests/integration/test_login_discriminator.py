@@ -89,9 +89,9 @@ class TestLoginSeesTheEnrolment:
         user_id = _student(db, email)
         _enrol(db, user_id, status="active")
 
-        result = login(db, LoginRequest(
-                email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN
-            ))
+        result = login(
+            db, LoginRequest(email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN)
+        )
 
         assert result["status"] == "two_factor_required", (
             "an enrolled user was sent to enrolment; login cannot see "
@@ -105,9 +105,9 @@ class TestLoginSeesTheEnrolment:
         email = unique_email("disc")
         _student(db, email)
 
-        result = login(db, LoginRequest(
-                email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN
-            ))
+        result = login(
+            db, LoginRequest(email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN)
+        )
 
         assert result["status"] == "two_factor_enrollment_required"
         assert result["enrollment_token"]
@@ -118,9 +118,9 @@ class TestLoginSeesTheEnrolment:
         user_id = _student(db, email)
         _enrol(db, user_id, status="pending")
 
-        result = login(db, LoginRequest(
-                email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN
-            ))
+        result = login(
+            db, LoginRequest(email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN)
+        )
 
         assert result["status"] == "two_factor_enrollment_required"
 
@@ -137,9 +137,7 @@ class TestLoginHonoursTheLockout:
         _enrol(db, user_id, status="active", locked_for=300)
 
         with pytest.raises(AppError) as exc:
-            login(db, LoginRequest(
-                email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN
-            ))
+            login(db, LoginRequest(email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN))
 
         assert exc.value.status_code == 423
         assert exc.value.code == "TWO_FACTOR_LOCKED"
@@ -151,11 +149,9 @@ class TestLoginHonoursTheLockout:
         user_id = _student(db, email)
         _enrol(db, user_id, status="active", locked_for=-300)
 
-        assert login(db, LoginRequest(
-                email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN
-            ))["status"] == (
-            "two_factor_required"
-        )
+        assert login(
+            db, LoginRequest(email=email, password=PASSWORD, turnstile_token=TURNSTILE_TOKEN)
+        )["status"] == ("two_factor_required")
 
     def test_a_wrong_password_on_a_locked_account_still_answers_401(self, db, unique_email):
         """
@@ -168,10 +164,6 @@ class TestLoginHonoursTheLockout:
 
         wrong = "not-the-password"  # noqa: S105 -- the point of the test
         with pytest.raises(AppError) as exc:
-            login(
-                db, LoginRequest(
-                    email=email, password=wrong, turnstile_token=TURNSTILE_TOKEN
-                )
-            )
+            login(db, LoginRequest(email=email, password=wrong, turnstile_token=TURNSTILE_TOKEN))
 
         assert exc.value.status_code == 401

@@ -37,7 +37,12 @@ vi.mock('@/components/auth/Turnstile', () => ({
     resetNonce?: number
     className?: string
   }) => (
-    <button type="button" data-testid="turnstile" className={className} onClick={() => onVerify('mock-token')} />
+    <button
+      type="button"
+      data-testid="turnstile"
+      className={className}
+      onClick={() => onVerify('mock-token')}
+    />
   ),
 }))
 
@@ -227,11 +232,15 @@ describe('captcha', () => {
 
     // The consumed token is gone: the button does NOT re-arm on its own, and
     // clicking it again does nothing until the widget issues a new token.
-    await user.click(screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }))
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }),
+    )
     expect(signIn).toHaveBeenCalledTimes(1)
 
     await user.click(screen.getByTestId('turnstile'))
-    await user.click(screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }))
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(en.auth.login.submit, 'i') }),
+    )
     expect(signIn).toHaveBeenCalledTimes(2)
     expect(signIn.mock.calls[1]?.[0]).toMatchObject({ turnstile_token: 'mock-token' })
   })

@@ -54,9 +54,7 @@ function withIntl(ui: React.ReactNode) {
   )
 }
 
-function mountTurnstile(
-  ui = <Turnstile onVerify={onVerify} onExpired={onExpired} />,
-) {
+function mountTurnstile(ui = <Turnstile onVerify={onVerify} onExpired={onExpired} />) {
   // With window.turnstile stubbed the pending API promise resolves without a
   // network round trip, so no script element exists to fire an event on.
   return render(withIntl(ui))

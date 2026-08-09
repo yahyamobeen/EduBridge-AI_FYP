@@ -47,7 +47,9 @@ function loadTurnstileApi(): Promise<TurnstileApi> {
       resolve(window.turnstile)
       return
     }
-    const existing = document.querySelector<HTMLScriptElement>('script[data-edubridge-turnstile]')
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-edubridge-turnstile]',
+    )
     const script =
       existing ??
       (() => {

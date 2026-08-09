@@ -98,7 +98,7 @@
       "haveAccount": "Already have an account?",
       "signIn": "Sign In",
       "stepOf": "Step {current} of {total}",
-"required": "This field is required.",
+      "required": "This field is required.",
       "invalidEmail": "Enter a valid email address.",
       "passwordTooShort": "Use at least 8 characters.",
       "turnstileLabel": "Security check",

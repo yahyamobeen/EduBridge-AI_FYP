@@ -116,6 +116,7 @@ class TestVerifyTurnstileToken:
 
 def _fake_login_db(user_row: dict | None):
     """A Session stand-in answering the two reads `login()` makes."""
+
     class _Mappings:
         def __init__(self, row):
             self._row = row

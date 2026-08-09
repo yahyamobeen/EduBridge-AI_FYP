@@ -18,9 +18,7 @@ vi.mock('@/components/auth/Turnstile', () => ({
     onVerify: (token: string) => void
     onExpired?: () => void
     resetNonce?: number
-  }) => (
-    <button type="button" data-testid="turnstile" onClick={() => onVerify('mock-token')} />
-  ),
+  }) => <button type="button" data-testid="turnstile" onClick={() => onVerify('mock-token')} />,
 }))
 
 function renderForm() {

@@ -245,8 +245,8 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
                       value: draft.password,
                       onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
                         set('password', e.target.value),
-}}
-                    />
+                    }}
+                  />
                   <TextField
                     label={tc('confirmPassword')}
                     name="confirm_password"

@@ -18,9 +18,7 @@ vi.mock('@/components/auth/Turnstile', () => ({
     onVerify: (token: string) => void
     onExpired?: () => void
     resetNonce?: number
-  }) => (
-    <button type="button" data-testid="turnstile" onClick={() => onVerify('mock-token')} />
-  ),
+  }) => <button type="button" data-testid="turnstile" onClick={() => onVerify('mock-token')} />,
 }))
 
 function renderForm(role: 'teacher' | 'parent' = 'teacher') {
@@ -95,7 +93,9 @@ describe('SimpleSignupForm', () => {
     const user = userEvent.setup()
     renderForm('teacher')
 
-    const submit = screen.getByRole('button', { name: new RegExp(en.signup.common.submit, 'i') })
+    const submit = screen.getByRole('button', {
+      name: new RegExp(en.signup.common.submit, 'i'),
+    })
     await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha Khan')
     await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
     await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
@@ -121,6 +121,8 @@ describe('SimpleSignupForm', () => {
     await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'alllowercase')
     await user.click(screen.getByTestId('turnstile'))
 
-    expect(screen.getByRole('button', { name: new RegExp(en.signup.common.submit, 'i') })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: new RegExp(en.signup.common.submit, 'i') }),
+    ).toBeEnabled()
   })
 })
