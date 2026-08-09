@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     # the message that tells you what to run.
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
 
+    # Cloudflare Turnstile secret (siteverify is called server-side on register
+    # and login). SAME RULE AS TOTP: required, no default, and the app refuses
+    # to start on the placeholder from .env.example. A defaulted or placeholder
+    # secret key would silently verify nothing (or every) captcha.
+    turnstile_secret_key: str = Field(validation_alias="TURNSTILE_SECRET_KEY")
+
     # Email delivery (tdd.md §3.1, KAN-10b).
     # "logging" writes metadata to the logger (development/CI).
     # "resend" sends via the Resend API, and needs `uv sync --extra email`.
@@ -134,6 +140,20 @@ class Settings(BaseSettings):
                 'base64-encoded bytes). Generate one with: python -c "from '
                 'cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
             ) from exc
+        return value
+
+    @field_validator("turnstile_secret_key")
+    @classmethod
+    def _turnstile_key_is_not_a_placeholder(cls, value: str) -> str:
+        # Same refusal style as the TOTP key: the two keys have different
+        # formats (Turnstile secrets are opaque), so this checks the placeholder
+        # rather than pretending to validate a format we could never pin down.
+        if value.startswith("CHANGE_ME"):
+            raise ValueError(
+                "TURNSTILE_SECRET_KEY is still the placeholder from .env.example. "
+                "Create the widget in the Cloudflare dashboard, copy its secret "
+                "key into backend/.env, and never commit it."
+            )
         return value
 
     @model_validator(mode="after")

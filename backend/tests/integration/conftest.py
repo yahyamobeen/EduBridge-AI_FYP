@@ -101,6 +101,34 @@ def never_send_real_email(monkeypatch):
     email_module.drain_pending_emails()
 
 
+@pytest.fixture(autouse=True)
+def never_call_turnstile(monkeypatch):
+    """
+    THE SUITE MUST NOT TALK TO CHALLENGES.CLOUDFLARE.COM.
+
+    Same rule as `never_send_real_email`: a developer .env with a real
+    TURNSTILE_SECRET_KEY and a token in a test body would fire a live HTTP
+    call from CI. Patch the verify seam so every verification PASSES; the
+    captcha-failure paths are tested by explicitly re-patching it to a
+    rejecting stub (see test_turnstile.py).
+
+    NOTE on the patch target: `service.py` does `from app.auth.turnstile
+    import verify_turnstile_token`, so the name the request path calls lives
+    in `app.auth.service` — patching the turnstile module alone would leave
+    the real function reachable from every register/login test.
+    """
+    import app.auth.service as service_module
+
+    monkeypatch.setattr(service_module, "verify_turnstile_token", lambda _token: True)
+    yield
+
+
+@pytest.fixture
+def valid_turnstile_token() -> str:
+    """The token value supplied by tests; the autouse fixture accepts anything."""
+    return "test-turnstile-token"
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

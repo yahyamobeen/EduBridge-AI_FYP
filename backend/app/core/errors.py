@@ -57,6 +57,15 @@ def rate_limited(message: str = "Too many requests. Please slow down.") -> AppEr
     return AppError(code="RATE_LIMITED", message=message, status_code=429)
 
 
+def captcha_failed(message: str = "Please complete the security check again.") -> AppError:
+    # 400, not 403: the request body carried a token that failed verification,
+    # exactly like VALIDATION_ERROR is a 400 for a body that failed validation.
+    # The code — not the status — is what the client branches on, and this code
+    # is new, so a client that does not know it renders the generic state
+    # safely (ERROR_CODES additions in the frontend phase).
+    return AppError(code="CAPTCHA_FAILED", message=message, status_code=400)
+
+
 def forbidden_scope(message: str = "This account cannot do that.") -> AppError:
     return AppError(code="FORBIDDEN_SCOPE", message=message, status_code=403)
 

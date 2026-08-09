@@ -26,6 +26,10 @@ export const ERROR_CODES = [
   'GUARDIAN_NOT_FOUND',
   'ATTEMPT_EXISTS',
   'INVALID_CLASS_GROUP',
+  // Turnstile token rejected by Cloudflare siteverify. 400, but NOT
+  // VALIDATION_ERROR: the client must reset the widget and re-solve, because
+  // the token is single-use and may be consumed by the failed POST.
+  'CAPTCHA_FAILED',
   'SELF_LINK_FORBIDDEN',
   'NOT_GROUNDED',
   'RATE_LIMITED',

@@ -63,6 +63,9 @@ export type RegisterRequest = {
   password: string
   full_name: string
   role: Exclude<Role, 'admin'>
+  // Required everywhere since the Turnstile rollout: the client proves
+  // a human solved the widget before the server will touch the account.
+  turnstile_token: string
   // Students only.
   board?: BoardCode
   class_level?: number
@@ -79,7 +82,7 @@ export type RegisterResponse = {
   onboarding_state: OnboardingState
 }
 
-export type LoginRequest = { email: string; password: string }
+export type LoginRequest = { email: string; password: string; turnstile_token: string }
 
 /**
  * A 200 is NEVER a credential failure -- it means the request succeeded and the

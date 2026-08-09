@@ -70,14 +70,25 @@ const securityHeaders = [
       // instead of the actual bug. React never uses eval() in a production
       // build, so shipping the directive would weaken script-src for a feature
       // that is not there. `NODE_ENV` is set by `next build`, not by us.
-      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+      // Turnstile loads its challenge script from challenges.cloudflare.com and
+      // renders inside a Cloudflare-served iframe — so script-src, the
+      // otherwise-absent frame-src, AND connect-src must admit it, or the widget
+      // is blocked by the very policy that protects these forms. All three
+      // directives are in Cloudflare's own references (script-src + frame-src in
+      // the CSP reference; connect-src because the widget's orchestration code
+      // fetches from this origin, per the widget docs and production configs
+      // such as Storefront). No other third-party origin is allowed.
+      `script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com${isDev ? " 'unsafe-eval'" : ''}`,
       "style-src 'self' 'unsafe-inline'",
       // Self-hosted via next/font, plus the data: URI used to render the
       // server-supplied 2FA QR without injecting markup (tdd.md §6.11).
       "font-src 'self'",
       "img-src 'self' data:",
       // `ws:` in dev only, for Turbopack's hot-reload socket.
-      `connect-src 'self'${apiOrigin ? ` ${apiOrigin}` : ''}${isDev ? ' ws: wss:' : ''}`,
+      `connect-src 'self' https://challenges.cloudflare.com${apiOrigin ? ` ${apiOrigin}` : ''}${isDev ? ' ws: wss:' : ''}`,
+      // What we may FRAME (the Turnstile iframe), distinct from frame-ancestors
+      // below, which says who may frame US. Both coexist.
+      'frame-src https://challenges.cloudflare.com',
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

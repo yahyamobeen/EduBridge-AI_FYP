@@ -1,9 +1,9 @@
 # Technical Design Document
 ## EduBridge AI — A Secure, Agentic, Multilingual Learning Platform (Classes 9–12, PCTB & STBB)
 
-**Version:** 0.3.6
+**Version:** 0.3.7
 **Status:** Draft — under section-by-section review
-**Last Updated:** August 3, 2026
+**Last Updated:** August 9, 2026
 **Purpose:** Implementation-ready technical design derived from `prd.md`, for a curriculum-grounded, agentic, multimodal, multilingual tutoring + classroom-analytics platform with a Secure Skills & MCP Layer.
 **Product Owner:** EduBridge AI Team (Group Leader: Yahya Mobeen) · **Supervisor:** Dr. Muhammad Arif Butt (FCIT, University of the Punjab)
 **Source of truth:** `prd.md` (this TDD implements it) · **Upstream:** `EDUBRIDGE_AI_PROPOSAL.pdf`
@@ -18,6 +18,7 @@
 |---------|------|--------|---------|
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
+| 0.3.7 | 2026-08-09 | EduBridge AI Team | **Consistency pass, driven by writing the User Stories & Epics deliverable.** §3.1 gains the **account-management routes** — `PATCH /api/auth/me`, `POST /api/auth/password/change`, `GET /api/auth/2fa/status` — closing a gap where `prd.md` §4.2 granted every role "manage own account" and this document routed nothing for it (now `prd.md` FR-A8). §3.6's claim that "the guardian-space join path creates/verifies a `guardian_link`" is **corrected**: the v0.3.5 write boundary in §6.8 already made `verified` reachable only through `app.confirm_guardian_link` with a one-time invite token, so a join code could never have verified anything — the student-initiated invite is the sole route, and parents create no spaces. §5.4's migration table listed **4 of the 11 applied migrations**, omitting `20260803090000_guardian_link_write_boundary.sql` — which §6.8 cites by name — and six others; all eleven are now documented with what each does. §5.4 also records that the subscriptions migration took the schema from **45 to 48 tables**. §7.3's error table was **split in half by two prose paragraphs**, so `NOT_GROUNDED`, `RATE_LIMITED` and `MODEL_UNAVAILABLE` rendered as a header-less fragment; the table is whole and the prose follows it. §11.1's second one-row version table, which claimed v0.1.0, is removed, and the closing Document Status no longer reads "Draft v0.1.1". No design decision changed in this pass — every edit brings the document into line with what was already decided or already applied. |
 | 0.3.6 | 2026-08-03 | EduBridge AI Team | **2FA / email / password-reset hardened (KAN-10b review fixes).** §6.9 D7 now applies to **enrolment as well as challenge**: `/2fa/confirm` counted no failures and never locked, so a six-digit emailed OTP was guessable with only a per-address limiter in the way — and `upsert_2fa_enrollment` cleared `failed_attempts`/`locked_until`, so the client's enrolment resend (a re-call of `/2fa/enroll`, §14.4 finding 2) laundered any lockout that did exist. Enrolment also records the TOTP step it consumed, closing a window in which the code that completed enrolment was replayable at `/2fa/verify`. Rate limits gain a **per-account** layer, because an address-keyed limit of ten verifications per five minutes is ten for an entire school lab. Transactional mail is **locale-aware** (§3.1): every link carried `/en/` in an Urdu-first product; copy stays English pending a human writer, but the URL locale is correct now. Mail leaves the request thread so `password/forgot` is constant-time in fact and not only in intent — a synchronous provider call in the known-address branch was an enumeration oracle the dummy hash did not cover. §7.3 gains the `INVALID_TOKEN`/`TOKEN_EXPIRED` rule for **spent** tokens. No provider is chosen: the Resend SDK is an optional extra and `EMAIL_PROVIDER=logging` is refused in production. |
 | 0.3.5 | 2026-08-03 | EduBridge AI Team | **Guardian gate hardened (RBAC-002 review fixes).** §6.8 gains the `guardian_link` **write boundary**: either participant may INSERT only as `pending`, only the parent may UPDATE and never to `verified`, so the status is reachable through `app.confirm_guardian_link` alone — the policies now enforce the anti-forgery claim §3.1 had been making on their behalf. The student's re-invite reset moves to `app.reinvite_guardian_link`, because the applied `guardian_link_update` is parent-only and the student's UPDATE was matching zero rows **silently**: a resend after a revoke reported success while changing nothing and produced an unconfirmable invitation. §3.1 rule 3 extends to an **unknown class level**, which now fails closed rather than waving the student through. New error code **`GUARDIAN_NOT_FOUND` (422)** catalogued in §7.3 — it was already being returned. Rate limits on the authenticated guardian endpoints key on the **acting user** rather than the address, so a shared school-lab or carrier-NAT address no longer makes one student spend the cohort's allowance. `guardian/confirm` returns `student_name` as **nullable**, matching `app_user.full_name`. |
 | 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend feature-complete (Phases 10–12).** Plan selection, the role guard, the three dashboard shells and the error boundary. §6.11 records a **deviation**: `script-src` now carries `'unsafe-inline'`, because the Phase-1 policy blocked the App Router's inline bootstrap scripts and left the whole application non-interactive in production (**new §14.5**). §9.5 gains two enforced rules — the RTL physical-property sweep and the parent-navigation assertion — plus the requirement that a production build be opened and interacted with before a phase is done. |
@@ -188,6 +189,9 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | POST | `/api/auth/guardian/confirm` | **Yes (parent)** | Parent | Parent confirms link → `guardian_link.status=verified` (v0.3.2 — see below) |
 | GET | `/api/auth/guardian/status` | Yes | Student | Poll link state while the gate is pending |
 | GET | `/api/auth/me` | Yes | any | Current identity + **`onboarding_state`** |
+| PATCH | `/api/auth/me` | Yes | any | Update own profile and **stored `language_pref`**, which governs outgoing email (v0.3.7 — FR-A8) |
+| POST | `/api/auth/password/change` | Yes | any | Change password from inside the account; **requires the current password** (v0.3.7 — FR-A8) |
+| GET | `/api/auth/2fa/status` | Yes | any | Own second-factor method and state. **Never returns the secret** (v0.3.7 — FR-A8) |
 
 **Key design decisions:**
 - Passwords hashed with **argon2id** (never MD5 — the supervisor's template's MD5 is the explicit anti-pattern we avoid). Refresh tokens stored hashed, rotated, revocable.
@@ -324,7 +328,7 @@ Routing is driven by the subject's **`content_strategy`** column (four values), 
 **Key design decisions:**
 - **Consent = joining.** Enrollment row is the consent record; students see viewers and can leave (sets `enrollment.left_at`).
 - **Least-privilege scoping enforced in queries:** teacher report queries join through **`teacher_subject_scope`** (M:N) so a teacher sees only the subjects (per board×class) they actually teach; parent queries filter by **`guardian_link`**. Enforced in the service/data layer, never trusting the client.
-- **Single parent-link source of truth:** the guardian-space join path **creates/verifies a `guardian_link`** — parent visibility and the 9–10 gate never depend on `enrollment` (avoids the dual-mechanism gap).
+- **Single parent-link source of truth:** `guardian_link` alone carries parent visibility and the 9–10 gate; neither ever depends on `enrollment` (avoids the dual-mechanism gap). **There is no space-based linking path (corrected in v0.3.7).** Through v0.3.6 this read *"the guardian-space join path creates/verifies a `guardian_link`"*, which the v0.3.5 write boundary in §6.8 had already made impossible: `verified` is reachable only through `app.confirm_guardian_link`, which demands an unexpired one-time `guardian_invite` token, and a join code produces none. Parents therefore create no spaces and issue no join codes (`prd.md` §4.2, v0.3.5).
 - Reports are **read from the OLAP star schema** (§5.6), not recomputed on the request path.
 
 ### 3.7 Multimodal — `backend/app/multimodal/` **[P0]**
@@ -671,10 +675,17 @@ Each table lists notable columns, keys, and indexes (full DDL for core tables in
 
 | Migration | Contents |
 |---|---|
-| `20260801120000_initial_schema.sql` | Extensions, enums, all 45 tables (incl. two-factor auth), the admin 2FA status view, constraints, indexes, triggers, partitions |
+| `20260801120000_initial_schema.sql` | Extensions, enums, 45 tables (incl. two-factor auth), the admin 2FA status view, constraints, indexes, triggers, partitions |
 | `20260801120100_rls_policies.sql` | `app_backend` role, RLS helper functions, **68 policies** — 56 written out plus 12 generated in a `DO` loop over the reference tables (§6.8, §6.9) |
 | `20260801120200_seed_reference_data.sql` | Boards, class levels, subjects (76 rows) and 160 elective-group mappings |
-| `20260802120000_subscriptions_and_oauth.sql` | `subscription_plan`, `subscription`, `oauth_identity`; two enums; the Rs. 999 `standard` plan seed; grants and RLS (§6.8) |
+| `20260802120000_subscriptions_and_oauth.sql` | `subscription_plan`, `subscription`, `oauth_identity` — **taking the schema to 48 tables**; two enums; the Rs. 999 `standard` plan seed; grants and 5 RLS policies (§6.8) |
+| `20260802140000_reference_read_and_auth_lookups.sql` | `SELECT` policies for the six reference/curriculum tables, which the blanket RLS loop had left readable by nobody; `SECURITY DEFINER` lookups for the pre-auth login and refresh paths |
+| `20260802140100_token_kind_enrollment.sql` | `two_factor_enrollment` added to `token_kind`, separating the 900 s enrolment token from the 300 s pending token (Postgres cannot use an enum value added in the same transaction, hence its own file) |
+| `20260802150000_guardian_gate_and_partition_rls.sql` | Guardian-gate helper functions; RLS on the `audit_log` and `api_request_log` default partitions |
+| `20260803090000_guardian_link_write_boundary.sql` | **The anti-forgery boundary (§3.1, §6.8):** `app.reinvite_guardian_link`; `guardian_link_create` restricted to `pending`; `guardian_link_update` made parent-only and barred from writing `verified` |
+| `20260803120000_2fa_email_password_lookups.sql` | `SECURITY DEFINER` lookups for 2FA enrolment/challenge, email verification and password reset |
+| `20260803160000_2fa_lockout_and_email_locale.sql` | Enrolment no longer clears `failed_attempts`/`locked_until`, so restarting cannot launder a lockout; `activate_2fa` records the consumed step; `check_token_status` distinguishes a **spent** token from a **lapsed** one (§7.3) |
+| `20260803180000_login_2fa_lookup.sql` | `app.lookup_2fa_for_login` — login read its 2FA row unbound under RLS, so every enrolled user was silently returned to enrolment |
 
 **Conventions applied throughout:**
 
@@ -1051,13 +1062,15 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 | 422 | `INVALID_CLASS_GROUP` | elective group is not valid for the chosen class |
 | 422 | `SELF_LINK_FORBIDDEN` | student used their own address as the parent's |
 | 422 | `GUARDIAN_NOT_FOUND` | no **active parent** account uses that address — the parent signs up first (§3.1), so this is the ordinary outcome of the gate screen, not an edge case, and the client must render a next step rather than a generic failure |
+| 422 | `NOT_GROUNDED` | no confident curriculum answer (degrade) |
+| 429 | `RATE_LIMITED` | over limit; `Retry-After` header |
+| 503 | `MODEL_UNAVAILABLE` | fallback path engaged |
+
+*(Table repaired in v0.3.7 — two explanatory paragraphs sat between `GUARDIAN_NOT_FOUND` and `NOT_GROUNDED`, so the last three codes rendered as a separate, header-less fragment. They now follow the table.)*
 
 **`INVALID_TOKEN` vs `TOKEN_EXPIRED` is not a coin toss.** A token that was already *used* is `400 INVALID_TOKEN`. `410` is what makes the client offer a resend, and offering one for a link that already worked sends the user round a loop they have finished. Only an **unused, lapsed** token is `410`. `app.check_token_status` returns `token_revoked` precisely so the two can be told apart.
 
 **No endpoint invents a code.** `/2fa/resend` against a TOTP enrolment answers `400 VALIDATION_ERROR` with `details.fields`, not a bespoke `INVALID_METHOD`: a code outside this table reaches the client as an unrecognised string and renders as "something went wrong".
-| 422 | `NOT_GROUNDED` | no confident curriculum answer (degrade) |
-| 429 | `RATE_LIMITED` | over limit; `Retry-After` header |
-| 503 | `MODEL_UNAVAILABLE` | fallback path engaged |
 
 Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
 
@@ -1219,9 +1232,10 @@ Policy, a service worker, or a hydration failure, so none of them can catch a bu
 ## 11. Maintenance and Support
 
 ### 11.1 Version history
-| Version | Date | Changes |
-|---|---|---|
-| 0.1.0 | 2026-07-19 | Initial TDD from accepted PRD. |
+
+See the **Document History** table at the head of this document. *(Through v0.3.6 this section held a
+second, one-row table claiming the document was v0.1.0, contradicting the nine rows above it. Removed in
+v0.3.7 — one document states its version in one place.)*
 
 ### 11.2 Known limitations
 Curriculum coverage gated by data digitization (proposal §1.7); Urdu is not top-tier for TTS (fallback designed); LLM reasoning bounded (controlled skills only); self-hosting needs GPU budget (§2.4).
@@ -1395,7 +1409,7 @@ one real interaction belongs in the definition of done, and is now in §9.5.
 
 ---
 
-**Document Status:** Draft v0.1.1 — critically reviewed, awaiting user section-by-section review.
+**Document Status:** Draft v0.3.7 — critically reviewed, awaiting user section-by-section review.
 **Next Review:** on resolution of the [PROPOSED] items and user feedback.
 **Downstream:** on acceptance, this TDD drives Epics → Stories → Tasks → Implementation.
 

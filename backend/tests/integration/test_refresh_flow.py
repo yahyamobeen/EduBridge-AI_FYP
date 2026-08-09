@@ -22,6 +22,7 @@ def _user_with_refresh_token(client, db) -> tuple[str, str]:
             "email": email,
             "password": "password123",
             "full_name": "Refresh User",
+            "turnstile_token": "test-turnstile-token",
             "role": "parent",
         },
     )
@@ -119,6 +120,7 @@ def test_registered_student_has_a_trial_row(client, db):
             "email": email,
             "password": "password123",
             "full_name": "Trial Check",
+            "turnstile_token": "test-turnstile-token",
             "role": "student",
             "board": "PCTB",
             "class_level": 11,

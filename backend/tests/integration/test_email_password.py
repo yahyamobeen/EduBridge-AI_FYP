@@ -190,7 +190,11 @@ class TestPasswordReset:
         # Try to login with new password
         resp2 = client.post(
             "/api/auth/login",
-            json={"email": email, "password": "newpassword123"},
+            json={
+                "email": email,
+                "password": "newpassword123",
+                "turnstile_token": "test-turnstile-token",
+            },
         )
         assert resp2.status_code == 200
 

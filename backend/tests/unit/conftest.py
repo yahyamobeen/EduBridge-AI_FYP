@@ -32,6 +32,11 @@ _TEST_ENV = {
     "ARGON2_TIME_COST": "1",
     "ARGON2_MEMORY_COST": "8192",
     "ARGON2_PARALLELISM": "1",
+    # Fake Turnstile secret for tests/unit only. The config validator only
+    # refuses a CHANGE_ME placeholder — never start with that prefix — and the
+    # value is otherwise opaque, so a fixed string is as real as it needs to be.
+    # No unit test ever calls siteverify; this exists only so Settings validates.
+    "TURNSTILE_SECRET_KEY": "0" * 40,
 }
 
 for key, value in _TEST_ENV.items():
