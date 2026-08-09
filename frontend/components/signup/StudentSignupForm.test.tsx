@@ -46,6 +46,7 @@ async function completeBasicStep(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha Khan')
   await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
   await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+  await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
   await user.click(screen.getByRole('button', { name: en.signup.common.continue }))
 }
 
@@ -74,6 +75,27 @@ describe('step gating', () => {
     await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha')
     await user.type(screen.getByLabelText(en.signup.common.email), 'a@example.com')
     await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+    expect(screen.getByRole('button', { name: en.signup.common.continue })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
+    expect(screen.getByRole('button', { name: en.signup.common.continue })).toBeEnabled()
+  })
+
+  it('will not advance until passwords match', async () => {
+    const user = userEvent.setup()
+    renderForm()
+
+    await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha Khan')
+    await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
+    await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+    expect(screen.getByRole('button', { name: en.signup.common.continue })).toBeDisabled()
+
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password124')
+    expect(screen.getByText(en.signup.common.mismatch)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: en.signup.common.continue })).toBeDisabled()
+
+    await user.clear(screen.getByLabelText(en.signup.common.confirmPassword))
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
     expect(screen.getByRole('button', { name: en.signup.common.continue })).toBeEnabled()
   })
 

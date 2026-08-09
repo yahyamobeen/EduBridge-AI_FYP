@@ -35,23 +35,25 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(en.signup.common.fullName), 'Ayesha Teacher')
   await user.type(screen.getByLabelText(en.signup.common.email), 'ayesha@example.com')
   await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+  await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
   await user.click(screen.getByTestId('turnstile'))
   await user.click(screen.getByRole('button', { name: en.signup.common.submit }))
 }
 
-describe('SimpleSignupForm', () => {
-  beforeEach(() => {
-    push.mockReset()
-    registerAccount.mockReset()
-    registerAccount.mockResolvedValue({ onboarding_state: 'email_verification_pending' })
-  })
+beforeEach(() => {
+  push.mockReset()
+  registerAccount.mockReset()
+  registerAccount.mockResolvedValue({ onboarding_state: 'email_verification_pending' })
+})
 
+describe('SimpleSignupForm', () => {
   it('stays disabled until the captcha token exists', async () => {
     const user = userEvent.setup()
     renderForm()
     await user.type(screen.getByLabelText(en.signup.common.fullName), 'Ayesha Teacher')
     await user.type(screen.getByLabelText(en.signup.common.email), 'ayesha@example.com')
     await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
 
     expect(screen.getByRole('button', { name: en.signup.common.submit })).toBeDisabled()
 
@@ -87,5 +89,38 @@ describe('SimpleSignupForm', () => {
     await user.click(screen.getByTestId('turnstile'))
     await user.click(screen.getByRole('button', { name: en.signup.common.submit }))
     expect(registerAccount).toHaveBeenCalledTimes(2)
+  })
+
+  it('will not submit until passwords match', async () => {
+    const user = userEvent.setup()
+    renderForm('teacher')
+
+    const submit = screen.getByRole('button', { name: new RegExp(en.signup.common.submit, 'i') })
+    await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha Khan')
+    await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
+    await user.type(screen.getByLabelText(en.signup.common.password), 'Password123')
+    await user.click(screen.getByTestId('turnstile'))
+    expect(submit).toBeDisabled()
+
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password124')
+    expect(screen.getByText(en.signup.common.mismatch)).toBeInTheDocument()
+    expect(submit).toBeDisabled()
+
+    await user.clear(screen.getByLabelText(en.signup.common.confirmPassword))
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'Password123')
+    expect(submit).toBeEnabled()
+  })
+
+  it('gates only on length and match, leaving real policy to server', async () => {
+    const user = userEvent.setup()
+    renderForm('parent')
+
+    await user.type(screen.getByLabelText(en.signup.common.fullName), 'Aisha Khan')
+    await user.type(screen.getByLabelText(en.signup.common.email), 'aisha@example.com')
+    await user.type(screen.getByLabelText(en.signup.common.password), 'alllowercase')
+    await user.type(screen.getByLabelText(en.signup.common.confirmPassword), 'alllowercase')
+    await user.click(screen.getByTestId('turnstile'))
+
+    expect(screen.getByRole('button', { name: new RegExp(en.signup.common.submit, 'i') })).toBeEnabled()
   })
 })

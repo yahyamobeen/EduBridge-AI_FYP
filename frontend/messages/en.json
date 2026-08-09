@@ -87,6 +87,8 @@
       "email": "Email Address",
       "password": "Password",
       "passwordHint": "Must be at least 8 characters.",
+      "confirmPassword": "Confirm Password",
+      "confirmPasswordHint": "Must match the password above.",
       "showPassword": "Show password",
       "hidePassword": "Hide password",
       "back": "Back",
@@ -97,10 +99,11 @@
       "signIn": "Sign In",
       "stepOf": "Step {current} of {total}",
 "required": "This field is required.",
-        "invalidEmail": "Enter a valid email address.",
-        "passwordTooShort": "Use at least 8 characters.",
-        "turnstileLabel": "Security check"
-      },
+      "invalidEmail": "Enter a valid email address.",
+      "passwordTooShort": "Use at least 8 characters.",
+      "turnstileLabel": "Security check",
+      "mismatch": "Both passwords must match."
+    },
     "student": {
       "title": "Create Student Account",
       "subtitle": "Enter your details to access the curriculum.",

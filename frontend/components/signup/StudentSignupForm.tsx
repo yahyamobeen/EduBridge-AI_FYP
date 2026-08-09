@@ -17,6 +17,7 @@ type Draft = {
   full_name: string
   email: string
   password: string
+  confirm_password: string
   board: string
   class_level: string
   student_group: string
@@ -49,6 +50,7 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
     full_name: '',
     email: '',
     password: '',
+    confirm_password: '',
     board: '',
     class_level: '',
     student_group: '',
@@ -81,8 +83,13 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
     setFieldErrors((e) => ({ ...e, student_group: '' }))
   }
 
+  const mismatch = draft.confirm_password !== '' && draft.confirm_password !== draft.password
   const basicComplete =
-    draft.full_name.trim() !== '' && draft.email.trim() !== '' && draft.password.length >= 8
+    draft.full_name.trim() !== '' &&
+    draft.email.trim() !== '' &&
+    draft.password.length >= 8 &&
+    draft.confirm_password === draft.password &&
+    draft.confirm_password !== ''
   // Submit stays unreachable until the pair is valid, so 422 INVALID_CLASS_GROUP
   // cannot be produced through the UI. It is still handled if it ever arrives.
   const academicComplete =
@@ -238,6 +245,20 @@ export function StudentSignupForm({ enums }: { enums: EnumsResponse }) {
                       value: draft.password,
                       onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
                         set('password', e.target.value),
+}}
+                    />
+                  <TextField
+                    label={tc('confirmPassword')}
+                    name="confirm_password"
+                    type="password"
+                    autoComplete="new-password"
+                    hint={tc('confirmPasswordHint')}
+                    required
+                    error={mismatch ? tc('mismatch') : fieldErrors.confirm_password}
+                    register={{
+                      value: draft.confirm_password,
+                      onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+                        set('confirm_password', e.target.value),
                     }}
                   />
                 </div>
