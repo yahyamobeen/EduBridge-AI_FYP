@@ -41,6 +41,35 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.7"
 
+      # WITHOUT THIS, EVERY USER SHARES ONE RATE-LIMIT BUCKET.
+      #
+      # app/core/ratelimit.py keys the pre-authentication buckets on
+      # `request.client.host` -- register at 5 per 5 minutes, login at 10 per
+      # minute, refresh at 30 per minute. Behind the frontend's /api rewrite the
+      # socket peer is the frontend service, so all three become global: the
+      # sixth person to sign up inside five minutes gets a 429, whoever they are.
+      #
+      # Measured, both halves:
+      #   - Next's rewrite forwards an existing X-Forwarded-For unchanged (it
+      #     never ADDS one, but Render's edge sets it before the request reaches
+      #     the frontend, so it is present and survives the hop).
+      #   - uvicorn rewrites request.client.host from that header only when the
+      #     peer is in its trust list, which defaults to 127.0.0.1. On Render the
+      #     peer is Render's router, so the default ignores the header entirely.
+      #     With this set, request.client.host becomes the real client address.
+      #
+      # An env var rather than --forwarded-allow-ips on the command line: the
+      # shell glob-expands a bare `*` into a directory listing, and uvicorn then
+      # exits on unexpected arguments.
+      #
+      # Trade-off, accepted deliberately: the backend has a public URL on this
+      # plan, so a direct caller can spoof X-Forwarded-For and evade the
+      # address-keyed limits. The per-ACCOUNT limits and the `locked_until`
+      # ladder are unaffected, and ratelimit.py already names those as the real
+      # control. Making the backend a private service removes the exposure.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+
       # Makes the refresh cookie Secure, and REFUSES both a "*" CORS origin and
       # EMAIL_PROVIDER=logging -- verification links written to a log file mean
       # nobody can finish signing up.
