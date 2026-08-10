@@ -138,9 +138,17 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
-      # Next 16 requires Node 20+; CI builds on 24.
+      # Match .github/workflows/frontend.yml exactly. That workflow runs the
+      # same `npm ci` against the same package-lock.json on Node 24 and passes,
+      # so 24 is the only version this lockfile is known to install under.
+      #
+      # Set to 22 first, and `npm ci` failed on Render with an EUSAGE error --
+      # npm's "package.json and package-lock.json are not in sync" path, which
+      # dumps the whole command usage and buries its own message. The lockfile
+      # is written by the npm that ships with Node 24; an older npm resolves the
+      # `overrides` block differently and calls it a mismatch.
       - key: NODE_VERSION
-        value: "22"
+        value: "24"
 
       # Ships as `mock`. A mock build is green and looks entirely healthy —
       # it just never talks to the backend.
