@@ -122,7 +122,14 @@ const securityHeaders = [
  *
  * Left unset, no rewrite is emitted at all.
  */
-const backendOrigin = process.env.BACKEND_INTERNAL_URL
+/*
+ * Trimmed, because this value is pasted into a hosting dashboard by hand and a
+ * stray tab or newline rides along more often than not. Untrimmed, Next rejects
+ * the rewrite at BUILD time with "`destination` does not start with `/`,
+ * `http://`, or `https://`" -- accurate, but it reads like the URL is wrong when
+ * the URL is fine and the whitespace is invisible. This failed a real deploy.
+ */
+const backendOrigin = process.env.BACKEND_INTERNAL_URL?.trim()
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
