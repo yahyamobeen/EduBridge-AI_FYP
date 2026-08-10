@@ -96,10 +96,47 @@ const securityHeaders = [
   },
 ]
 
+/**
+ * Proxy the API through our own origin in deployed environments.
+ *
+ * The refresh token is an httpOnly cookie set `SameSite=Lax` (backend
+ * app/auth/routes.py). Lax cookies are not sent on cross-SITE requests, and a
+ * platform subdomain is its own site: `*.onrender.com` and `*.vercel.app` are
+ * both on the Public Suffix List, so a frontend and a backend deployed as
+ * sibling subdomains are cross-site to the browser. Split that way, login
+ * succeeds and then `/api/auth/refresh` silently stops receiving the cookie --
+ * the user is signed out the moment the access token expires, in production
+ * only.
+ *
+ * Rewriting `/api/*` through this server makes the API same-origin, so the Lax
+ * cookie keeps working with no backend change, `connect-src 'self'` already
+ * covers the calls, and there is no credentialed CORS to configure. The cookie's
+ * `path=/api/auth/refresh` is unchanged by the rewrite, so it still matches.
+ *
+ * Locally this is set from `.env.local` (the template ships
+ * `http://localhost:8000`), so the rewrite exists in a dev build too. That is
+ * harmless either way: with the default `NEXT_PUBLIC_API_BASE_URL` the client
+ * calls :8000 directly and never uses it, and both origins are `localhost` --
+ * same site -- so Lax is satisfied regardless. Point the base URL at `/api`
+ * locally and the rewrite carries the calls instead, matching production.
+ *
+ * Left unset, no rewrite is emitted at all.
+ */
+const backendOrigin = process.env.BACKEND_INTERNAL_URL
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  async rewrites() {
+    if (!backendOrigin) return []
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${backendOrigin.replace(/\/$/, '')}/api/:path*`,
+      },
+    ]
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }]
   },
