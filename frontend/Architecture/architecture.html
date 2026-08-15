@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture · EduBridge AI Frontend Architecture</title>
+<script src="assets/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      darkMode: true,
+      background: '#0d1117',
+      primaryColor: '#15323b',
+      primaryBorderColor: '#2596be',
+      primaryTextColor: '#e6edf3',
+      // ER attribute rows: Mermaid's base theme leaves these light, which put
+      // near-white text on a near-white row and made every column unreadable.
+      attributeBackgroundColorOdd: '#161b22',
+      attributeBackgroundColorEven: '#1c2230',
+      lineColor: '#5b93a3',
+      secondaryColor: '#21262d',
+      tertiaryColor: '#161b22',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true, nodeSpacing: 45, rankSpacing: 55 },
+    er: { layoutDirection: 'TB', entityPadding: 10 }
+  });
+</script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --border:#30363d;
+    --text:#c9d1d9; --head:#e6edf3; --muted:#8b949e; --teal:#2596be; --teal-dim:#15323b;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --purple:#a371f7; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(13,17,23,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--head);font-size:16px;white-space:nowrap}
+  .topbar .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .nav{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  .nav a{padding:5px 11px;border-radius:7px;font-size:13px;color:var(--muted);border:1px solid transparent}
+  .nav a:hover{background:var(--panel);color:var(--head);text-decoration:none}
+  .nav a.active{background:var(--teal-dim);color:#9fdcef;border-color:var(--teal)}
+  .container{max-width:1180px;margin:0 auto;padding:34px 28px 90px}
+  h1{color:var(--head);font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  h2{color:var(--head);font-size:22px;margin:42px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{color:var(--head);font-size:17px;margin:28px 0 8px}
+  .subtitle{color:var(--muted);font-size:16px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono);margin-bottom:26px}
+  .prose p{margin:10px 0}
+  section{margin-bottom:10px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin:18px 0}
+  .diagram{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;margin:20px 0;overflow-x:auto}
+  .mermaid{display:flex;justify-content:center}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:10px 2px 0}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:13px;height:13px;border-radius:4px;display:inline-block;border:1px solid var(--border)}
+  .ln{color:var(--amber);font-family:var(--mono);font-size:.84em}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--head);background:var(--panel-2);font-weight:600;position:sticky;top:0}
+  tr:hover td{background:rgba(37,150,190,.05)}
+  td code{color:#9fdcef}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-family:var(--mono);
+    background:var(--teal-dim);color:#9fdcef;border:1px solid var(--teal)}
+  .pill.opus{background:#2a1d3d;color:#c8a6f5;border-color:var(--purple)}
+  .pill.sonnet{background:#15323b;color:#9fdcef;border-color:var(--teal)}
+  .pill.haiku{background:#1d2e1f;color:#7ee787;border-color:var(--green)}
+  .callout{border-left:3px solid var(--teal);background:var(--teal-dim);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
+  .callout.warn{border-color:var(--amber);background:#2b220c}
+  .callout.warn strong{color:var(--amber)}
+  .callout.danger{border-color:var(--red);background:#2d1314}
+  .callout .t{font-weight:700;color:var(--head);display:block;margin-bottom:3px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:18px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .stat .n{font-size:26px;font-weight:700;color:var(--teal);font-family:var(--mono)}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:4px 16px;margin:10px 0}
+  summary{cursor:pointer;padding:10px 0;color:var(--head);font-weight:600}
+  pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:12.5px;color:#b9c2cc}
+  blockquote{margin:14px 0;padding:2px 16px;border-left:3px solid var(--muted);color:var(--muted);font-style:italic}
+  footer{border-top:1px solid var(--border);color:var(--muted);font-size:12.5px;padding:22px 28px;text-align:center}
+  .offline-note{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> EduBridge AI · Frontend Architecture</div>
+    <nav class="nav">
+      <a href="README.md">Index</a>
+      <a href="architecture.html" class="active">Architecture</a>
+      <a href="../../backend/Architecture/README.md">Backend Docs →</a>
+    </nav>
+  </div>
+  <div class="container">
+    <h1>Frontend Architecture</h1>
+    <p class="subtitle">Next.js App Router client for EduBridge AI — screens, routing and a transport layer over the FastAPI backend.</p>
+    <p class="meta">Snapshot 2026-08-15 · commit eea0e74 (branch fix-epic-1) · Source of truth: the code. Update in the same change (see /CLAUDE.md).</p>
+
+    <div class="grid">
+      <div class="stat"><div class="n">20</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>)</div></div>
+      <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
+      <div class="stat"><div class="n">22</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 398</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
+    </div>
+
+    <div class="callout danger">
+      <span class="t">SessionGuard is not a security control.</span>
+      It decides what a signed-in person is <em>shown</em>. What they may <em>do</em> is decided by the
+      API (Application Programming Interface) layer and by Row-Level Security in PostgreSQL. This whole
+      application runs in a browser the user controls. A reader who takes the guard for the gate will draw
+      the wrong conclusion about this system's security posture — and
+      <a href="../../backend/Architecture/database.md">the database documents</a> record that the second of
+      those two layers does not currently hold.
+    </div>
+
+    <div class="callout">
+      <span class="t">This is the first documentation this application has had.</span>
+      Before Phase 0, everything on this page had to be reconstructed from source. The paired
+      <a href="architecture.md">architecture.md</a> is a <strong>parallel document, not a generation of this one</strong>:
+      the Markdown reads anywhere, this page carries the diagrams. Mermaid is
+      <strong>vendored locally</strong> at <code>assets/mermaid.min.js</code>, so every diagram renders with
+      the network disabled.
+    </div>
+
+    <section class="prose">
+      <h2>Stack</h2>
+      <table>
+        <thead><tr><th>Layer</th><th>Choice</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Framework</td><td>Next.js <span class="pill">^16.2.12</span> (App Router)</td><td><span class="ln">package.json:19</span></td></tr>
+          <tr><td>UI runtime</td><td>React <span class="pill">^19.2.8</span></td><td><span class="ln">package.json:21</span></td></tr>
+          <tr><td>Language</td><td>TypeScript <span class="pill">^6.0.3</span></td><td><span class="ln">package.json:48</span></td></tr>
+          <tr><td>Styling</td><td>Tailwind CSS <span class="pill">^3.4.19</span></td><td><span class="ln">package.json:47</span></td></tr>
+          <tr><td>Internationalisation</td><td>next-intl <span class="pill">^4.13.4</span></td><td><span class="ln">package.json:20</span></td></tr>
+          <tr><td>Tests</td><td>Vitest <span class="pill">^4.1.10</span> + Testing Library</td><td><span class="ln">package.json:49</span></td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn">
+        <span class="t">Three installed dependencies are imported by zero source files.</span>
+        <code>react-hook-form</code> <span class="ln">package.json:23</span>, <code>zod</code>
+        <span class="ln">:24</span> and <code>@hookform/resolvers</code> <span class="ln">:18</span>.
+        Every form here is plain <code>useState</code>. That is a deliberate choice — short forms,
+        server-authoritative validation — but the packages are still in the tree, and a contributor should
+        know they are unused rather than assume a convention exists.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Layout tree <span class="ln">app/</span></h2>
+      <p>Everything lives under one dynamic <code>[locale]</code> segment.
+        <code>app/layout.tsx</code> <span class="ln">:9-11</span> is a bare pass-through, because
+        <code>&lt;html&gt;</code> cannot live there — <code>lang</code> and <code>dir</code> both depend on
+        the locale, which is only known inside <code>[locale]</code>.</p>
+      <div class="diagram">
+        <div class="mermaid">
+flowchart TB
+  subgraph root["app/layout.tsx"]
+    A["pass-through, no html<br/><span class='ln'>:9-11</span>"]
+  end
+  subgraph loc["app/[locale]/layout.tsx"]
+    B["html lang + dir<br/>NextIntlClientProvider + SkipLink<br/><span class='ln'>:32-60</span>"]
+  end
+  subgraph site["(site)/layout.tsx"]
+    C["TopNav + main + Footer<br/><span class='ln'>:12-22</span>"]
+    C2["7 public pages"]
+  end
+  subgraph auth["(auth)/layout.tsx"]
+    D["bare main — no chrome<br/><span class='ln'>:11-17</span>"]
+    D2["10 transactional screens"]
+  end
+  subgraph app["(app)/layout.tsx"]
+    E["bare main — no chrome<br/><span class='ln'>:10-16</span>"]
+    E2["3 role dashboards<br/>chrome rendered INSIDE SessionGuard"]
+  end
+  A --> B
+  B --> C --> C2
+  B --> D --> D2
+  B --> E --> E2
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b;border-color:#2596be"></span> file (subgraph)</span>
+          <span><span class="ln">file:line</span> source anchor</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">Why <code>(app)</code> renders no chrome</h3>
+        <p>The layout's own comment <span class="ln">(app)/layout.tsx:3-9</span> says it:
+          <em>"each dashboard renders its own sidebar through <code>DashboardShell</code>, because the
+          sidebar's contents depend on the role, which is only known once <code>SessionGuard</code> has
+          resolved the identity."</em></p>
+        <p>This is the structural consequence of the guard being a <strong>client-side render-prop</strong>
+          component. The role arrives from <code>GET /auth/me</code> <em>after</em> mount. A layout renders
+          above the page, before that answer exists, and a server layout cannot read it at all. A sidebar
+          there would mean either an empty shell that fills in later — a visible layout shift on every
+          dashboard entry — or a default role, which is exactly the copy-paste mistake
+          <code>navigation.ts</code> exists to prevent. So the chrome moves <em>inside</em> the guard,
+          where <code>me</code> is already resolved, and the layout does nothing but reserve the flex column.</p>
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Routes — 20 pages</h2>
+      <p>A route group adds <strong>no path segment</strong>. <code>/login</code> is <code>/login</code>
+        whether or not it sits inside <code>(auth)</code>. The split exists purely so the three surfaces can
+        have different chrome.</p>
+      <table>
+        <thead><tr><th>Group</th><th>Route</th><th>File / notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>(site)</code></td><td><code>/</code></td><td><code>(site)/page.tsx</code> — landing</td></tr>
+          <tr><td><code>(site)</code></td><td><code>/signup</code>, <code>/signup/student</code>, <code>/signup/parent</code>, <code>/signup/teacher</code></td><td>role-split registration</td></tr>
+          <tr><td><code>(site)</code></td><td><code>/coming-soon/[slug]</code></td><td>21 allow-listed slugs <span class="ln">:15-41</span>; anything else <code>notFound()</code> <span class="ln">:61</span>. Better than <code>href="#"</code>, which reads as broken</td></tr>
+          <tr><td><code>(site)</code></td><td>catch-all</td><td><code>(site)/[...rest]/page.tsx</code> <span class="ln">:8-10</span> — <code>notFound()</code> so an unmatched path gets the <em>localized</em> 404</td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/login</code></td><td><code>(auth)/login/page.tsx</code></td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/login/2fa</code></td><td>reachable only from <code>/login</code>, which puts the <code>pending_token</code> in memory first <span class="ln">:13-18</span></td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/onboarding/email</code>, <code>/onboarding/2fa</code></td><td>verification + two-factor enrolment</td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/onboarding/guardian</code></td><td>Class 9–10 students only — the backend never puts a Class 11–12 student in that state <span class="ln">:13-18</span></td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/onboarding/plan</code></td><td><strong>the one step reachable after being <code>active</code></strong> <span class="ln">:13-17</span></td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/verify-email</code>, <code>/forgot-password</code>, <code>/reset-password</code></td><td>email + password flows</td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/guardian/confirm</code></td><td>where the invitation email lands; authenticated as the <strong>parent</strong> <span class="ln">:16-21</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/dashboard</code></td><td><code>StudentDashboard</code> — <code>allow={['student']}</code> <span class="ln">Dashboards.tsx:34</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/teacher</code></td><td><code>TeacherDashboard</code> — <code>allow={['teacher']}</code> <span class="ln">Dashboards.tsx:80</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/parent</code></td><td><code>ParentDashboard</code> — <code>allow={['parent']}</code> <span class="ln">Dashboards.tsx:108</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/admin</code></td><td><strong>DOES NOT EXIST</strong> — see defect A6 below</td></tr>
+        </tbody>
+      </table>
+      <p><code>app/[locale]/layout.tsx</code> <span class="ln">:17-19</span> pre-renders all three locales at
+        build time. <span class="ln">:38</span> sends an unknown locale to <code>notFound()</code> rather
+        than falling back to English — a student who lands on <code>/pk/login</code> is told the page is
+        wrong, not handed a language they may not read. <span class="ln">:41</span> calls
+        <code>setRequestLocale</code>, without which every page opts into dynamic rendering; that static
+        prerendering is what the Content Security Policy section below turns on.</p>
+      <p>The dashboards are <strong>shells</strong> <span class="ln">Dashboards.tsx:8-19</span>: no dashboard
+        data endpoint exists in the contract, so <code>PlaceholderCard</code>
+        <span class="ln">DashboardShell.tsx:144-185</span> names what will live there and says plainly that
+        it is not available yet, instead of rendering the mockups' invented 78% exam readiness. Fabricated
+        analytics have a way of surviving into a demo and then into a report. What <em>is</em> real on these
+        pages is the navigation and the role boundary.</p>
+    </section>
+
+    <section class="prose">
+      <h2>SessionGuard + onboarding routing <span class="ln">components/app/SessionGuard.tsx</span></h2>
+      <p>A <strong>render-prop</strong> component, not a wrapper and not a hook
+        <span class="ln">:29-36</span>. <code>children</code> is a <em>function</em> of the resolved
+        identity — <code>(me: MeResponse) =&gt; ReactNode</code>. That shape is load-bearing: the page body
+        cannot be constructed at all until <code>me</code> exists, so there is no branch on which a
+        component can render with an undefined user.</p>
+
+      <div class="diagram">
+        <div class="mermaid">
+flowchart TB
+  S(["mount — one identity check<br/>useEffect, empty deps<br/><span class='ln'>SessionGuard.tsx:42-97</span>"]) --> G["GET /auth/me<br/><span class='ln'>:61</span>"]
+  G -- "throws" --> L1["router.replace('/login')<br/><span class='ln'>:73-77</span>"]
+  G -- "resolves" --> O{"onboarding_state<br/>=== 'active'?<br/><span class='ln'>:64</span>"}
+  O -- "no" --> RT["routeForOnboardingState(state, role)<br/><span class='ln'>:65 · onboarding.ts:31-33</span>"]
+  RT --> E1["/onboarding/email<br/>email_verification_pending"]
+  RT --> E2["/onboarding/2fa<br/>two_factor_enrollment_pending"]
+  RT --> E3["/onboarding/guardian<br/>guardian_link_pending"]
+  RT --> E4["/onboarding/plan<br/>plan_selection_pending"]
+  O -- "yes" --> R{"allow.includes(role)?<br/><span class='ln'>:68</span>"}
+  R -- "no" --> DB["dashboardFor(role)<br/><span class='ln'>:69 · onboarding.ts:20-22</span>"]
+  DB --> D1["/dashboard · student"]
+  DB --> D2["/teacher · teacher"]
+  DB --> D3["/parent · parent"]
+  DB --> D4["/admin · admin<br/>DEFECT A6 — no such page"]
+  R -- "yes" --> M["setMe(identity)<br/><span class='ln'>:72</span>"]
+  M --> RENDER["children(me)<br/><span class='ln'>:113</span>"]
+  L1 --> CLOSED
+  RT --> CLOSED
+  DB --> CLOSED
+  CLOSED["me === null → status region only,<br/>NO page content<br/><span class='ln'>:99-111</span>"]
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b;border-color:#2596be"></span> step</span>
+          <span><span class="ln">file:line</span> source anchor</span>
+        </div>
+        <p class="offline-note">Mermaid is vendored at <code>assets/mermaid.min.js</code> — this renders offline.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">The three checks, in order</h3>
+        <ol>
+          <li><strong>No session → <code>/login</code>.</strong> Any failure to establish identity is caught
+            <span class="ln">:73-77</span> and treated as "not signed in". The client has already attempted a
+            refresh by this point, so there is nothing further to recover from. Test:
+            <span class="ln">SessionGuard.test.tsx:49-53</span>.</li>
+          <li><strong>Onboarding incomplete → the step that completes it.</strong> <span class="ln">:64-67</span>.
+            Test: <span class="ln">:55-59</span>.</li>
+          <li><strong>Wrong role → that role's own dashboard.</strong> <span class="ln">:68-71</span>. A parent
+            who opens <code>/dashboard</code> is sent to <code>/parent</code>, not to an error page. Test:
+            <span class="ln">:61-65</span>.</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">It fails <em>closed</em> on every path</h3>
+        <p>While <code>me === null</code> <span class="ln">:99-111</span> the component renders a
+          <code>role="status"</code> region and <strong>no page content</strong> —
+          <code>checked ? t('redirecting') : t('loading')</code> <span class="ln">:106-108</span>. There is no
+          branch that renders <code>children</code> before identity resolves, no <code>me ?? fallbackUser</code>,
+          and no optimistic path. A hung request renders "Loading…" forever; a rejected request renders
+          "Redirecting…" and navigates. Neither shows a page.
+          <span class="ln">SessionGuard.test.tsx:104-111</span> asserts a permanently pending promise produces
+          no page content.</p>
+      </div>
+
+      <div class="callout warn">
+        <span class="t">The StrictMode note — a real bug, recorded at :43-56</span>
+        The obvious implementation — a <code>started</code> ref to make the effect idempotent —
+        <strong>deadlocked in development</strong>. <code>reactStrictMode: true</code>
+        <span class="ln">next.config.mjs:136</span> makes React mount, unmount and remount every component.
+        The unmount set <code>cancelled</code>, discarding the in-flight response; the remount found
+        <code>started.current</code> still true (refs survive the double-invoke) and returned early. Neither
+        <code>setMe</code> nor <code>setChecked</code> ever ran. Every dashboard sat on "Loading…" forever
+        with a healthy 200 in the network tab — and <em>only</em> in development, so nothing in continuous
+        integration could see it. The fix is the empty dependency array plus a plain <code>let cancelled</code>
+        closure variable <span class="ln">:57, :83-85</span>, re-created per mount.
+        <strong>The same pattern is reproduced, unfixed, in <code>VerifyEmail</code> — defect D5.</strong>
+      </div>
+
+      <h3><code>onboarding_state</code> is the only routing input</h3>
+      <p><code>lib/auth/onboarding.ts</code> <span class="ln">:3-11</span>: <em>"Routing is driven by
+        <code>onboarding_state</code> from the identity endpoint and nothing else — never from
+        <code>class_level</code>, never from a combination of booleans."</em> That is why a Class 11–12
+        student has <strong>no code path</strong> that can render the parental gate: the backend never sets
+        the state for them, so the frontend has nothing to render it from. There is no
+        <code>if (classLevel &lt;= 10 &amp;&amp; !guardianVerified)</code> anywhere in this application, and
+        there must never be one — a client-side re-derivation of a server-side gate is a second source of
+        truth that will drift.</p>
+      <table>
+        <thead><tr><th><code>onboarding_state</code></th><th>Route</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td><code>email_verification_pending</code></td><td><code>/onboarding/email</code></td><td><span class="ln">onboarding.ts:25</span></td></tr>
+          <tr><td><code>two_factor_enrollment_pending</code></td><td><code>/onboarding/2fa</code></td><td><span class="ln">onboarding.ts:26</span></td></tr>
+          <tr><td><code>guardian_link_pending</code></td><td><code>/onboarding/guardian</code></td><td><span class="ln">onboarding.ts:27</span></td></tr>
+          <tr><td><code>plan_selection_pending</code></td><td><code>/onboarding/plan</code></td><td><span class="ln">onboarding.ts:28</span></td></tr>
+          <tr><td><code>active</code></td><td><code>dashboardFor(role)</code></td><td><span class="ln">onboarding.ts:32</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout danger">
+        <span class="t">It is NOT monotonic.</span>
+        <span class="ln">onboarding.ts:47-53</span> and <span class="ln">SessionGuard.tsx:13-18</span>: a
+        student reaches <code>active</code>, uses the app for fourteen days, and then the trial lapses and
+        the server puts them back into <code>plan_selection_pending</code>. Onboarding is a <strong>state,
+        not a checklist</strong> — a user moves <em>backwards</em> through it. Any consumer that caches
+        <code>active</code> — a context set once on login, a <code>hasOnboarded</code> boolean, a guard
+        written as "check once, then trust" — <strong>strands that user</strong> on a page they no longer
+        have rights to, with every API call returning 403 <code>SUBSCRIPTION_REQUIRED</code> and no route
+        out. The defence is that the state is re-read on every mount and never remembered across one;
+        <span class="ln">SessionGuard.test.tsx:90-101</span> renders an <code>active</code> student,
+        unmounts, flips the mock to <code>plan_selection_pending</code>, renders again, and asserts both the
+        redirect and that <code>getMe</code> was called twice.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2><code>navigation.ts</code> is a Role-Based Access Control boundary <span class="ln">lib/auth/navigation.ts</span></h2>
+      <p>Its header says so in the first sentence <span class="ln">:3-31</span>: <em>"THIS FILE IS AN RBAC
+        BOUNDARY, not a styling concern."</em> <code>NAV_BY_ROLE</code> <span class="ln">:44-75</span> is a
+        <code>Record&lt;Role, NavItem[]&gt;</code>. <code>DashboardShell</code> builds every sidebar from it
+        <span class="ln">DashboardShell.tsx:41, :69-85</span> and from nothing else. That single-source
+        construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no
+        per-role markup to paste into.</p>
+      <table>
+        <thead><tr><th>Decision</th><th>Why it is a boundary, not a layout choice</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>The parent surface is read-only</strong> <span class="ln">:67-73</span></td>
+            <td>The supplied mockups shipped <em>one student sidebar pasted into all three dashboards</em>,
+              which handed parents a "Play Session" button that replays a child's AI tutor conversation.
+              <code>GET /api/tutor/sessions/{id}</code> is student-owner-only and a parent may never read
+              chat content — so that control was not a dead link, it was a <strong>privacy violation with a
+              button on it</strong>.</td>
+          </tr>
+          <tr>
+            <td><strong>The teacher surface has no tutor entry</strong> <span class="ln">:56-66</span></td>
+            <td>The requirements once granted teachers tutor access "for own testing" while
+              <code>POST /api/tutor/ask</code> has always been scoped to gate-verified students. The
+              technical design document won.</td>
+          </tr>
+          <tr>
+            <td><strong>The student surface must expose My Classes</strong> <span class="ln">:52</span></td>
+            <td>Students are guaranteed the right to see who can view them and to leave any space at any
+              time. No mockup had an entry for it, and a right with no route to it is not a right.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p><code>lib/auth/navigation.test.ts</code> calls itself <em>the highest-value regression test in the
+        frontend</em> <span class="ln">:8-18</span>. <span class="ln">:19-34</span> asserts the parent
+        navigation contains no href and no key matching <code>/tutor/</code>,
+        <code>/session|replay|play/</code>, <code>/planner/</code>, <code>/practice/</code>,
+        <code>/quiz/</code> or <code>/subject|curriculum/</code>. <span class="ln">:36-46</span> covers the
+        teacher surface, <span class="ln">:48-54</span> the student one, and <span class="ln">:67-81</span>
+        asserts every key has a translated label in all three locales.</p>
+      <p><code>ROLE_ACCENT</code> <span class="ln">:78-83</span> sits in the same file and <em>is</em>
+        styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is
+        here because it is keyed by <code>Role</code>, and keeping every role-keyed record together is what
+        makes an incomplete role obvious.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The API client <span class="ln">lib/api/client.ts</span></h2>
+      <p>The single entry point for every call. <code>lib/api/endpoints.ts</code> wraps it in typed functions
+        so no screen hand-writes a path or a shape; <code>lib/api/types.ts</code> is transcribed from the
+        contract, so a mock that drifts from it is a type error rather than an integration surprise.</p>
+
+      <div class="diagram">
+        <div class="mermaid">
+flowchart TB
+  CALL(["apiFetch(path, init)<br/><span class='ln'>client.ts:152</span>"]) --> AHEAD{"token present<br/>AND (expired OR ≥80% used)?<br/><span class='ln'>:155-159</span>"}
+  AHEAD -- "yes" --> RF1["refreshOnce() — single-flight<br/><span class='ln'>:76-81</span>"]
+  AHEAD -- "no" --> RAW
+  RF1 --> RAW["rawRequest<br/><span class='ln'>:118-146</span>"]
+  RAW --> MODE{"USE_MOCKS?<br/><span class='ln'>:21-23</span>"}
+  MODE -- "true" --> MOCK["await import('./mock')<br/>dead-code-eliminated when false<br/><span class='ln'>:123</span>"]
+  MODE -- "false" --> FETCH["fetch(BASE_URL + path)<br/>credentials: 'include'<br/><span class='ln'>:128-139</span>"]
+  FETCH --> OK{"response.ok?"}
+  MOCK --> OK
+  OK -- "yes" --> DONE(["parsed body"])
+  OK -- "no" --> ERR["toApiError(status, payload)<br/><span class='ln'>errors.ts:79-88</span>"]
+  ERR --> RETRY{"no bearer AND no noRetry<br/>AND code on allow-list?<br/><span class='ln'>:168 · errors.ts:98</span>"}
+  RETRY -- "yes" --> RF2["refreshOnce() → retry ONCE<br/><span class='ln'>:169</span>"]
+  RETRY -- "no" --> OB["handleOnboardingRedirect<br/><span class='ln'>:182-198</span>"]
+  RF2 --> DONE
+  OB --> G1["403 GATE_PENDING → /onboarding/guardian"]
+  OB --> G2["403 SUBSCRIPTION_REQUIRED → /onboarding/plan"]
+  OB --> G3["any other → rethrow, screen renders it"]
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b;border-color:#2596be"></span> step</span>
+          <span><span class="ln">file:line</span> source anchor</span>
+        </div>
+      </div>
+
+      <h3>Mock versus live — the exact condition <span class="ln">:21-23</span></h3>
+      <pre>const API_MODE = process.env.NEXT_PUBLIC_API_MODE
+const USE_MOCKS =
+  API_MODE === 'mock' || (API_MODE === undefined &amp;&amp; process.env.NODE_ENV !== 'production')</pre>
+      <p>Read literally: mocks are used when the flag is <code>'mock'</code> <strong>regardless of
+        environment</strong>, or when the flag is <strong>absent</strong> and the build is not production.
+        The reasoning <span class="ln">:11-20</span> is that a developer who has not copied
+        <code>.env.example</code> to <code>.env.local</code> would otherwise get a real fetch against an
+        empty base URL, which on the server is a relative path Node cannot parse. The mock import is
+        <strong>dynamic</strong> <span class="ln">:123</span> and <code>NEXT_PUBLIC_API_MODE</code> is
+        inlined at build time, so when it is not <code>'mock'</code> the whole branch is a compile-time
+        <code>false</code> and the mock handlers and their seeded accounts
+        <span class="ln">mock/index.ts:31</span> are eliminated from the bundle entirely.</p>
+      <p>The comment's claim that "mocks can never be shipped by omission" is true only of <em>omission</em>.
+        Setting the flag to <code>mock</code> in a production environment ships mocks, because the first
+        clause is checked before <code>NODE_ENV</code>. That is the bite of defect <strong>C4</strong>.</p>
+
+      <h3>Proactive refresh at 80% of token lifetime</h3>
+      <p><code>apiFetch</code> refreshes <strong>ahead of use</strong> rather than waiting to be told
+        <span class="ln">:152-159</span>. <code>shouldRefreshAhead</code>
+        <span class="ln">tokenStore.ts:45-50</span> reconstructs the issue time from the stored absolute
+        expiry and the original <code>expires_in</code>, then compares elapsed time against
+        <code>REFRESH_AT_FRACTION = 0.8</code> <span class="ln">tokenStore.ts:18</span>.
+        <code>lastLifetimeSeconds</code> <span class="ln">client.ts:28</span> exists because the store keeps
+        only the absolute expiry. The point <span class="ln">:153-154</span>: a long form must not be
+        interrupted by a redirect the user did not cause. Waiting for a 401 means the interruption lands
+        mid-typing.</p>
+
+      <h3>Single-flight refresh, and why rotation makes it necessary</h3>
+      <pre>export function refreshOnce(): Promise&lt;boolean&gt; {
+  refreshInFlight ??= performRefresh().finally(() =&gt; {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}                                             // client.ts:76-81</pre>
+      <p>The module-level <code>refreshInFlight</code> <span class="ln">:69</span> means N concurrent 401s
+        trigger <strong>one</strong> refresh, not N. The reason is refresh-token <strong>rotation</strong>:
+        each successful refresh invalidates the token it consumed. Without single-flight, a dashboard firing
+        several requests at once sends a burst; the first consumes the cookie and every other one presents a
+        token the server has already retired. On a backend that treats a retired token as theft, that burst
+        is <strong>indistinguishable from an attack</strong> — it signs the user out mid-session and writes a
+        false reuse-detection audit row. <span class="ln">client.test.ts:76-94</span> fires three concurrent
+        requests that each 401 and asserts exactly one <code>/auth/refresh</code>.</p>
+      <p><code>performRefresh</code> <span class="ln">:83-94</span> deliberately bypasses
+        <code>apiFetch</code> and calls <code>rawRequest</code> directly <span class="ln">:85-87</span>: a
+        refresh that itself 401s must not recurse back into the retry path.</p>
+      <div class="callout warn">
+        <span class="t">Caveat, recorded not hidden.</span>
+        This guard is <strong>per browser tab</strong>. Two tabs of the same application hold two
+        independent module states and can still race a rotating refresh (register D2).
+      </div>
+
+      <h3>The retry allow-list <span class="ln">lib/api/errors.ts:90-102</span></h3>
+      <pre>const REFRESHABLE_401_CODES = new Set&lt;string&gt;(['UNAUTHENTICATED', 'UNKNOWN'])   // :98</pre>
+      <p>An <strong>allow-list, not a status check</strong>. <code>TWO_FACTOR_INVALID</code> and
+        <code>PENDING_TOKEN_EXPIRED</code> are also 401s, but they mean the submitted code was wrong or its
+        challenge died — refreshing and retrying those would <strong>resubmit a bad code and burn one of the
+        user's lockout attempts</strong>. <code>UNKNOWN</code> is included because
+        <code>toApiError</code> <span class="ln">:79-88</span> assigns it when a proxy, gateway or crash
+        returns HTML or an empty body: a transport failure a fresh token may well fix.</p>
+      <p>The retry <span class="ln">client.ts:168-170</span> is guarded three ways — not a challenge
+        credential, not opted out, and on the allow-list — and runs <strong>once</strong>, calling
+        <code>rawRequest</code> directly so there is no loop.
+        <span class="ln">client.test.ts:96-105</span> asserts the original path is hit exactly twice and then
+        gives up. <code>noRetry</code> <span class="ln">:105-113</span> has exactly one call site:
+        <code>login</code> <span class="ln">endpoints.ts:61</span>, because there a 401 means the password
+        was wrong and refreshing would fire a guaranteed-to-fail request on every typo.</p>
+
+      <h3>Transport-level onboarding redirects <span class="ln">:182-198</span></h3>
+      <table>
+        <thead><tr><th>Error code</th><th>Redirect target</th></tr></thead>
+        <tbody>
+          <tr><td>403 <code>GATE_PENDING</code></td><td><code>/onboarding/guardian</code></td></tr>
+          <tr><td>403 <code>SUBSCRIPTION_REQUIRED</code></td><td><code>/onboarding/plan</code></td></tr>
+          <tr><td>any other 403</td><td>none — left to the screen to render</td></tr>
+        </tbody>
+      </table>
+      <p><span class="ln">:193-195</span> suppresses the redirect when the current path already ends with the
+        target, because the gate page itself calls guardian endpoints and would otherwise loop. The client
+        must not import the router — that would make it untestable outside React and couple the transport to
+        the framework — so a handler is <em>registered</em> instead
+        <span class="ln">setNavigationHandler, :53-56</span>.</p>
+      <div class="callout danger">
+        <span class="t">Verified: setNavigationHandler is called from no application code.</span>
+        The only call sites are <span class="ln">client.test.ts:138, :148, :159, :169</span>. A
+        repository-wide search outside <code>node_modules</code> and <code>.next</code> finds no provider
+        that registers it, so <code>navigate</code> is <code>null</code> at runtime and
+        <code>handleOnboardingRedirect</code> returns at its first line <span class="ln">:183</span> on every
+        real request. <strong>The mechanism is built and tested but not wired</strong>; these redirects do
+        not currently fire in the running application. <code>SessionGuard</code> still catches the same
+        conditions on the next mount, so the user is not stranded — the loss is that a mid-session lapse is
+        not caught until a navigation.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Credential storage</h2>
+      <table>
+        <thead><tr><th>Credential</th><th>Where it lives</th><th>Survives a reload?</th></tr></thead>
+        <tbody>
+          <tr><td>Access token</td><td>module variable <span class="ln">tokenStore.ts:14</span></td><td><strong>No</strong></td></tr>
+          <tr><td>Refresh token</td><td><code>httpOnly</code> cookie set by the server</td><td>Yes — but JavaScript can <strong>never read it</strong></td></tr>
+          <tr><td><code>pending_token</code> (two-factor challenge)</td><td>module variable <span class="ln">challenge.ts:34</span></td><td><strong>No</strong></td></tr>
+          <tr><td><code>enrollment_token</code> (two-factor enrolment)</td><td>module variable <span class="ln">challenge.ts:35</span></td><td><strong>No</strong></td></tr>
+          <tr><td>Unverified email address</td><td>module variable <span class="ln">challenge.ts:43</span></td><td><strong>No</strong></td></tr>
+        </tbody>
+      </table>
+      <p><code>tokenStore.ts:1-12</code>: <em>"The access token lives in a module-level variable and nowhere
+        else. Never localStorage, sessionStorage, a readable cookie, or a URL: any of those survive the tab
+        and are readable by injected script."</em> Two <code>let</code> bindings at
+        <span class="ln">:14-15</span>, with no persistence layer under them. The repository contains no
+        <code>localStorage</code>, no <code>sessionStorage</code> and no <code>document.cookie</code>
+        anywhere in application code. The refresh token is an <code>httpOnly</code> cookie, which is the
+        property that makes it safe to persist when the access token is not — and why
+        <code>rawRequest</code> sends <code>credentials: 'include'</code>
+        <span class="ln">client.ts:130-131</span> on every call.</p>
+      <p>The consequence <span class="ln">tokenStore.ts:9-11</span>: <strong>a full page reload loses the
+        access token</strong>, and the application recovers by calling <code>/auth/refresh</code> with the
+        cookie. That is the intended trade-off, not a bug.</p>
+
+      <div class="callout">
+        <span class="t">The challenge tokens, and the deliberate reload consequence</span>
+        <code>challenge.ts:3-17</code>: <code>pending_token</code> and <code>enrollment_token</code> are
+        bearer credentials — presenting one completes an authentication step — so they follow exactly the
+        same rule. And the consequence is spelled out as <em>design</em>, not defect: <em>"a hard reload on
+        <code>/login/2fa</code> loses the challenge, and the screen sends the user back to
+        <code>/login</code> to sign in again. A token that survived a reload would also survive the user
+        walking away from a shared device."</em> Shared devices are the operative case: this is a product
+        used on family phones and school computers, and a challenge credential that outlives the tab
+        outlives the user's attention. <span class="ln">(auth)/login/2fa/page.tsx:13-18</span> records the
+        same thing from the page side — opening it directly renders nothing and returns to sign-in, because
+        the token cannot be recovered from a URL or from storage <strong>by design</strong>.
+      </div>
+      <p><code>unverifiedEmail</code> <span class="ln">:37-43</span> is kept for a subtler reason:
+        <code>status: 'email_verification_required'</code> returns a <strong>masked</strong> address, and a
+        masked address cannot be submitted to <code>/auth/email/resend</code>.
+        <code>clearAllChallenges()</code> <span class="ln">:77-82</span> is called once a session exists —
+        <span class="ln">TwoFactorChallenge.tsx:173</span>, immediately after <code>startSession</code> at
+        <span class="ln">:172</span>. The order is deliberate <span class="ln">:169-171</span>: the session
+        is stored before the spent challenge is dropped, so a failure between the two cannot leave the user
+        holding neither credential. Challenge credentials travel as <code>init.bearer</code>
+        <span class="ln">client.ts:103-104, :127</span>, which is what excludes them from proactive refresh
+        <span class="ln">:155</span> and from refresh-and-retry <span class="ln">:168</span> — refreshing
+        cannot help a challenge token, and retrying would waste an attempt.</p>
+    </section>
+
+    <section class="prose">
+      <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
+      <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
+        <code>ur-Latn</code> — with <strong>398 leaf message keys each, identical across all three</strong>.
+        <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
+        <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
+        — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had
+        chosen anything. The accepted trade-off <span class="ln">:31-34</span>: this also disables the
+        cookie, so a returning visitor who chose Urdu lands on <code>/</code> in English again. They stay in
+        Urdu while navigating, because every link carries the locale prefix.</p>
+      <p><code>i18n/navigation.ts:9</code> exports locale-aware <code>Link</code>, <code>redirect</code>,
+        <code>usePathname</code>, <code>useRouter</code> and <code>getPathname</code>.
+        <strong>Always import from there</strong>, never from <code>next/link</code> or
+        <code>next/navigation</code>, or the locale prefix is dropped and the user silently falls back to
+        English mid-journey <span class="ln">:4-8</span>. <code>proxy.ts:4</code> mounts the next-intl
+        middleware; <span class="ln">:6-9</span> excludes <code>/api</code>, Next internals and any path with
+        a file extension.</p>
+
+      <h3>Right-to-left for Urdu only <span class="ln">:64-80</span></h3>
+      <pre>const RTL_LOCALES = new Set&lt;string&gt;(['ur'])                              // :72
+export function dirFor(locale) { return isRtl(locale) ? 'rtl' : 'ltr' }  // :78-80</pre>
+      <p><strong>Roman Urdu is Urdu written in Latin script, so it reads left-to-right.</strong> Mirroring it
+        would be a defect, not a feature. This is the single place that decision is encoded; nothing else may
+        test the locale string to work out direction. The one consumer that matters is
+        <code>app/[locale]/layout.tsx:51</code> — <code>&lt;html lang={locale} dir={dirFor(locale)}&gt;</code>.
+        <code>app/fonts.ts:36-38</code> reads the same predicate: the Urdu Naskh face is loaded with
+        <code>preload: false</code> <span class="ln">:30</span> and applied only for right-to-left locales,
+        so an English or Roman-Urdu visitor never downloads a large Arabic-script font they cannot read.</p>
+
+      <h3>The logical-property lint rule <span class="ln">lib/i18n-rules.test.ts</span></h3>
+      <p>A <strong>test that behaves like a lint rule</strong>. Its header <span class="ln">:5-16</span>:
+        <em>"A single <code>ml-2</code> looks fine in English and silently breaks the Urdu layout, which
+        nobody notices until someone reads the page in Urdu. The prototypes are entirely physical
+        (<code>pl-10</code>, <code>left-0</code>, <code>text-left</code>), so this catches a class copied
+        straight across."</em></p>
+      <p>It walks <code>app/</code> and <code>components/</code> <span class="ln">:18, :24-32</span>,
+        skipping test files, and fails any non-test <code>.ts</code>/<code>.tsx</code> file whose
+        <code>className</code> lines match the physical-property pattern <span class="ln">:21-22</span>:</p>
+      <pre>/(?:^|[\s"'`:[])(?:-)?(?:ml|mr|pl|pr|left|right|border-l|border-r|rounded-l|rounded-r)(?:-[a-z0-9./[\]%-]+)?(?=[\s"'`\]]|$)|text-(?:left|right)/</pre>
+      <p><span class="ln">:43-45</span> restricts the check to lines containing <code>className</code> or
+        <code>class=</code>, so prose in a comment may still say "left". <span class="ln">:39</span> runs it
+        as <strong>one test case per file</strong>, so a failure names the offending file and line rather
+        than a single opaque assertion, and <span class="ln">:35-37</span> guards against the walker silently
+        finding nothing. The permitted replacements are the logical properties — <code>ms</code>/<code>me</code>,
+        <code>ps</code>/<code>pe</code>, <code>start</code>/<code>end</code>,
+        <code>text-start</code>/<code>text-end</code>, <code>border-s</code>/<code>border-e</code> — so a new
+        screen is correct in Urdu by construction rather than by review. Real usage:
+        <span class="ln">DashboardShell.tsx:92, :105, :118</span>. Where mirroring is genuinely wrong it is
+        opted out explicitly: <span class="ln">BackupCodes.tsx:63-67</span> marks the code grid
+        <code>force-ltr</code> because backup codes are Latin-alphanumeric strings that must not reorder
+        inside an Urdu page.</p>
+
+      <h3>Web locale → API enum — deliberately not the same <span class="ln">:3-15</span></h3>
+      <table>
+        <thead><tr><th>Web locale</th><th>API / database <code>language_code</code></th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><code>en</code></td><td><code>en</code></td><td>—</td></tr>
+          <tr><td><code>ur</code></td><td><code>ur</code></td><td>—</td></tr>
+          <tr><td><code>ur-Latn</code></td><td><strong><code>roman_ur</code></strong></td><td><code>roman_ur</code> is <strong>not a valid BCP-47 tag</strong>: <code>Intl.NumberFormat('roman_ur')</code> throws <code>RangeError</code>, and <code>&lt;html lang="roman_ur"&gt;</code> is invalid, so a screen reader cannot tell what language the page is in</td></tr>
+        </tbody>
+      </table>
+      <p>Both directions live in one file — <code>LOCALE_TO_API</code> <span class="ln">:44-48</span> and
+        <code>API_TO_LOCALE</code> <span class="ln">:50-54</span>, exposed as <code>toApiLanguage</code>
+        <span class="ln">:56-58</span> and <code>fromApiLanguage</code> <span class="ln">:60-62</span>.
+        <code>LOCALE_LABELS</code> <span class="ln">:83-87</span> names each language in its own script —
+        <code>English</code>, <code>اردو</code>, <code>Roman Urdu</code> — never translated.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The Content Security Policy deviation <span class="ln">next.config.mjs:59-97</span></h2>
+      <div class="callout warn">
+        <span class="t">script-src keeps 'unsafe-inline' — deliberately. Read this before tightening it back.</span>
+        <pre style="margin:10px 0 0">script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com   [+ 'unsafe-eval' in dev]
+                                                                       // next.config.mjs:81</pre>
+      </div>
+      <p>Recorded in full at <span class="ln">:3-30</span>:</p>
+      <ul>
+        <li>The App Router <strong>streams its React payload through inline <code>&lt;script&gt;</code>
+          elements</strong>. Under a bare <code>script-src 'self'</code> every one of them is blocked, React
+          never hydrates, and the entire site ships as <strong>dead HTML</strong> — no form accepts input, no
+          button responds.</li>
+        <li><strong>It fails silently.</strong> Every asset returns 200 and the console stays empty. That is
+          why it survived five phases unnoticed.</li>
+        <li><strong>Verified both ways on a clean production build.</strong> The tightened value was applied,
+          built and opened; the application was inert. The current value was applied, built and opened; it
+          works.</li>
+      </ul>
+      <p>The correct fix is a <strong>per-request nonce</strong>, and it cannot be used here: a nonce must
+        differ per response, so the page must be rendered per request — but these routes are prerendered per
+        locale at build time <span class="ln">app/[locale]/layout.tsx:17-19, :41</span>. Forcing them dynamic
+        would trade the static prerendering the accessibility and performance requirements depend on — a fast
+        first paint on a mid-tier Android over Slow 3G — for a directive that stops a subset of cross-site
+        scripting payloads. Revisit if the auth routes ever become dynamic for another reason.</p>
+      <p><code>'unsafe-eval'</code> is <strong>development only</strong> <span class="ln">:66-72</span>:
+        React uses <code>eval()</code> in development to reconstruct call stacks across the server/client
+        boundary, and without it the error overlay reports the policy violation instead of the actual bug.
+        React never uses <code>eval()</code> in a production build.</p>
+      <h3>What still holds</h3>
+      <table>
+        <thead><tr><th>Directive</th><th>Value</th><th>What it buys</th></tr></thead>
+        <tbody>
+          <tr><td><code>default-src</code></td><td><code>'self'</code></td><td>everything not named below</td></tr>
+          <tr><td><code>style-src</code></td><td><code>'self' 'unsafe-inline'</code></td><td>Tailwind's runtime styles</td></tr>
+          <tr><td><code>font-src</code></td><td><code>'self'</code></td><td>self-hosted via <code>next/font</code>; no <code>fonts.googleapis.com</code></td></tr>
+          <tr><td><code>img-src</code></td><td><code>'self' data:</code></td><td>the <code>data:</code> URI is the server-supplied two-factor QR code</td></tr>
+          <tr><td><code>connect-src</code></td><td><code>'self'</code> + Turnstile + API origin + <code>ws:</code>/<code>wss:</code> in dev</td><td>confines API calls</td></tr>
+          <tr><td><code>frame-src</code></td><td><code>https://challenges.cloudflare.com</code></td><td>what <strong>we</strong> may frame — the Turnstile widget</td></tr>
+          <tr><td><code>frame-ancestors</code></td><td><code>'none'</code></td><td>blocks clickjacking of the login and two-factor screens</td></tr>
+          <tr><td><code>base-uri</code></td><td><code>'self'</code></td><td>stops a <code>&lt;base&gt;</code> tag rewriting every relative URL</td></tr>
+          <tr><td><code>form-action</code></td><td><code>'self'</code></td><td>stops a form being pointed at another origin</td></tr>
+        </tbody>
+      </table>
+      <p>Plus <code>X-Frame-Options: DENY</code>, <code>X-Content-Type-Options: nosniff</code> and
+        <code>Referrer-Policy: strict-origin-when-cross-origin</code> <span class="ln">:60-62</span>, and
+        <code>poweredByHeader: false</code> <span class="ln">:137</span>. <code>connect-src</code> is
+        <em>computed</em> <span class="ln">:33-57</span>, not hard-coded: <code>'self'</code> alone is wrong
+        the moment the backend is a separate origin, which it is in development — the app is served from
+        <code>:3000</code> and calls <code>:8000</code>, so <strong>every</strong> fetch is blocked before it
+        leaves the browser, and the symptom is a login screen that appears to do nothing.
+        <span class="ln">:50-53</span> emits nothing unless the value parses to a real <code>http(s)</code>
+        origin, because an opaque origin would put a literal <code>null</code> into the directive — which
+        allows nothing and reads like a bug. Turnstile needs three directives, not one
+        <span class="ln">:73-80</span>: <code>script-src</code>, <code>frame-src</code> and
+        <code>connect-src</code>. No other third-party origin is allowed anywhere in the policy.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The <code>/api</code> rewrite <span class="ln">next.config.mjs:138-146</span></h2>
+      <p>It looks like a convenience. It is the thing that keeps sessions alive in production.</p>
+      <div class="callout danger">
+        <span class="t">Platform subdomains are on the Public Suffix List.</span>
+        The refresh token is an <code>httpOnly</code> cookie set <code>SameSite=Lax</code>. <strong>Lax
+        cookies are not sent on cross-<em>site</em> requests, and a platform subdomain is its own
+        site.</strong> <code>*.onrender.com</code> and <code>*.vercel.app</code> are both on the Public
+        Suffix List, so the browser treats <code>edubridge-web.onrender.com</code> and
+        <code>edubridge-api.onrender.com</code> as two different <em>sites</em>, not two hosts of one site.
+        Deployed as sibling subdomains, the frontend and backend are cross-site.
+      </div>
+      <p>The failure that produces is the nastiest kind <span class="ln">:99-124</span>: <strong>login
+        succeeds</strong>, the dashboard loads, and then <code>/api/auth/refresh</code> silently stops
+        receiving the cookie. The user is signed out the moment the access token expires —
+        <strong>in production only</strong>. Nothing in development reproduces it, because
+        <code>localhost:3000</code> and <code>localhost:8000</code> are the same site.</p>
+      <p>Rewriting <code>/api/*</code> through the Next server makes the API <strong>same-origin</strong>.
+        The Lax cookie keeps working with no backend change, <code>connect-src 'self'</code> already covers
+        the calls, there is no credentialed Cross-Origin Resource Sharing to configure, and the cookie's
+        <code>path=/api/auth/refresh</code> is unchanged by the rewrite so it still matches.</p>
+      <div class="callout warn">
+        <span class="t">The trap</span>
+        <strong>Pointing <code>NEXT_PUBLIC_API_BASE_URL</code> at the backend's public address silently
+        breaks refresh in production, and only in production.</strong> <code>lib/api/client.ts:25</code> reads
+        that variable as the fetch prefix. Set it to <code>/api</code> and every call goes through the
+        same-origin rewrite. Set it to <code>https://edubridge-api.onrender.com/api</code> — which looks more
+        correct, is what the deployment dashboard invites, and works perfectly in every manual test that
+        finishes inside one token lifetime — and every call is cross-site. Login still works. The dashboard
+        still loads. Fifteen minutes later the user is signed out, and the reproduction requires waiting.
+      </div>
+      <table>
+        <thead><tr><th>Variable</th><th>Read by</th><th>Exposed to browser</th><th>Should be</th></tr></thead>
+        <tbody>
+          <tr><td><code>NEXT_PUBLIC_API_BASE_URL</code></td><td><span class="ln">client.ts:25</span>, <span class="ln">next.config.mjs:46</span></td><td><strong>Yes</strong></td><td><code>/api</code> in any deployed environment</td></tr>
+          <tr><td><code>BACKEND_INTERNAL_URL</code></td><td><span class="ln">next.config.mjs:132</span></td><td>No</td><td>the backend's address, server-side only</td></tr>
+        </tbody>
+      </table>
+      <p><span class="ln">:125-131</span> records a second failure this already caused: the value is pasted
+        into a hosting dashboard by hand and a stray tab or newline rides along more often than not.
+        Untrimmed, Next rejects the rewrite at <strong>build</strong> time with "<code>destination</code> does
+        not start with <code>/</code>, <code>http://</code>, or <code>https://</code>" — accurate, but it
+        reads like the URL is wrong when the URL is fine and the whitespace is invisible. Hence
+        <code>.trim()</code> <span class="ln">:132</span>. Left unset, <span class="ln">:139</span> emits no
+        rewrite at all.</p>
+    </section>
+
+    <section class="prose">
+      <h2>Known defects — recorded, not hidden</h2>
+      <p>Seven findings from the Epic 1 review land in this application. Numbering follows the 35-finding
+        register in the Phase 0 plan. Full detail in
+        <a href="architecture.md#known-defects">architecture.md § Known defects</a>.</p>
+
+      <div class="card">
+        <h3 style="margin-top:4px">A6 — the <code>admin</code> role routes to a page that does not exist</h3>
+        <p><code>lib/auth/onboarding.ts:17</code> maps <code>admin</code> to <code>/admin</code>;
+          <code>lib/auth/navigation.ts:74</code> gives the admin sidebar a single entry pointing there.
+          <strong>There is no <code>/admin</code> page</strong> — <code>app/[locale]/(app)/</code> contains
+          <code>dashboard/</code>, <code>teacher/</code> and <code>parent/</code> and nothing else. Three call
+          sites can send an administrator there:
+          <span class="ln">SessionGuard.tsx:65</span>, <span class="ln">SessionGuard.tsx:69</span> and
+          <span class="ln">TwoFactorChallenge.tsx:183</span>. The result is a loop — the guard's own fallback
+          renders "Redirecting…" <span class="ln">SessionGuard.tsx:106-108</span> forever.</p>
+        <p><strong>And the breakage cannot fail a test, because a test allow-lists it.</strong>
+          <code>lib/auth/navigation.test.ts:83-89</code> is titled <em>routes every non-dashboard item
+          somewhere that exists</em>:</p>
+        <pre>expect(item.href, item.key).toMatch(/^\/(dashboard|teacher|parent|admin|coming-soon\/)/)
+                                                       // navigation.test.ts:87</pre>
+        <p><code>admin</code> is in the alternation. The test written to catch exactly this class of
+          regression has the regression written into it.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">A7 — the backup-code download can silently produce no file</h3>
+        <pre>const url = URL.createObjectURL(blob)
+const link = document.createElement('a')
+link.href = url
+link.download = 'edubridge-backup-codes.txt'
+link.click()                 // BackupCodes.tsx:49
+URL.revokeObjectURL(url)     // :50 — synchronous, immediately after</pre>
+        <p>Two problems in four lines. The anchor is <strong>never appended to the document</strong>, which
+          several browsers require before a synthetic click on a download link does anything. And
+          <code>revokeObjectURL</code> runs <strong>synchronously</strong> on the next statement, which can
+          invalidate the blob URL before the browser has started reading it. The stakes are set by the
+          component's own header <span class="ln">:7-20</span>: the ten backup codes are shown
+          <strong>exactly once</strong>. A user who clicks Download, sees nothing happen and continues past
+          the acknowledgement checkbox has lost their only recovery credential. The copy path reports its own
+          failure <span class="ln">:95-99</span>; the download path reports nothing, because a
+          <code>click()</code> that does nothing throws nothing.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">A8 — sign-out no-ops on a network failure</h3>
+        <pre>async function signOut() {
+  await logout()
+  router.replace('/login')
+}                            // DashboardShell.tsx:45-48</pre>
+        <p>No <code>try</code>/<code>catch</code>. <code>logout()</code>
+          <span class="ln">endpoints.ts:179-188</span> uses <code>try</code>/<strong><code>finally</code></strong>,
+          not <code>catch</code> — the local session is dropped at <span class="ln">:186</span>, but the error
+          still propagates. So on a network failure: the token is cleared, <code>await logout()</code>
+          rejects, and <code>router.replace('/login')</code> <span class="ln">:47</span> <strong>never
+          executes</strong>. The user is left looking at a dashboard that appears signed in, with no token
+          behind it. On the shared devices this product is used on, "sign out appeared to do nothing" is the
+          worst possible failure for that button.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">C4 — <code>.env.example</code> ships mock mode as the documented default</h3>
+        <p><code>.env.example:10</code> is <code>NEXT_PUBLIC_API_MODE=mock</code>, and
+          <span class="ln">:3</span> tells the reader to <code>cp .env.example .env.local</code> — so the
+          documented happy path produces a mock-mode configuration. The first clause of
+          <code>client.ts:22-23</code> matches <code>'mock'</code> <strong>before</strong> <code>NODE_ENV</code>
+          is consulted, so this value carried into a deployment's environment ships the in-memory mock — with
+          its seeded accounts <span class="ln">mock/index.ts:31</span> — as the production backend. Nothing
+          in the build warns, because the flag being set explicitly is exactly the condition the client treats
+          as intentional.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">D5 — <code>VerifyEmail</code> reproduces the StrictMode deadlock <code>SessionGuard</code> documents fixing</h3>
+        <pre>const attempted = useRef(false)                              // VerifyEmail.tsx:41
+
+useEffect(() =&gt; {
+  if (token === null || attempted.current) return            // :44
+  attempted.current = true                                   // :45
+  let cancelled = false                                      // :47
+  ...  if (cancelled) return                                 // :51
+  return () =&gt; { cancelled = true }                          // :70-72
+}, [token])</pre>
+        <p>Precisely the pattern <span class="ln">SessionGuard.tsx:43-56</span> records as having deadlocked:
+          a ref guard that survives React's development double-invoke, combined with a <code>cancelled</code>
+          flag that discards the first response. The unmount sets <code>cancelled</code>, so the in-flight
+          verification's result is thrown away at <span class="ln">:51</span>; the remount finds
+          <code>attempted.current === true</code> and returns at <span class="ln">:44</span>, so no second
+          request is made. The screen stays on the <code>verifying</code> spinner
+          <span class="ln">:93-114</span> permanently. Development only — exactly like the original, which is
+          what makes it costly.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">D6 — an unvalidated <code>onboarding_state</code> reaches <code>router.replace(undefined)</code></h3>
+        <p><code>onboarding_state</code> is typed as a five-value union
+          <span class="ln">lib/api/types.ts:12-17</span>, but it arrives from the network and nothing
+          validates it against that union at the boundary. Both lookup tables are plain
+          <code>Record</code>s, so an unrecognised value returns <code>undefined</code>:</p>
+        <ul>
+          <li><span class="ln">onboarding.ts:32</span> → <span class="ln">SessionGuard.tsx:65</span> calls
+            <code>router.replace(undefined)</code></li>
+          <li><span class="ln">onboarding.ts:44</span> → the guard at
+            <span class="ln">TwoFactorChallenge.tsx:176</span> is <code>if (next !== null)</code>, and
+            <code>undefined !== null</code> is <strong>true</strong>, so <span class="ln">:177</span> calls
+            <code>router.replace(undefined)</code></li>
+        </ul>
+        <p>Two of the three <code>pendingOnboardingRoute</code> call sites are <em>accidentally</em> safe —
+          <span class="ln">VerifyEmail.tsx:61</span> and <span class="ln">TwoFactorEnrollment.tsx:136</span>
+          both use <code>?? '/dashboard'</code>, and nullish coalescing catches <code>undefined</code> as well
+          as <code>null</code>. The trigger is a backend that adds a sixth state or renames one.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">D17 — <code>error.tsx</code> logs the error object it refuses to render</h3>
+        <p><code>app/[locale]/error.tsx:16-18</code> states the rule: <em>"The error is deliberately NOT
+          shown. A stack or a message from a failed request can carry an email address, a token fragment or
+          an internal path, and this page is reachable by anyone."</em> Then <span class="ln">:29-31</span>
+          sends the whole object — message, stack and any attached properties — to
+          <code>console.error</code>. The console is not a private channel: it is readable by any extension
+          with page access, captured by client-side error-reporting integrations, and visible to anyone who
+          opens developer tools, including on a shared device. The page correctly renders only
+          <code>error.digest</code> <span class="ln">:63-67</span>, which is exactly the opaque, safe
+          identifier that ought to be the <em>only</em> thing that leaves.</p>
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Where the rest of the system is documented</h2>
+      <p>This application makes no authorization decisions and holds no data. <strong>There is no database
+        page in this folder</strong> — for anything below the transport layer:</p>
+      <table>
+        <thead><tr><th>Document</th><th>What is there</th></tr></thead>
+        <tbody>
+          <tr><td><a href="../../backend/Architecture/architecture.md">backend/Architecture/architecture.md</a></td><td>the layered request path, the two-layer authorization model <strong>and its current failure</strong>, the token kinds, the onboarding state machine as the server computes it, the guardian gate</td></tr>
+          <tr><td><a href="../../backend/Architecture/database.md">backend/Architecture/database.md</a></td><td>tables by domain, the complete Row-Level Security policy catalogue, the <code>app.*</code> privileged functions, the invariants</td></tr>
+          <tr><td><a href="../../backend/Architecture/api-endpoints.md">backend/Architecture/api-endpoints.md</a></td><td>implemented routes with <code>file:line</code>, and the specified-but-missing ones</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+  <footer>EduBridge AI · frontend architecture docs · snapshot 2026-08-15 · keep in sync with code per <code>/CLAUDE.md</code></footer>
+</body>
+</html>

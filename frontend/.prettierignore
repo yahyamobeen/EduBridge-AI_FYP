@@ -7,3 +7,9 @@ package-lock.json
 
 # Hand-formatted prose with deliberate line breaks and tables.
 PLAN.md
+CLAUDE.md
+
+# Same, plus a vendored Mermaid bundle. The architecture pages carry Mermaid
+# source inside <div class="mermaid"> blocks, where indentation is significant --
+# reformatting the HTML rewrites it and the diagrams stop parsing.
+Architecture/

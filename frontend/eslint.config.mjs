@@ -4,7 +4,18 @@ import nextTypescript from 'eslint-config-next/typescript'
 // `next lint` was removed in Next 16, so ESLint runs directly.
 // eslint-config-next 16 exports flat-config arrays, so no FlatCompat shim.
 const config = [
-  { ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts', 'coverage/**'] },
+  // `Architecture/assets/**` is the vendored Mermaid bundle. It is third-party
+  // minified output, not source: linting it reports thousands of problems that
+  // nobody can act on and that would drown every real one.
+  {
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'next-env.d.ts',
+      'coverage/**',
+      'Architecture/assets/**',
+    ],
+  },
   ...nextCoreWebVitals,
   ...nextTypescript,
   {
