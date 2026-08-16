@@ -150,10 +150,10 @@ services:
       - key: NODE_VERSION
         value: "24"
 
-      # Ships as `mock`. A mock build is green and looks entirely healthy —
-      # it just never talks to the backend.
-      - key: NEXT_PUBLIC_API_MODE
-        value: live
+      # NEXT_PUBLIC_API_MODE is gone. It selected an in-memory mock layer that
+      # has been deleted; the comment here claimed "ships as mock" directly above
+      # a `live` value, and reconciling the comment to the value would have put
+      # seeded credentials into a production bundle.
 
       # Relative on purpose: the rewrite makes /api same-origin, which is what
       # keeps the SameSite=Lax refresh cookie working. Setting the backend's
@@ -174,4 +174,27 @@ services:
       # changed env var needs a rebuild, not a restart.
       #   https://edubridge-backend.onrender.com
       - key: BACKEND_INTERNAL_URL
+        sync: false
+
+      # The unlisted path the administrator login is served at, without a
+      # leading slash. proxy.ts rewrites it to /en/admin-login; every other
+      # route to that page answers 404.
+      #
+      # NO NEXT_PUBLIC_ PREFIX, EVER. That prefix inlines a value into the
+      # browser bundle and would publish this path to every visitor.
+      #
+      # Unlike the NEXT_PUBLIC_* values above, this one is read at RUNTIME, so a
+      # change takes effect on restart and does not need a rebuild. Measured on
+      # a production build: the server chunk keeps the literal
+      # `process.env.ADMIN_LOGIN_PATH` read, and the value appears nowhere under
+      # .next/ -- not in the client chunks, not in the middleware bundle.
+      #
+      # `sync: false` so the value is prompted for in the dashboard and never
+      # enters the repository (SEC-10). Unset is safe: no rewrite happens and
+      # the administrator login is unreachable.
+      #
+      # NOT A SECURITY CONTROL. POST /api/auth/admin/login is: it refuses every
+      # non-administrator with a 401 identical to a wrong password, so learning
+      # this path buys an attacker nothing.
+      - key: ADMIN_LOGIN_PATH
         sync: false

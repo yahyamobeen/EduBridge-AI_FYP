@@ -149,7 +149,7 @@ surface the conflict and ask — never resolve it quietly.
 
 | | |
 |---|---|
-| Backend | **17 routes, all authentication or reference.** One router (`app/auth/routes.py`). `tdd.md` specifies **48 endpoints — 31 do not exist.** |
+| Backend | **18 routes, all authentication or reference.** One router (`app/auth/routes.py`). `tdd.md` specifies **49 endpoints — 31 do not exist.** Phase 1b added `POST /auth/admin/login` to both sides of that ledger at once. |
 | Frontend | 20 pages, 3 route groups, 3 locales. Auth and onboarding journeys complete. |
 | Database | 11 applied migrations, 33 `app.*` functions, 73 Row-Level Security policies. |
 | `ml/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |

@@ -9,20 +9,31 @@ import { ApiError, isRefreshableAuthError, toApiError } from './errors'
 import type { RefreshResponse } from './types'
 
 /**
- * Mock mode is the DEFAULT outside production.
+ * THE EMPTY STRING IS LOAD-BEARING IN THE BROWSER. Do not "fix" it.
  *
- * The backend does not exist yet, so a developer who has not copied
- * .env.example to .env.local would otherwise get a real fetch against an empty
- * base URL — which on the server is a relative path Node cannot parse, so every
- * page that loads data fails with an unhelpful error. Defaulting to mocks in
- * development means the app runs on checkout; production still requires the
- * flag to be set explicitly, so mocks can never be shipped by omission.
+ * A relative `/api/...` path goes through the rewrite in next.config.mjs, and
+ * that rewrite is what keeps the refresh cookie same-site. Pointing this at the
+ * backend's public address re-breaks it silently, in production only, roughly
+ * fifteen minutes after each login (see frontend/CLAUDE.md).
+ *
+ * On the SERVER there is no origin to be relative to, and Node cannot parse a
+ * relative URL — so a server component fetching without a configured base URL
+ * fails three frames deep in `fetch`. The mock layer used to hide that by
+ * defaulting on outside production; with the mocks gone, it is named instead.
  */
-const API_MODE = process.env.NEXT_PUBLIC_API_MODE
-const USE_MOCKS =
-  API_MODE === 'mock' || (API_MODE === undefined && process.env.NODE_ENV !== 'production')
-
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
+
+function resolve(path: string): string {
+  if (BASE_URL) return `${BASE_URL}${path}`
+  if (typeof window === 'undefined') {
+    throw new Error(
+      'NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be ' +
+        'resolved on the server. Set it in .env.local (see .env.example) and ' +
+        'restart the dev server — NEXT_PUBLIC_* values are inlined at build time.',
+    )
+  }
+  return path
+}
 
 /** Access-token lifetime from the last issue, needed for proactive refresh. */
 let lastLifetimeSeconds = 0
@@ -116,16 +127,8 @@ export type ApiRequestInit = {
 }
 
 async function rawRequest<T>(path: string, init: ApiRequestInit): Promise<T> {
-  if (USE_MOCKS) {
-    // Dynamic so the mock handlers and their seeded users are not bundled into
-    // a live build -- NEXT_PUBLIC_API_MODE is inlined, so this branch is
-    // eliminated entirely when it is not 'mock'.
-    const { mockRequest } = await import('./mock')
-    return mockRequest<T>(path, init)
-  }
-
   const token = init.bearer ?? getAccessToken()
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(resolve(path), {
     method: init.method ?? 'GET',
     // Carries the httpOnly refresh cookie.
     credentials: 'include',

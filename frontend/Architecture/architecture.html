@@ -109,10 +109,10 @@
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 (branch fix-epic-1) · Source of truth: the code. Update in the same change (see /CLAUDE.md).</p>
 
     <div class="grid">
-      <div class="stat"><div class="n">20</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>)</div></div>
+      <div class="stat"><div class="n">22</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>)</div></div>
       <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
-      <div class="stat"><div class="n">22</div><div class="l">test files (Vitest)</div></div>
-      <div class="stat"><div class="n">3 × 398</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">24</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 426</div><div class="l">locales × leaf message keys</div></div>
       <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
     </div>
 
@@ -234,7 +234,8 @@ flowchart TB
           <tr><td><code>(app)</code></td><td><code>/dashboard</code></td><td><code>StudentDashboard</code> — <code>allow={['student']}</code> <span class="ln">Dashboards.tsx:34</span></td></tr>
           <tr><td><code>(app)</code></td><td><code>/teacher</code></td><td><code>TeacherDashboard</code> — <code>allow={['teacher']}</code> <span class="ln">Dashboards.tsx:80</span></td></tr>
           <tr><td><code>(app)</code></td><td><code>/parent</code></td><td><code>ParentDashboard</code> — <code>allow={['parent']}</code> <span class="ln">Dashboards.tsx:108</span></td></tr>
-          <tr><td><code>(app)</code></td><td><code>/admin</code></td><td><strong>DOES NOT EXIST</strong> — see defect A6 below</td></tr>
+          <tr><td><code>(app)</code></td><td><code>/admin</code></td><td><code>AdminDashboard</code> — built in phase 1b, closing A6. Five FR-K1 placeholder cards plus the privacy panel</td></tr>
+          <tr><td><code>(auth)</code></td><td><code>/admin-login</code></td><td>Reachable ONLY through the <code>proxy.ts</code> rewrite from the unlisted <code>ADMIN_LOGIN_PATH</code>; the ordinary path answers 404</td></tr>
         </tbody>
       </table>
       <p><code>app/[locale]/layout.tsx</code> <span class="ln">:17-19</span> pre-renders all three locales at
@@ -275,7 +276,7 @@ flowchart TB
   DB --> D1["/dashboard · student"]
   DB --> D2["/teacher · teacher"]
   DB --> D3["/parent · parent"]
-  DB --> D4["/admin · admin<br/>DEFECT A6 — no such page"]
+  DB --> D4["/admin · admin<br/>AdminDashboard"]
   R -- "yes" --> M["setMe(identity)<br/><span class='ln'>:72</span>"]
   M --> RENDER["children(me)<br/><span class='ln'>:113</span>"]
   L1 --> CLOSED
@@ -446,22 +447,36 @@ flowchart TB
         </div>
       </div>
 
-      <h3>Mock versus live — the exact condition <span class="ln">:21-23</span></h3>
-      <pre>const API_MODE = process.env.NEXT_PUBLIC_API_MODE
-const USE_MOCKS =
-  API_MODE === 'mock' || (API_MODE === undefined &amp;&amp; process.env.NODE_ENV !== 'production')</pre>
-      <p>Read literally: mocks are used when the flag is <code>'mock'</code> <strong>regardless of
-        environment</strong>, or when the flag is <strong>absent</strong> and the build is not production.
-        The reasoning <span class="ln">:11-20</span> is that a developer who has not copied
-        <code>.env.example</code> to <code>.env.local</code> would otherwise get a real fetch against an
-        empty base URL, which on the server is a relative path Node cannot parse. The mock import is
-        <strong>dynamic</strong> <span class="ln">:123</span> and <code>NEXT_PUBLIC_API_MODE</code> is
-        inlined at build time, so when it is not <code>'mock'</code> the whole branch is a compile-time
-        <code>false</code> and the mock handlers and their seeded accounts
-        <span class="ln">mock/index.ts:31</span> are eliminated from the bundle entirely.</p>
-      <p>The comment's claim that "mocks can never be shipped by omission" is true only of <em>omission</em>.
-        Setting the flag to <code>mock</code> in a production environment ships mocks, because the first
-        clause is checked before <code>NODE_ENV</code>. That is the bite of defect <strong>C4</strong>.</p>
+      <h3>Live data always — the mock layer was deleted</h3>
+      <p><code>client.ts</code> used to select a hand-rolled in-memory backend from
+        <code>NEXT_PUBLIC_API_MODE</code>. <strong>Phase 1b deleted it entirely</strong> — 841 lines across
+        <code>lib/api/mock/</code>, plus the branch, plus the flag from <code>.env.example</code>,
+        <code>vitest.config.mts</code>, <code>render.yaml</code> and the CI workflow.</p>
+      <p>What it was, recorded so nobody rebuilds it: an in-memory router serving 18 endpoints from eight
+        seeded accounts that all shared one password, plus magic strings — <code>verify-&lt;user-id&gt;</code>
+        <strong>minted a session from a URL with no password</strong>, <code>123456</code> passed any
+        two-factor challenge, <code>BKUP0000</code> was a working backup code. It was the <strong>default</strong>
+        whenever <code>NODE_ENV</code> was not <code>production</code>, and the <code>'mock'</code> flag was
+        tested <em>before</em> <code>NODE_ENV</code> — so setting it explicitly shipped those credentials out
+        of a production build. That was defect <strong>C4</strong>, and deleting the layer converts the
+        guarantee from a configuration invariant into a structural one.</p>
+      <h3>The configuration hole it was hiding, now named instead of hidden</h3>
+      <pre>const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
+
+function resolve(path: string): string {
+  if (BASE_URL) return `${BASE_URL}${path}`
+  if (typeof window === 'undefined') {
+    throw new Error('NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be…')
+  }
+  return path
+}</pre>
+      <p>The mock default existed <em>because</em> an unset base URL produces a relative path Node cannot
+        parse on the server. <strong>The empty string is still load-bearing in the browser</strong>: relative
+        <code>/api/...</code> goes through the <code>next.config.mjs</code> rewrite, and that rewrite is what
+        keeps the refresh cookie same-site. Pointing <code>NEXT_PUBLIC_API_BASE_URL</code> at the backend's
+        public address re-breaks it silently, in production only. So the fix is <strong>server-side
+        only</strong>: a named error saying which variable to set, rather than a URL parse failure three
+        frames deep inside <code>fetch</code>.</p>
 
       <h3>Proactive refresh at 80% of token lifetime</h3>
       <p><code>apiFetch</code> refreshes <strong>ahead of use</strong> rather than waiting to be told
@@ -595,7 +610,7 @@ const USE_MOCKS =
     <section class="prose">
       <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
       <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
-        <code>ur-Latn</code> — with <strong>398 leaf message keys each, identical across all three</strong>.
+        <code>ur-Latn</code> — with <strong>426 leaf message keys each, identical across all three</strong>, and in the same order.
         <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
         <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
         — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had
@@ -772,22 +787,48 @@ export function dirFor(locale) { return isRtl(locale) ? 'rtl' : 'ltr' }  // :78-
         <a href="architecture.md#known-defects">architecture.md § Known defects</a>.</p>
 
       <div class="card">
-        <h3 style="margin-top:4px">A6 — the <code>admin</code> role routes to a page that does not exist</h3>
-        <p><code>lib/auth/onboarding.ts:17</code> maps <code>admin</code> to <code>/admin</code>;
-          <code>lib/auth/navigation.ts:74</code> gives the admin sidebar a single entry pointing there.
-          <strong>There is no <code>/admin</code> page</strong> — <code>app/[locale]/(app)/</code> contains
-          <code>dashboard/</code>, <code>teacher/</code> and <code>parent/</code> and nothing else. Three call
-          sites can send an administrator there:
-          <span class="ln">SessionGuard.tsx:65</span>, <span class="ln">SessionGuard.tsx:69</span> and
-          <span class="ln">TwoFactorChallenge.tsx:183</span>. The result is a loop — the guard's own fallback
-          renders "Redirecting…" <span class="ln">SessionGuard.tsx:106-108</span> forever.</p>
-        <p><strong>And the breakage cannot fail a test, because a test allow-lists it.</strong>
-          <code>lib/auth/navigation.test.ts:83-89</code> is titled <em>routes every non-dashboard item
-          somewhere that exists</em>:</p>
-        <pre>expect(item.href, item.key).toMatch(/^\/(dashboard|teacher|parent|admin|coming-soon\/)/)
-                                                       // navigation.test.ts:87</pre>
-        <p><code>admin</code> is in the alternation. The test written to catch exactly this class of
-          regression has the regression written into it.</p>
+        <h3 style="margin-top:4px">A6 — FIXED, phase 1b</h3>
+        <p><code>lib/auth/onboarding.ts:17</code> mapped <code>admin</code> to <code>/admin</code> and the
+          nav table pointed there, but <code>app/[locale]/(app)/</code> contained only
+          <code>dashboard/</code>, <code>teacher/</code> and <code>parent/</code>. Three call sites could send
+          an administrator there — <span class="ln">SessionGuard.tsx:65</span>,
+          <span class="ln">SessionGuard.tsx:69</span> and <span class="ln">TwoFactorChallenge.tsx:183</span> —
+          and the result was a loop, with the guard's own fallback rendering "Redirecting…"
+          <span class="ln">SessionGuard.tsx:106-108</span> for ever.</p>
+        <p><strong><code>app/[locale]/(app)/admin/page.tsx</code> and <code>AdminDashboard</code> now
+          exist.</strong> The page is a shell like the other three: no <code>/api/admin/*</code> endpoint is
+          implemented, so its five cards name the five FR-K1 duties and say plainly that each is not
+          available yet.</p>
+        <p><strong>Two nav tests covered the admin row between them and neither actually did.</strong> The
+          first-item test omitted <code>admin</code>; the href test allow-listed it inside its regex
+          alternation — the test written to catch this class of regression had the regression written into
+          it. Phase 1 added the missing assertion. Phase 1b added a third that resolves every
+          <code>coming-soon</code> href against the page's own <code>generateStaticParams</code>, because a
+          prefix regex accepts <code>/coming-soon/anything</code>.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:4px">Administrators do not use the public identity surface</h3>
+        <p><code>POST /api/auth/login</code> refuses an administrator and
+          <code>POST /api/auth/admin/login</code> refuses everyone else — <strong>both with a 401 whose body
+          is identical to a wrong password</strong>, so neither endpoint can be used to work out which
+          addresses are administrators (prd.md FR-A2a). A <code>403</code> would refuse just as effectively
+          and would still be a vulnerability.</p>
+        <p><code>proxy.ts</code> was four lines wrapping next-intl; it now composes three handlers, in
+          order: the unlisted <code>ADMIN_LOGIN_PATH</code> is <strong>rewritten</strong> (not redirected) to
+          <code>/en/admin-login</code> so the address bar keeps the secret and no locale prefix appears; any
+          path whose last segment is <code>admin-login</code> answers <strong>404</strong>; everything else
+          reaches next-intl untouched.</p>
+        <p><code>ADMIN_LOGIN_PATH</code> carries <strong>no <code>NEXT_PUBLIC_</code> prefix</strong>, which
+          would publish it to every visitor. Measured on a production build: the server chunk keeps the
+          literal <code>process.env.ADMIN_LOGIN_PATH</code> read rather than folding it to a constant, and the
+          value appears <strong>nowhere</strong> under <code>.next/</code> — read at runtime, never in a build
+          artefact. Unset, no rewrite happens and the login is unreachable, which is the correct failure.</p>
+        <p><strong>⚠️ The unlisted path is not an access control.</strong> It keeps the entrance off the
+          public site and nothing more; the endpoint's role check is the lock.
+          <code>proxy.test.ts</code> covers all three branches — including that ordinary locale routing is
+          unchanged, which is the assertion worth having, because a middleware that stops calling next-intl
+          takes down all 22 pages at once.</p>
       </div>
 
       <div class="card">
@@ -826,18 +867,19 @@ URL.revokeObjectURL(url)     // :50 — synchronous, immediately after</pre>
       </div>
 
       <div class="card">
-        <h3 style="margin-top:4px">C4 — <code>.env.example</code> ships mock mode as the documented default</h3>
-        <p><code>.env.example:10</code> is <code>NEXT_PUBLIC_API_MODE=mock</code>, and
-          <span class="ln">:3</span> tells the reader to <code>cp .env.example .env.local</code> — so the
-          documented happy path produces a mock-mode configuration. The first clause of
-          <code>client.ts:22-23</code> matches <code>'mock'</code> <strong>before</strong> <code>NODE_ENV</code>
-          is consulted, so this value carried into a deployment's environment ships the in-memory mock — with
-          its seeded accounts <span class="ln">mock/index.ts:31</span> — as the production backend. Nothing
-          in the build warns, because the flag being set explicitly is exactly the condition the client treats
-          as intentional.</p>
+        <h3 style="margin-top:4px">C4 — CLOSED PERMANENTLY, phase 1b</h3>
+        <p><code>.env.example</code> documented <code>NEXT_PUBLIC_API_MODE=mock</code> three lines below an
+          instruction to <code>cp .env.example .env.local</code>. Phase 1 flipped the value to
+          <code>live</code>; <strong>phase 1b then deleted the entire mock layer along with the flag</strong>,
+          which is why this is closed rather than fixed.</p>
+        <p>The hazard was never the default on its own. It was that <code>API_MODE === 'mock'</code> was
+          checked <strong>before</strong> <code>NODE_ENV</code>, so the value carried into a deployment's
+          environment would ship the in-memory mock — seeded accounts and all — as the production backend,
+          with nothing in the build warning, because an explicitly set flag was exactly the condition the
+          client treated as intentional. <code>NEXT_PUBLIC_API_BASE_URL</code> is required in its place.</p>
       </div>
 
-      <div class="card">
+<div class="card">
         <h3 style="margin-top:4px">D5 — <code>VerifyEmail</code> reproduces the StrictMode deadlock <code>SessionGuard</code> documents fixing</h3>
         <pre>const attempted = useRef(false)                              // VerifyEmail.tsx:41
 

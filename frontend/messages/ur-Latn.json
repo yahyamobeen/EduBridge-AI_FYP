@@ -32,6 +32,10 @@
       "announcements": "Elanaat",
       "myChild": "Mera bacha",
       "howToHelp": "Madad kaise karein",
+      "curriculum": "Nisaab",
+      "security": "Security",
+      "quotas": "Quotas",
+      "endpointLogs": "Endpoint logs",
       "settings": "Tarteebat",
       "help": "Madad markaz",
       "logout": "Log out"
@@ -162,6 +166,16 @@
       "submitting": "Sign in ho raha hai…",
       "noAccount": "Account nahi hai?",
       "createAccount": "Account banayein"
+    },
+    "adminLogin": {
+      "title": "Admin sign in",
+      "subtitle": "Yeh raasta sirf platform administrators ke liye hai.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "admin@example.com",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "submitting": "Sign in ho raha hai…",
+      "notice": "Admin accounts baraah-e-raast banaye jaate hain. Is safhe se na account banaya ja sakta hai aur na password tabdeel ho sakta hai."
     },
     "turnstile": {
       "label": "Security check"
@@ -434,6 +448,11 @@
       "welcome": "Khush aamdeed, {name}",
       "subtitle": "Aap ke bache ki peshraft, baghair musalsal nigrani ke."
     },
+    "admin": {
+      "role": "Admin dashboard",
+      "welcome": "Khush aamdeed, {name}",
+      "subtitle": "Accounts ki farahmi, nisaab ki taazgi, security ki soorat-e-haal aur quotas."
+    },
     "cards": {
       "performanceTitle": "Majmooi karkardagi",
       "performanceBody": "Aap ke mazameen mein imtehani tayyari aur nisab ki takmeel.",
@@ -458,7 +477,19 @@
       "howToHelpTitle": "Madad kaise karein",
       "howToHelpBody": "Un maqamat par amali tajaweez jahan aap ke bache ko dushwari ho rahi hai.",
       "privacyTitle": "Aap kya dekh sakte hain aur kya nahi",
-      "privacyBody": "Aap peshraft reportein aur mutalie ki sargarmi dekh sakte hain. Aap apne bache ki tuition guftagu ka mawad nahi parh sakte — wo bah lihaz-e-design un ke liye niji rehti hai."
+      "privacyBody": "Aap peshraft reportein aur mutalie ki sargarmi dekh sakte hain. Aap apne bache ki tuition guftagu ka mawad nahi parh sakte — wo bah lihaz-e-design un ke liye niji rehti hai.",
+      "provisioningTitle": "Accounts ki farahmi",
+      "provisioningBody": "Poore platform par accounts, kirdar aur idara jaati rasai.",
+      "curriculumAdminTitle": "Nisaab ki taazgi",
+      "curriculumAdminBody": "Boards, jamaatein aur mazameen, aur mansalik nisaab kitna taaza hai.",
+      "securityTitle": "Security ki soorat-e-haal",
+      "securityBody": "Agent software bill of materials, model janch ke record aur khule masail.",
+      "quotasTitle": "Quotas",
+      "quotasBody": "Har account aur har idare ki istemal ki hudood, aur kaun un ke qareeb hai.",
+      "endpointLogsTitle": "Rozana endpoint rasai logs",
+      "endpointLogsBody": "Kin endpoints ko, kitne accounts ne aur kitni baar istemal kiya. Sirf metadata.",
+      "adminPrivacyTitle": "Admin kya nahi dekh sakta",
+      "adminPrivacyBody": "Aap audit record, rasai logs aur istemal ka metadata dekh sakte hain. Aap kisi bhi tuition guftagu ka mawad nahi parh sakte — bah lihaz-e-design admin ke liye us tak koi raasta mojood hi nahi."
     }
   },
   "plan": {

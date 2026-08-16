@@ -96,14 +96,23 @@ The arithmetic from statements to objects:
 > every audit and request-log write, while production is fine. That is the worst shape a divergence
 > can take: it cannot be reproduced anywhere the migrations are the source of truth.
 >
-> **Not fixed here.** Authoring the reconciling migration is Phase 2 work, and it must be written
-> from what is live rather than from what someone assumes was intended. It is also the concrete
-> answer to the open question of whether the eleven migrations replay from zero into the deployed
-> schema: **they do not.**
+> **FIXED, phase 1b (2026-08-16)** — `20260816130000_reconcile_default_partition_policies.sql`.
+> Written from `pg_policy` rather than from what someone assumes was intended, and dry-run first:
+> the four policies it creates were proved byte-identical to the live ones (command, `USING`,
+> `WITH CHECK` and roles) before it was applied, so against production it is a no-op. Its value is
+> that a database rebuilt from the migrations alone now gets them.
+>
+> It deliberately copies `WITH CHECK (true)` **including its weakness** — that is finding B15 on the
+> parent tables. Phase 2 tightens parent and partition together; reconciling and redesigning in one
+> file would make it impossible to tell which change caused what.
+>
+> This was also the concrete answer to whether the migrations replay from zero into the deployed
+> schema: **they did not, by exactly four policies.** Tables, views, `app.*` functions, triggers and
+> enum types showed zero divergence when live object names were diffed against the migration corpus.
 >
 > `tests/integration/test_rls.py::TestPartitionDirectAccessDenied` still passes, and its docstring
-> is now inaccurate — it says the partitions were left "with no policies", which was true of the
-> migration and is not true of the database.
+> is still inaccurate — it says the partitions were left "with no policies", which was true of the
+> migration corpus before `20260816130000` and was never true of the database.
 
 Scaffolded-only directories, named honestly: `ml/`, `mcp-servers/`, `infra/` and
 `backend/app/workers/` contain **`.gitkeep` files only** (`mcp-servers/` and `infra/` additionally
@@ -490,7 +499,7 @@ carry `updated_at` columns with **no** trigger attached — finding D14.
 
 | Function | Volatility | Definer? | Returns | Called from | Grant | Defined at |
 |---|---|---|---|---|---|---|
-| `app.lookup_user_for_login(p_email text)` | `STABLE` | Yes | `TABLE(id, password_hash, status, email_verified_at)` — deliberately not `SELECT *` | `backend/app/auth/service.py:294` (`login`, `:272`) → `POST /auth/login` (`routes.py:101`) | `app_backend` | `20260802140000:115` |
+| `app.lookup_user_for_login(p_email text)` | `STABLE` | Yes | `TABLE(id, password_hash, status, email_verified_at, role)` — deliberately not `SELECT *`. **`role` was added by `20260816140000`** so `login()` can decide which of the two sign-in endpoints an account may use (FR-A2a) inside the query it was already making, rather than as a second round trip on the hot login path | `backend/app/auth/service.py:305-313` (`login`, `:278`) → `POST /auth/login` (`routes.py:104`) and `POST /auth/admin/login` (`routes.py:115`) | `app_backend` | `20260816140000:57` (originally `20260802140000:115`) |
 | `app.lookup_2fa_for_login(p_user_id uuid)` | `STABLE` | Yes | `TABLE(method, status, locked_until)` — no secret, no counter | `service.py:324` (`login`) → `POST /auth/login` | `app_backend` | `20260803180000:36` |
 | `app.lookup_refresh_token(p_token_hash text)` | `STABLE` | Yes | `TABLE(id, user_id, kind, revoked, expires_at)`; takes a hash, never a plaintext token | `backend/app/auth/tokens.py:80` (`find_token`, `:76`) → `POST /auth/refresh` (`routes.py:109`) | `app_backend` | `20260802140000:133` |
 | `app.insert_auth_token(p_user_id uuid, p_kind token_kind, p_token_hash text, p_expires_at timestamptz)` | `VOLATILE` | Yes | `uuid` | `tokens.py:54` (`_insert_token`, `:50`) — every token-issuing path | `app_backend` | `20260802140000:182` |

@@ -92,4 +92,30 @@ describe('the map itself', () => {
       expect(item.href, item.key).toMatch(/^\/(dashboard|teacher|parent|admin|coming-soon\/)/)
     }
   })
+
+  it('points every coming-soon link at a slug that is actually prerendered', async () => {
+    /*
+      THE GAP THE TEST ABOVE LEAVES. A regex on the prefix accepts
+      `/coming-soon/anything`, so adding a nav entry without appending its slug
+      to the page's SLUGS list passes it and then 404s in the browser — the
+      runtime membership check at `[slug]/page.tsx` calls `notFound()` on
+      anything absent. Two of the four administrator entries added in phase 1b
+      needed new slugs, which is exactly the mistake this catches.
+
+      `generateStaticParams` is read rather than the SLUGS constant because it
+      is the module's real export, and because it is the same function Next
+      itself uses to decide what gets built. A slug that is in the list but not
+      in the prerender is equally broken.
+    */
+    const page = await import('@/app/[locale]/(site)/coming-soon/[slug]/page')
+    const prerendered = new Set(page.generateStaticParams().map((p) => p.slug))
+
+    const linked = Object.values(NAV_BY_ROLE)
+      .flat()
+      .map((i) => i.href)
+      .filter((href) => href.startsWith('/coming-soon/'))
+      .map((href) => href.slice('/coming-soon/'.length))
+
+    for (const slug of linked) expect(prerendered, slug).toContain(slug)
+  })
 })

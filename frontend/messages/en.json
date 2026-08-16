@@ -32,6 +32,10 @@
       "announcements": "Announcements",
       "myChild": "My Child",
       "howToHelp": "How to Help",
+      "curriculum": "Curriculum",
+      "security": "Security",
+      "quotas": "Quotas",
+      "endpointLogs": "Endpoint Logs",
       "settings": "Settings",
       "help": "Help Centre",
       "logout": "Log Out"
@@ -162,6 +166,16 @@
       "submitting": "Signing in…",
       "noAccount": "Don't have an account?",
       "createAccount": "Create an account"
+    },
+    "adminLogin": {
+      "title": "Administrator sign-in",
+      "subtitle": "This entrance is for platform administrators.",
+      "emailLabel": "Email Address",
+      "emailPlaceholder": "admin@example.com",
+      "passwordLabel": "Password",
+      "submit": "Sign In",
+      "submitting": "Signing in…",
+      "notice": "Administrator accounts are provisioned directly. There is no sign-up and no password reset from this page."
     },
     "turnstile": {
       "label": "Security check"
@@ -434,6 +448,11 @@
       "welcome": "Welcome, {name}",
       "subtitle": "Your child's progress, without looking over their shoulder."
     },
+    "admin": {
+      "role": "Admin Dashboard",
+      "welcome": "Welcome, {name}",
+      "subtitle": "Provisioning, curriculum currency, security posture and quotas."
+    },
     "cards": {
       "performanceTitle": "Overall performance",
       "performanceBody": "Exam readiness and syllabus coverage across your subjects.",
@@ -458,7 +477,19 @@
       "howToHelpTitle": "How to help",
       "howToHelpBody": "Practical suggestions based on where your child is finding things hard.",
       "privacyTitle": "What you can and cannot see",
-      "privacyBody": "You can see progress reports and study activity. You cannot read the content of your child’s tutoring conversations — those stay private to them, by design."
+      "privacyBody": "You can see progress reports and study activity. You cannot read the content of your child’s tutoring conversations — those stay private to them, by design.",
+      "provisioningTitle": "Provisioning",
+      "provisioningBody": "Accounts, roles and institutional access across the platform.",
+      "curriculumAdminTitle": "Curriculum currency",
+      "curriculumAdminBody": "Boards, classes and subjects, and how current the mapped syllabus is.",
+      "securityTitle": "Security posture",
+      "securityBody": "Agent software bill of materials, model vetting records and open findings.",
+      "quotasTitle": "Quotas",
+      "quotasBody": "Usage limits per account and per institution, and who is close to them.",
+      "endpointLogsTitle": "Daily endpoint access logs",
+      "endpointLogsBody": "Which endpoints were called, by how many accounts, and how often. Metadata only.",
+      "adminPrivacyTitle": "What an administrator cannot see",
+      "adminPrivacyBody": "You can see audit records, access logs and usage metadata. You cannot read the content of any tutoring conversation — no administrator path to it exists, by design."
     }
   },
   "plan": {

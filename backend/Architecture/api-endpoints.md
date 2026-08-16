@@ -21,16 +21,16 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **17** | `grep -c "^@router\." backend/app/auth/routes.py` |
+| Implemented routes | **18** | `grep -c "^@router\." backend/app/auth/routes.py` |
 | Routers in the backend | **1** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Specified in `tdd.md` §3.1 | 22 | rows at `tdd.md:173-194` |
+| Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
-| **Total specified** | **48** | 22 + 3 + 6 + 6 + 11 |
-| **Specified but missing** | **31** | 48 − 17 — enumerated in §4 below |
+| **Total specified** | **49** | 23 + 3 + 6 + 6 + 11 |
+| **Specified but missing** | **31** | 49 − 18 — enumerated in §4 below. Unchanged: phase 1b added one specified endpoint AND implemented it in the same change |
 
-**All 17 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
+**All 18 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
 router. `GET /health` (`backend/app/main.py:86`) is defined on the application object rather than the
-router, sits outside `/api`, and is not one of the 48 — `tdd.md` does not specify it.
+router, sits outside `/api`, and is not one of the 49 — `tdd.md` does not specify it.
 
 Everything is mounted under `settings.api_base_path`, default `/api` (`app/main.py:84`,
 `app/core/config.py:36`).
@@ -50,38 +50,67 @@ in [architecture.md §2.4](architecture.md#24-rate-limiter--appcoreratelimitpy11
 
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `GET /api/reference/enums` | `enums_endpoint` `routes.py:154` | `enums` `service.py:208` | `EnumsResponse` `schemas.py:114` | none | **none** | §3.1 row `tdd.md:173` |
+| `GET /api/reference/enums` | `enums_endpoint` `routes.py:175` | `enums` `service.py:214` | `EnumsResponse` `schemas.py:114` | none | **none** | §3.1 row `tdd.md:173` |
 
-`groups_by_class` is **derived** from the seeded `subject_group` table (`service.py:222-239`), not
+`groups_by_class` is **derived** from the seeded `subject_group` table (`service.py:238-250`), not
 hardcoded — a literal here would let the seed and the API drift apart silently. Readable as
 `app_backend` only because migration `20260802140000` gave the reference tables a `SELECT` policy;
 before that they were deny-all, which is why this endpoint once needed a privileged connection
-(`routes.py:155-157`).
+(`routes.py:176-178`).
 
 ### 2.2 Registration and session
 
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/auth/register` | `register_endpoint` `routes.py:93` | `register` `service.py:98` | `RegisterRequest` `schemas.py:35` → `RegisterResponse` `schemas.py:97` | none | `register` | §3.1 row `tdd.md:174` |
-| `POST /api/auth/login` | `login_endpoint` `routes.py:102` | `login` `service.py:272` | `LoginRequest` `schemas.py:122` → `LoginResponse` union `schemas.py:148` | none | `login` | §3.1 row `tdd.md:175` |
-| `POST /api/auth/refresh` | `refresh_endpoint` `routes.py:110` | `refresh` `service.py:374` | refresh cookie → `AccessTokenResponse` `schemas.py:151` | refresh cookie | `refresh` | §3.1 row `tdd.md:186` |
-| `POST /api/auth/logout` | `logout_endpoint` `routes.py:143` | `logout` `service.py:406` | — (204) | `authenticated` | **none** | §3.1 row `tdd.md:187` |
-| `GET /api/auth/me` | `me_endpoint` `routes.py:149` | `me` `service.py:487` | `MeResponse` `schemas.py:218` | `authenticated` | **none** | §3.1 row `tdd.md:191` |
+| `POST /api/auth/register` | `register_endpoint` `routes.py:95` | `register` `service.py:98` | `RegisterRequest` `schemas.py:35` → `RegisterResponse` `schemas.py:97` | none | `register` | §3.1 row `tdd.md:174` |
+| `POST /api/auth/login` | `login_endpoint` `routes.py:104` | `login` `service.py:278` | `LoginRequest` `schemas.py:126` → `LoginResponse` union `schemas.py:152` | none | `login` | §3.1 row `tdd.md:175` |
+| `POST /api/auth/admin/login` | `admin_login_endpoint` `routes.py:115` | `login` `service.py:278` with `admin_portal=True` | same `LoginRequest` → `LoginResponse` | none | `admin_login` | §3.1 row `tdd.md:176` |
+| `POST /api/auth/refresh` | `refresh_endpoint` `routes.py:138` | `refresh` `service.py:412` | refresh cookie → `AccessTokenResponse` `schemas.py:151` | refresh cookie | `refresh` | §3.1 row `tdd.md:186` |
+| `POST /api/auth/logout` | `logout_endpoint` `routes.py:157` | `logout` `service.py:444` | — (204) | `authenticated` | **none** | §3.1 row `tdd.md:187` |
+| `GET /api/auth/me` | `me_endpoint` `routes.py:170` | `me` `service.py:525` | `MeResponse` `schemas.py:218` | `authenticated` | **none** | §3.1 row `tdd.md:191` |
 
 **`register` issues no session.** It returns `onboarding_state: "email_verification_pending"`
-(`service.py:204`) and queues the verification email (`service.py:194-198`). It binds the user id it
-is about to create *before* inserting (`service.py:120`) because every profile policy and
+(`service.py:210`) and queues the verification email (`service.py:200-204`). It binds the user id it
+is about to create *before* inserting (`service.py:126`) because every profile policy and
 `subscription_owner` are `WITH CHECK (user_id = app.current_user_id())`.
 
 **`login` never returns a session either.** A correct password produces `200` with a `status`
 discriminator naming the next step — one of three response shapes
 (`EmailVerificationRequired` `schemas.py:130`, `TwoFactorEnrollmentRequired` `schemas.py:135`,
 `TwoFactorRequired` `schemas.py:141`). A *wrong* password is `401 UNAUTHENTICATED`
-(`service.py:305`, `:307`, `:309` — all three the same message, deliberately).
+(`service.py:320`, `:322`, `:324` — all three the same message, deliberately).
+
+**`login` serves BOTH endpoints, and `admin_portal` is the only difference.** One function, not a
+copy: the constant-time dummy-hash branch, the lockout ladder and the three response branches are
+the whole security argument of this path, and a second copy would drift from them. The rule is
+written as one exclusive-or (`service.py:346`) so it cannot be half-changed — an administrator is
+refused at `/auth/login`, and everyone else is refused at `/auth/admin/login`.
+
+> ⚠️ **BOTH REFUSALS ARE THE SAME 401 AS A WRONG PASSWORD**, with the same code and the same
+> message, and the argon2 verify has already run in either case so the timing matches too. A `403`
+> — or any distinguishable answer — would turn the public login form into an
+> **administrator-enumeration oracle**: submit an address, read the status code. `tdd.md` §6.11
+> forbids revealing an account fact "by body, status code, OR TIMING". Covered by
+> `tests/unit/test_admin_login_gate.py`, which asserts the whole envelope against the
+> wrong-password refusal captured from the same code path rather than asserting `== 401`.
+
+> ⚠️ **THE UNLISTED URL IS NOT THE CONTROL.** `/api/auth/admin/login` is reached from a page the
+> frontend serves at a server-only secret path (`ADMIN_LOGIN_PATH`, rewritten in `proxy.ts`). That
+> keeps the entrance off the public site and nothing more; the role check above is the lock, and it
+> holds whether or not the path is known.
+
+**Its own rate-limit bucket** (`admin_login`, 5 per 5 minutes — `core/ratelimit.py`). Sharing
+`login`'s would let anyone lock every administrator out of the product by hammering the public
+form until the shared counter was exhausted.
+
+**The continuations are deliberately SHARED.** `/auth/2fa/verify`, `/auth/2fa/resend`,
+`/auth/refresh` and `/auth/logout` are not segregated: the challenge token the admin endpoint
+issues is already bound to that user, so admin-only copies would add no security and would fork a
+flow that is currently tested once.
 
 **`refresh` rotates.** The new token goes **only** into the httpOnly, path-scoped
-`refresh_token` cookie (`routes.py:119-132`) and is deliberately absent from the response body
-(`routes.py:133-139`) so it cannot reach a log or a client store. Cookie `path` is
+`refresh_token` cookie (`routes.py:146`) and is deliberately absent from the response body
+(`routes.py:149-153`) so it cannot reach a log or a client store. Cookie `path` is
 `/api/auth/refresh`, so it is not attached to every call.
 
 > **A1 — FIXED, Phase 1 (2026-08-16).** `RegisterRequest.role` was an unrestricted `UserRole`, so
@@ -112,16 +141,16 @@ discriminator naming the next step — one of three response shapes
 
 | Route | Handler | Service | Models | Credential | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/auth/2fa/enroll` | `two_factor_enroll_endpoint` `routes.py:167` | `two_factor_enroll` `service.py:688` | `TwoFactorEnrollRequest` `schemas.py:249` → `TwoFactorEnrollResponse` union `schemas.py:267` | `enrollment_token` **in body** | `2fa_enroll` + per-account `service.py:720` | §3.1 row `tdd.md:180` |
-| `POST /api/auth/2fa/confirm` | `two_factor_confirm_endpoint` `routes.py:177` | `two_factor_confirm` `service.py:773` | `TwoFactorConfirmRequest` `schemas.py:270` → `TwoFactorConfirmResponse` `schemas.py:275` | `enrollment_token` **in body** | `2fa_confirm` + per-account `service.py:802` | §3.1 row `tdd.md:181` |
-| `POST /api/auth/2fa/verify` | `two_factor_verify_endpoint` `routes.py:209` | `two_factor_verify` `service.py:887` | `TwoFactorVerifyRequest` `schemas.py:286` → `TwoFactorVerifyResponse` `schemas.py:292` | `pending_token` **in body** | `2fa_verify` + per-account `service.py:923` | §3.1 row `tdd.md:182` |
-| `POST /api/auth/2fa/resend` | `two_factor_resend_endpoint` `routes.py:240` | `two_factor_resend` `service.py:1017` | `TwoFactorResendRequest` `schemas.py:299` → `TwoFactorResendResponse` `schemas.py:303` | `pending_token` **in body** | `2fa_resend` + per-account `service.py:1042` | §3.1 row `tdd.md:183` |
+| `POST /api/auth/2fa/enroll` | `two_factor_enroll_endpoint` `routes.py:188` | `two_factor_enroll` `service.py:726` | `TwoFactorEnrollRequest` `schemas.py:249` → `TwoFactorEnrollResponse` union `schemas.py:267` | `enrollment_token` **in body** | `2fa_enroll` + per-account `service.py:720` | §3.1 row `tdd.md:180` |
+| `POST /api/auth/2fa/confirm` | `two_factor_confirm_endpoint` `routes.py:198` | `two_factor_confirm` `service.py:831` | `TwoFactorConfirmRequest` `schemas.py:270` → `TwoFactorConfirmResponse` `schemas.py:275` | `enrollment_token` **in body** | `2fa_confirm` + per-account `service.py:802` | §3.1 row `tdd.md:181` |
+| `POST /api/auth/2fa/verify` | `two_factor_verify_endpoint` `routes.py:222` | `two_factor_verify` `service.py:945` | `TwoFactorVerifyRequest` `schemas.py:286` → `TwoFactorVerifyResponse` `schemas.py:292` | `pending_token` **in body** | `2fa_verify` + per-account `service.py:923` | §3.1 row `tdd.md:182` |
+| `POST /api/auth/2fa/resend` | `two_factor_resend_endpoint` `routes.py:245` | `two_factor_resend` `service.py:1075` | `TwoFactorResendRequest` `schemas.py:299` → `TwoFactorResendResponse` `schemas.py:303` | `pending_token` **in body** | `2fa_resend` + per-account `service.py:1042` | §3.1 row `tdd.md:183` |
 
 Short-lived, single-purpose tokens travel **in the request body**, not in an `Authorization` header
 — one convention, with the header reserved for real sessions (`tdd.md:227`).
 
-`/2fa/confirm` and `/2fa/verify` both set the refresh cookie (`routes.py:188`, `routes.py:220`) and
-strip `refresh_token` from the response model (`routes.py:199-205`, `routes.py:231-236`).
+`/2fa/confirm` and `/2fa/verify` both set the refresh cookie (`routes.py:209`, `routes.py:233`) and
+strip `refresh_token` from the response model (`routes.py:212-216`, `routes.py:236-241`).
 
 `/2fa/verify` accepts three `type` values (`schemas.py:289`): `totp` (`service.py:942-951`),
 `email_otp` (`service.py:953-967`) and `backup_code` (`service.py:969-986`). Backup codes are
@@ -139,10 +168,10 @@ argon2id-hashed, so verification must iterate the unused hashes rather than look
 
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/auth/email/verify` | `email_verify_endpoint` `routes.py:251` | `verify_email` `service.py:1086` | `EmailVerifyRequest` `schemas.py:311` → `EmailVerifyResponse` `schemas.py:315` | `email_verify` token in body | `email_verify` | §3.1 row `tdd.md:176` |
-| `POST /api/auth/email/resend` | `email_resend_endpoint` `routes.py:262` | `resend_email_verification` `service.py:1134` | `EmailResendRequest` `schemas.py:323` → 204 | none | `email_resend` | §3.1 row `tdd.md:177` |
-| `POST /api/auth/password/forgot` | `password_forgot_endpoint` `routes.py:272` | `forgot_password` `service.py:1155` | `PasswordForgotRequest` `schemas.py:330` → 204 | none | `password_forgot` | §3.1 row `tdd.md:178` |
-| `POST /api/auth/password/reset` | `password_reset_endpoint` `routes.py:282` | `reset_password` `service.py:1181` | `PasswordResetRequest` `schemas.py:334` → 204 | `password_reset` token in body | `password_reset` | §3.1 row `tdd.md:179` |
+| `POST /api/auth/email/verify` | `email_verify_endpoint` `routes.py:256` | `verify_email` `service.py:1144` | `EmailVerifyRequest` `schemas.py:311` → `EmailVerifyResponse` `schemas.py:315` | `email_verify` token in body | `email_verify` | §3.1 row `tdd.md:176` |
+| `POST /api/auth/email/resend` | `email_resend_endpoint` `routes.py:267` | `resend_email_verification` `service.py:1192` | `EmailResendRequest` `schemas.py:323` → 204 | none | `email_resend` | §3.1 row `tdd.md:177` |
+| `POST /api/auth/password/forgot` | `password_forgot_endpoint` `routes.py:277` | `forgot_password` `service.py:1213` | `PasswordForgotRequest` `schemas.py:330` → 204 | none | `password_forgot` | §3.1 row `tdd.md:178` |
+| `POST /api/auth/password/reset` | `password_reset_endpoint` `routes.py:287` | `reset_password` `service.py:1239` | `PasswordResetRequest` `schemas.py:334` → 204 | `password_reset` token in body | `password_reset` | §3.1 row `tdd.md:179` |
 
 `/email/verify` returns an **onboarding-scoped** access token (`service.py:1111-1114`), not a
 session token. `decode_access_token`'s default requires `type == "access"`
@@ -170,15 +199,15 @@ lapsed **unused**, `400 INVALID_TOKEN` for one already spent.
 ### 2.5 Guardian gate
 
 All three are **role-gated, not guardian-gated** — a gated student must be able to reach them
-(`routes.py:292-299`). Invite and status are student-only; confirm is parent-only, so a student can
+(`routes.py:311`, `routes.py:325`, `routes.py:340`). Invite and status are student-only; confirm is parent-only, so a student can
 never confirm their own gate through the API. All three pass `subject=` to the limiter so the bucket
 is per-user rather than per-address.
 
 | Route | Handler | Service | Models | Role | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/auth/guardian/invite` | `guardian_invite_endpoint` `routes.py:303` | `guardian_invite` `service.py:1210` | `GuardianInviteRequest` `schemas.py:184` → `GuardianInviteResponse` `schemas.py:188` | `student` `routes.py:306` | `guardian_invite` (per user) | §3.1 row `tdd.md:188` |
-| `GET /api/auth/guardian/status` | `guardian_status_endpoint` `routes.py:318` | `guardian_status` `service.py:1292` | `GuardianStatusResponse` `schemas.py:211` | `student` `routes.py:320` | `guardian_status` (per user) | §3.1 row `tdd.md:190` |
-| `POST /api/auth/guardian/confirm` | `guardian_confirm_endpoint` `routes.py:332` | `guardian_confirm` `service.py:1344` | `GuardianConfirmRequest` `schemas.py:194` → `GuardianConfirmResponse` `schemas.py:200` | `parent` `routes.py:335` | `guardian_confirm` (per user) | §3.1 row `tdd.md:189` |
+| `POST /api/auth/guardian/invite` | `guardian_invite_endpoint` `routes.py:308` | `guardian_invite` `service.py:1268` | `GuardianInviteRequest` `schemas.py:184` → `GuardianInviteResponse` `schemas.py:188` | `student` `routes.py:311` | `guardian_invite` (per user) | §3.1 row `tdd.md:188` |
+| `GET /api/auth/guardian/status` | `guardian_status_endpoint` `routes.py:323` | `guardian_status` `service.py:1350` | `GuardianStatusResponse` `schemas.py:211` | `student` `routes.py:325` | `guardian_status` (per user) | §3.1 row `tdd.md:190` |
+| `POST /api/auth/guardian/confirm` | `guardian_confirm_endpoint` `routes.py:337` | `guardian_confirm` `service.py:1402` | `GuardianConfirmRequest` `schemas.py:194` → `GuardianConfirmResponse` `schemas.py:200` | `parent` `routes.py:340` | `guardian_confirm` (per user) | §3.1 row `tdd.md:189` |
 
 `guardian_invite` requires the parent's account to **exist** — a missing, inactive or non-parent
 account is `422 GUARDIAN_NOT_FOUND` (`service.py:1238-1239`), which the gate screen must render as a
@@ -238,7 +267,7 @@ endpoint, and that an authorization-matrix test asserts it on each such route. T
 
 This is the honest build-state record. Each row cites the `tdd.md` line that specifies it. **None of
 these paths exists in `backend/app/`** — verified by `grep -rn "@router\." backend/app`, which returns
-17 decorators, all listed in §2.
+18 decorators, all listed in §2.
 
 ### 4.1 Auth and account management — 5 missing (of 22 in §3.1)
 
@@ -255,9 +284,16 @@ the phase plan: the **column grants must be narrowed first** (finding B2/B3), be
 table-wide grants and `app_user_self_update` permitting `role`, `PATCH /auth/me` would be a privilege
 escalation and password change would have no correct write path.
 
-There is also no reachable administrator surface at all: finding **A6** records that three frontend
-call sites route to `/admin`, which does not exist, so an `admin` account loops on "Redirecting…"
-forever. Row 2 above is the only administrator endpoint in §3.1, and it is missing.
+> **A6 — FIXED, phase 1b (2026-08-16).** Three frontend call sites routed an `admin` account to
+> `/admin`, which did not exist, so the account looped on "Redirecting…" for ever. The page is now
+> built, and administrators sign in at `POST /api/auth/admin/login` through an unlisted path rather
+> than the public form (FR-A2a).
+>
+> **The surface is still a shell**, and that is the honest state: none of the eight `/api/admin/*`
+> endpoints in §3.1 and §7.2 exists, so the dashboard names its five FR-K1 duties and says plainly
+> that each is not available yet — the same rule the teacher and parent dashboards follow. What is
+> real is the role boundary and the segregated authentication, which are the parts with security
+> consequences. Row 2 below is still missing.
 
 ### 4.2 Tutor — 3 missing (§3.2, incorporated into §7.2)
 
@@ -360,7 +396,7 @@ The sixteen codes that **do** have factories are listed in
   (`app/core/errors.py:152`) so a bug report can be tied to a log line.
 - **Rate limiting is opt-in per handler**, called as the first statement. Note that `logout` and
   `me` — the two authenticated routes outside the guardian group — have **no** `enforce(...)` call
-  (`routes.py:143`, `routes.py:149`).
+  (`routes.py:157`, `routes.py:165`).
 - **Every response model is explicit.** No handler returns a bare `dict`; the response model is what
   strips `refresh_token` out of the 2FA and refresh responses.
 
@@ -390,6 +426,6 @@ grep -n "^| \(GET\|POST\|PUT\|PATCH\|DELETE\) " tdd.md     # 47 rows; :1038 is t
 
 ---
 
-*Snapshot 2026-08-15. Implemented and specified are kept deliberately distinct: 17 of 48. Known
+*Snapshot 2026-08-15. Implemented and specified are kept deliberately distinct: 18 of 49. Known
 defects are recorded here rather than deferred until fixed — see the Phase 0 findings register for
 the full 35.*

@@ -275,7 +275,7 @@ def _dummy_password_hash() -> str:
     return hash_password("edubridge-dummy-password-for-constant-time-login")
 
 
-def login(db: Session, payload: LoginRequest) -> dict:
+def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> dict:
     """
     A CORRECT password never returns a session — it returns 200 with a `status`
     discriminator saying which step comes next (tdd.md §3.1). Only a WRONG
@@ -285,6 +285,15 @@ def login(db: Session, payload: LoginRequest) -> dict:
     This runs pre-authentication, so the lookup goes through the narrow
     SECURITY DEFINER function rather than an RLS-bypassing connection: there is
     no `app.current_user_id()` yet to satisfy `app_user_self_read` with.
+
+    `admin_portal` selects WHICH SET OF ROLES may authenticate here, and it is
+    the only difference between the two login endpoints (prd.md FR-A2a). ONE
+    function, deliberately, rather than a second copy for administrators: the
+    constant-time dummy-hash branch, the lockout ladder, the e-mail-verification
+    branch and the two challenge-token branches below are the whole security
+    argument of this path, and a copy would drift from them. That is the same
+    reasoning that produced `onboarding_state_for` after the state machine had
+    been reimplemented four times.
     """
     # 1) CAPTCHA, FIRST — before the lookup and before the dummy-hash branch,
     #    so the captcha is a constant cost for every account and never tells
@@ -296,7 +305,7 @@ def login(db: Session, payload: LoginRequest) -> dict:
     row = (
         db.execute(
             text(
-                "SELECT id, password_hash, status, email_verified_at "
+                "SELECT id, password_hash, status, email_verified_at, role "
                 "FROM app.lookup_user_for_login(:email)"
             ),
             {"email": str(payload.email).lower()},
@@ -312,6 +321,29 @@ def login(db: Session, payload: LoginRequest) -> dict:
     if not verify_password(payload.password, row["password_hash"]):
         raise unauthenticated("Incorrect email or password.")
     if str(row["status"]) != "active":
+        raise unauthenticated("Incorrect email or password.")
+
+    # WHICH DOOR THIS ACCOUNT MAY USE (prd.md FR-A2a). Administrators do not
+    # authenticate at the public endpoint, and nobody else authenticates at the
+    # administrator one.
+    #
+    # THE SAME 401, WITH THE SAME BODY, AS A WRONG PASSWORD — deliberately, and
+    # this is the whole point of the check rather than an implementation detail.
+    # A distinguishable answer (403, or any different message) would turn the
+    # public login form into an administrator-enumeration oracle: submit an
+    # address, read the status code, learn whether it is an admin account. That
+    # is the enumeration-resistance rule in tdd.md §6.11, which forbids
+    # revealing account facts "by body, status code, OR TIMING" — and the timing
+    # side holds too, because the argon2 verify above has already run either way.
+    #
+    # ⚠️ THE UNLISTED URL IS NOT WHAT ENFORCES THIS. The path is an unlisted
+    #    door; these two lines are the lock. Anyone who learns the path still
+    #    cannot sign in without administrator credentials, and anyone who has
+    #    administrator credentials still cannot use them at /auth/login.
+    #
+    # Written as one exclusive-or rather than two `if`s so the rule cannot be
+    # half-changed: the endpoint and the role must agree, in both directions.
+    if (str(row["role"]) == "admin") != admin_portal:
         raise unauthenticated("Incorrect email or password.")
 
     user_id = row["id"]

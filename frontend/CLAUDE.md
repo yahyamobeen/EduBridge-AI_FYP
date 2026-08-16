@@ -9,9 +9,9 @@ Snapshot: **2026-08-15**.
 
 ## 1. What this is
 
-Next.js App Router, React, TypeScript, Tailwind. **20 pages** across three route groups —
-`(site)`, `(auth)`, `(app)` — and **22 test files** (Vitest). Three locales: `en`, `ur`,
-`ur-Latn`, each exactly 398 leaf keys.
+Next.js App Router, React, TypeScript, Tailwind. **22 pages** across three route groups —
+`(site)`, `(auth)`, `(app)` — and **24 test files** (Vitest). Three locales: `en`, `ur`,
+`ur-Latn`, each exactly 426 leaf keys, in identical order.
 
 This application is the interface and nothing else. The data model, the endpoint catalogue and the
 authorization rules live in the backend documentation:
@@ -101,18 +101,37 @@ physical class (`ml-`, `pr-`, `left-0`, `text-left`) because Urdu renders right-
 
 **The web locale is not the API language enum.** `toApiLanguage` maps `ur-Latn` → `roman_ur`.
 
-## 4. Mock versus live
+## 4. Live data always — there is no mock layer
 
-`lib/api/client.ts` selects the mock when `NEXT_PUBLIC_API_MODE === 'mock'`, **or** when the
-variable is unset and `NODE_ENV !== 'production'`. `next build` sets `NODE_ENV=production`, so the
-mock is dead-code-eliminated from any production build unless the flag is explicitly set.
+**Deleted in phase 1b (2026-08-16).** `lib/api/mock/` is gone, along with
+`NEXT_PUBLIC_API_MODE`. Do not reintroduce either.
 
-⚠️ **`.env.example` currently ships `NEXT_PUBLIC_API_MODE=mock`** under a documented
-`cp .env.example .env.local` instruction. Follow it, then build for a demo, and you ship a bundle
-with working seeded credentials where a URL alone mints a session. Recorded as finding C4.
+What it was: an in-memory router serving 18 endpoints from eight seeded accounts that all shared the
+password `Password123`, plus magic strings — `verify-<user-id>` **minted a session from a URL with
+no password**, `123456` passed any two-factor challenge, `BKUP0000` was a working backup code. It was
+the **default** whenever `NODE_ENV` was not `production`, and `API_MODE === 'mock'` was tested
+*before* `NODE_ENV`, so an explicit flag shipped those credentials out of a production build.
 
-The mock layer mirrors the real contract on purpose — a drift is a **type error** rather than a
-runtime surprise found during integration. Keep it that way when adding an endpoint.
+### You need a backend running
+
+`NEXT_PUBLIC_API_BASE_URL` is now **required** — local (`http://localhost:8000/api`) or the deployed
+service. Pages that load data will not work without one, and signup fails first, because
+`(site)/signup/student/page.tsx` fetches reference data during server rendering.
+
+⚠️ **`NEXT_PUBLIC_*` is inlined at build time. Restart `next dev` after changing it.**
+
+### The empty base URL is load-bearing in the browser
+
+`client.ts` falls back to `''` so requests go out relative and are rewritten by `next.config.mjs`,
+which is what keeps the refresh cookie same-site (§3). **Do not replace it with an absolute URL.**
+On the *server* there is no origin to be relative to, so `resolve()` throws a named error telling you
+which variable to set — the mock layer used to hide that failure by defaulting on.
+
+### When adding an endpoint
+
+Add the types to `lib/api/types.ts` and the wrapper to `lib/api/endpoints.ts`. Tests stub
+`globalThis.fetch` and exercise the real transport — see `lib/api/client.test.ts`. There is no second
+implementation of the contract to keep in step any more, which was the point.
 
 ## 5. Testing
 
@@ -133,7 +152,25 @@ reported there rather than thrown.
 ## 6. Known defects
 
 Recorded rather than hidden — see
-[`Architecture/architecture.md`](Architecture/architecture.md) for detail. The `admin` role routes
-to `/admin`, which does not exist, and the navigation test allow-lists it so the breakage cannot
-fail. The backup-code download can silently produce no file. Sign-out no-ops on a network failure.
-`VerifyEmail` reproduces the React StrictMode deadlock `SessionGuard` documents having fixed.
+[`Architecture/architecture.md`](Architecture/architecture.md) for detail. `VerifyEmail` reproduces
+the React StrictMode deadlock `SessionGuard` documents having fixed. An unvalidated
+`onboarding_state` reaches `router.replace(undefined)`. `error.tsx` logs the error object it refuses
+to render.
+
+**Fixed and recorded so nobody re-audits:** the `admin` role routing to a page that did not exist
+(phase 1b built it), the backup-code download silently producing no file, and sign-out no-opping on
+a network failure (both phase 1).
+
+## 7. Administrators do not use the public identity surface
+
+`admin` is not accepted by `POST /auth/register` and not accepted by `POST /auth/login` either.
+Administrators sign in at `POST /auth/admin/login`, reached through a page the middleware serves at
+a server-only unlisted path (`ADMIN_LOGIN_PATH` — **never** `NEXT_PUBLIC_`, which would publish it).
+
+**Both refusals are a 401 identical to a wrong password.** Not a 403: a distinguishable answer would
+let anyone submit an address to the public form and read the status code to learn whether it belongs
+to an administrator.
+
+⚠️ **The unlisted path is not a security control**, any more than `SessionGuard` is. The endpoint's
+role check is. `proxy.ts` also 404s the ordinary `/admin-login` route so it is not a second door —
+read `proxy.test.ts` before touching that file, because it routes every page on the site.

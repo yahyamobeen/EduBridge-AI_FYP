@@ -30,11 +30,11 @@ documents on the right **in the same change** and append to [`HISTORY.md`](HISTO
 | `frontend/app/**/page.tsx`, layouts | `frontend/Architecture/architecture.md` **and** `.html` | Route group, what the layout renders, and the page count. |
 | `frontend/lib/auth/navigation.ts` | `frontend/Architecture/architecture.*` | This is a Role-Based Access Control boundary, not styling. Any new item needs its role list checked. |
 | `frontend/lib/auth/onboarding.ts` | `frontend/Architecture/architecture.*` | The state → route table is documented; it is the only routing input. |
-| `frontend/lib/api/client.ts`, `endpoints.ts`, `types.ts` | `frontend/Architecture/architecture.*`; `backend/Architecture/api-endpoints.md` if the contract shifts | Mock-versus-live condition, refresh behaviour, retry allow-list. The types mirror `tdd.md` §3.1. |
-| `frontend/lib/api/mock/*` | `frontend/Architecture/architecture.*` | The mock must mirror the real contract; a drift here is a type error rather than a runtime surprise, and that is the point. |
+| `frontend/lib/api/client.ts`, `endpoints.ts`, `types.ts` | `frontend/Architecture/architecture.*`; `backend/Architecture/api-endpoints.md` if the contract shifts | Base-URL resolution, refresh behaviour, retry allow-list. The types mirror `tdd.md` §3.1. **There is no mock layer** — it was deleted in phase 1b, so `types.ts` is the only description of a response shape in this application. |
+| `frontend/proxy.ts` | `frontend/Architecture/architecture.*` | **Routes every page on the site.** The unlisted administrator rewrite, the `/admin-login` 404, and the untouched next-intl fall-through. `proxy.test.ts` covers all three — read it first. |
 | `frontend/components/app/SessionGuard.tsx` | `frontend/Architecture/architecture.*` | The three checks and their order are documented, as is the fact that it fails closed. |
 | `frontend/next.config.mjs` | `frontend/Architecture/architecture.*` | Content Security Policy directives, the security headers, and the `/api` rewrite — all three are documented with their reasons. |
-| `frontend/messages/*.json` | — | No document to update, but all three locales must stay at the same key set. |
+| `frontend/messages/*.json` | `frontend/Architecture/architecture.*` and `README.md` if the count changes | All three locales must stay at the same key set **and the same order**. `ur.json` is Urdu in Arabic script and `ur-Latn.json` is romanised Urdu — genuinely distinct translations, never copies. |
 
 ## Cross-cutting
 

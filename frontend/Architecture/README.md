@@ -26,28 +26,28 @@ The single most load-bearing sentence in this whole folder follows from that spl
 ## At a glance
 
 - **Next.js 16 + React 19**, App Router, TypeScript, Tailwind CSS v3.
-- **20 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
-- **3 locales**: `en`, `ur`, `ur-Latn`, each with **398** leaf message keys. `ur` is the only right-to-left locale.
-- **22 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class.
+- **22 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
+- **3 locales**: `en`, `ur`, `ur-Latn`, each with **426** leaf message keys, in identical order. `ur` is the only right-to-left locale.
+- **24 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
 - Access token in **memory only**; refresh token in an `httpOnly` cookie JavaScript cannot read.
 - One transport client with proactive refresh, single-flight refresh, and an error-code allow-list for retry.
-- A **mock backend** compiled into development builds and dead-code-eliminated out of live ones.
+- **No mock layer.** It was deleted in phase 1b; `NEXT_PUBLIC_API_BASE_URL` is required and a backend must be running.
 
 ### How those numbers were measured
 
 Run from `frontend/`:
 
 ```bash
-find app -name "page.tsx" | wc -l                                   # 20
+find app -name "page.tsx" | wc -l                                   # 22
 find app -type d -name "(*)" | wc -l                                # 3
 find . -path ./node_modules -prune -o -path ./.next -prune -o \
-     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 22
+     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 24
 ls messages/                                                        # en.json  ur-Latn.json  ur.json
 node -e "const f=require('fs');const c=o=>Object.values(o).reduce((n,v)=>n+(v&&typeof v==='object'?c(v):1),0);for(const l of ['en','ur','ur-Latn'])console.log(l,c(JSON.parse(f.readFileSync('messages/'+l+'.json','utf8'))))"
-                                                                    # en 398 / ur 398 / ur-Latn 398
+                                                                    # en 426 / ur 426 / ur-Latn 426
 ```
 
-The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  22 passed (22)` · `Tests  263 passed (263)`** at this snapshot.
+The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  24 passed (24)` · `Tests  283 passed (283)`** at this snapshot.
 
 ## Known defects, recorded rather than hidden
 
@@ -55,10 +55,10 @@ Seven findings from the Epic 1 review land in this application. They are documen
 
 | # | Summary | Status |
 |---|---|---|
-| A6 | The `admin` role routes to `/admin`, which does not exist — and a test allow-lists it | **Open** — the page is built in Phase 1b. Phase 1 added the missing admin assertion to `navigation.test.ts`, which is what should have caught it: the sibling href test allow-listed `admin` while the first-item test omitted it, so neither covered the admin row |
+| A6 | The `admin` role routes to `/admin`, which does not exist — and a test allow-lists it | **Fixed** (Phase 1b) — `app/[locale]/(app)/admin/page.tsx` and `AdminDashboard` exist, and administrators now sign in at a separate endpoint reached through an unlisted path. Two nav tests covered the admin row between them and neither actually did: the first-item test omitted `admin`, the href test allow-listed it. Phase 1 added the missing assertion; Phase 1b added a third that resolves every coming-soon href against the page's own `generateStaticParams` |
 | A7 | Backup-code download can silently produce no file | **Fixed** (Phase 1) — the anchor is appended before the click and removed after, `revokeObjectURL` is deferred rather than run on the same tick, and a failure now renders `downloadFailed` in all three locales. Two bugs in four lines, on codes shown exactly once with no way back and no regenerate endpoint |
 | A8 | Sign-out no-ops on a network failure | **Fixed** (Phase 1) — `signOut` wraps `logout()` in `try`/`catch` with the redirect in `finally`. `logout()` clears the session and then **re-throws by design**, so the redirect must not depend on it resolving |
-| C4 | `.env.example` ships `NEXT_PUBLIC_API_MODE=mock` as the documented default | **Fixed** (Phase 1) — the template now defaults to `live`. Phase 1b deletes the mock layer outright, superseding this; the two are deliberately redundant so the demo hazard closes even if 1b slips |
+| C4 | `.env.example` ships `NEXT_PUBLIC_API_MODE=mock` as the documented default | **Closed permanently** (Phase 1b) — Phase 1 flipped the template to `live`; Phase 1b then deleted the entire mock layer, ~950 lines, along with the flag. The hazard is now structural rather than a matter of configuration: there is no mock to select. `NEXT_PUBLIC_API_BASE_URL` is required in its place |
 | D5 | `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing |
 | D6 | An unvalidated `onboarding_state` reaches `router.replace(undefined)` |
 | D17 | `error.tsx` logs the error object it refuses to render |
@@ -68,7 +68,7 @@ Seven findings from the Epic 1 review land in this application. They are documen
 Run from `frontend/`:
 
 ```bash
-npm test          # Vitest, 22 files
+npm test          # Vitest, 24 files
 npm run build     # includes the TypeScript check
 npm run lint      # ESLint
 npm run typecheck # tsc --noEmit

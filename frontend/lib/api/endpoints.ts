@@ -62,6 +62,22 @@ export function login(body: LoginRequest): Promise<LoginResponse> {
 }
 
 /**
+ * Segregated administrator sign-in (prd.md FR-A2a).
+ *
+ * SAME REQUEST, SAME RESPONSE, SAME BRANCHING RULE as `login` above — only the
+ * path differs, because the SERVER decides which roles may authenticate where.
+ * An administrator submitting the public form and an ordinary user submitting
+ * this one both get a 401 whose body is byte-identical to a wrong password, so
+ * neither endpoint can be used to discover which addresses are administrators.
+ *
+ * ⚠️ The unlisted URL the form is reached at is NOT the control; this endpoint
+ *    is. Do not add a role check in the browser and consider anything protected.
+ */
+export function adminLogin(body: LoginRequest): Promise<LoginResponse> {
+  return apiFetch<LoginResponse>('/auth/admin/login', { method: 'POST', body, noRetry: true })
+}
+
+/**
  * `pending_token` travels in the BODY, not as a bearer header (tdd.md §3.1).
  *
  * That also keeps it off the `bearer` path in the client, which exists for

@@ -13,11 +13,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 
 | Measure | Value | Command |
 |---|---|---|
-| Pages | **20** | `find app -name "page.tsx" \| wc -l` |
+| Pages | **22** | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **22** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **24** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **398**, identical across all three | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **426**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -111,9 +111,12 @@ Three pages, one per role that has a dashboard:
 |---|---|---|---|
 | `/dashboard` | `(app)/dashboard/page.tsx:13-17` | `StudentDashboard` | `['student']` — `components/app/Dashboards.tsx:34` |
 | `/teacher` | `(app)/teacher/page.tsx:13-17` | `TeacherDashboard` | `['teacher']` — `Dashboards.tsx:80` |
-| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:108` |
+| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:103` |
+| `/admin` | `(app)/admin/page.tsx:13-17` | `AdminDashboard` | `['admin']` — `Dashboards.tsx:145` |
 
-There is **no `/admin` page**. See defect **A6**.
+**`/admin` was built in phase 1b**, which closes defect **A6**. Administrators reach it after signing
+in at an unlisted path served by `(auth)/admin-login/page.tsx` — see *The unlisted administrator
+login* below.
 
 The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
 
@@ -208,7 +211,7 @@ And `dashboardFor` (`:13-22`):
 | `student` | `/dashboard` |
 | `teacher` | `/teacher` |
 | `parent` | `/parent` |
-| `admin` | `/admin` — **does not exist**, see **A6** |
+| `admin` | `/admin` |
 
 Three functions read that table:
 
@@ -254,30 +257,47 @@ Three decisions it encodes, each of which a shared component tree makes easy to 
 
 ## The API (Application Programming Interface) client
 
-`lib/api/client.ts` is the single entry point for every call. `lib/api/endpoints.ts` wraps it in typed functions so no screen hand-writes a path or a shape. `lib/api/types.ts` is transcribed from the contract, so a mock that drifts from it is a type error rather than an integration surprise.
+`lib/api/client.ts` is the single entry point for every call. `lib/api/endpoints.ts` wraps it in typed functions so no screen hand-writes a path or a shape. `lib/api/types.ts` is transcribed from the contract, so a response shape that drifts from it is a type error rather than an integration surprise.
 
-### Mock versus live, and the exact condition
+### Live data always — the mock layer was deleted
+
+`lib/api/client.ts` used to select a hand-rolled in-memory backend from `NEXT_PUBLIC_API_MODE`.
+**Phase 1b deleted it entirely** — 841 lines across `lib/api/mock/{index,db,db.test}.ts`, plus the
+branch, plus the flag from `.env.example`, `vitest.config.mts`, `render.yaml` and the CI workflow.
+
+What it was, recorded so nobody rebuilds it: an in-memory router serving 18 endpoints from eight
+seeded accounts that all shared one password, plus magic strings — `verify-<user-id>` **minted a
+session from a URL with no password**, `123456` passed any two-factor challenge, and `BKUP0000` was a
+working backup code. It was the **default** whenever `NODE_ENV` was not `production`, and the
+`'mock'` flag was tested *before* `NODE_ENV` — so setting it explicitly shipped those credentials out
+of a production build. That is what defect **C4** was, and deleting the layer converts the guarantee
+from a configuration invariant into a structural one: there is no mock to select.
+
+#### The configuration hole it was hiding, now named instead of hidden
 
 ```ts
-// lib/api/client.ts:21-23
-const API_MODE = process.env.NEXT_PUBLIC_API_MODE
-const USE_MOCKS =
-  API_MODE === 'mock' || (API_MODE === undefined && process.env.NODE_ENV !== 'production')
+// lib/api/client.ts
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
+
+function resolve(path: string): string {
+  if (BASE_URL) return `${BASE_URL}${path}`
+  if (typeof window === 'undefined') {
+    throw new Error('NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be…')
+  }
+  return path
+}
 ```
 
-Read literally: mocks are used when the flag is `'mock'` **regardless of environment**, or when the flag is **absent** and the build is not production.
+The mock default existed *because* an unset base URL produces a relative path Node cannot parse on
+the server. **The empty string is still load-bearing in the browser**: relative `/api/...` goes
+through the `next.config.mjs` rewrite, and that rewrite is what keeps the refresh cookie same-site.
+Pointing `NEXT_PUBLIC_API_BASE_URL` at the backend's public address re-breaks it silently, in
+production only. So the fix is **server-side only**: no `window` and no base URL now throws a named
+error naming the variable to set, rather than failing three frames deep inside `fetch`.
 
-The reasoning is at `:11-20` — the backend did not exist when this was written, and a developer who has not copied `.env.example` to `.env.local` would otherwise get a real fetch against an empty base URL, which on the server is a relative path Node cannot parse. Defaulting to mocks means the application runs on checkout.
-
-The dispatch is at `:118-125`. The mock import is **dynamic**:
-
-```ts
-const { mockRequest } = await import('./mock')
-```
-
-`NEXT_PUBLIC_API_MODE` is inlined at build time, so when it is not `'mock'` the whole branch is a compile-time constant `false` and the mock handlers and their seeded accounts are eliminated from the bundle entirely (`lib/api/mock/index.ts:25-29`).
-
-The claim in the comment that "production still requires the flag to be set explicitly, so mocks can never be shipped by omission" is true only of *omission*. Setting the flag to `mock` in a production environment ships mocks, because the first clause of `:22-23` is checked before `NODE_ENV`. That is the bite of defect **C4**.
+What this costs, stated plainly: a developer with a clean checkout and no backend running no longer
+gets a working application. Pages that load data fail, and signup fails first, because
+`(site)/signup/student/page.tsx` fetches reference data during server rendering.
 
 ### Proactive refresh at 80% of token lifetime
 
@@ -405,7 +425,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **398 leaf keys each, identical across all three**.
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **426 leaf keys each, identical across all three**, and in the same order — phase 1 added `downloadFailed` (A7) and phase 1b added 27 administrator keys.
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -546,7 +566,7 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-22 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+24 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
 
 The suite is not uniform — three files do something other than test a component:
 
@@ -556,7 +576,7 @@ The suite is not uniform — three files do something other than test a componen
 | `lib/auth/navigation.test.ts` | The Role-Based Access Control regression net described above |
 | `tailwind.config.test.ts` | Asserts the design tokens in the configuration match the design document |
 
-The rest cover the transport client (`lib/api/client.test.ts`), the error envelope (`lib/api/errors.test.ts`), the mock database (`lib/api/mock/db.test.ts`), the token and challenge stores (`lib/auth/tokenStore.test.ts`, `lib/auth/challenge.test.ts`), onboarding routing (`lib/auth/onboarding.test.ts`), locale routing (`i18n/routing.test.ts`), the guard (`components/app/SessionGuard.test.tsx`) and eight auth, signup, landing and layout components.
+The rest cover the transport client (`lib/api/client.test.ts`), the error envelope (`lib/api/errors.test.ts`), the middleware that routes every page (`proxy.test.ts`), the token and challenge stores (`lib/auth/tokenStore.test.ts`, `lib/auth/challenge.test.ts`), onboarding routing (`lib/auth/onboarding.test.ts`), locale routing (`i18n/routing.test.ts`), the guard (`components/app/SessionGuard.test.tsx`) and eight auth, signup, landing and layout components.
 
 ---
 
@@ -564,28 +584,66 @@ The rest cover the transport client (`lib/api/client.test.ts`), the error envelo
 
 Recorded here rather than hidden until fixed, per the Phase 0 honesty rules. Numbering follows the 35-finding register in the Phase 0 plan.
 
-### A6 — the `admin` role routes to a page that does not exist
+### A6 — FIXED, phase 1b (2026-08-16)
 
-`lib/auth/onboarding.ts:17` maps `admin` to `/admin`. `lib/auth/navigation.ts:74` gives the admin sidebar a single entry pointing at `/admin`. **There is no `/admin` page** — `app/[locale]/(app)/` contains `dashboard/`, `teacher/` and `parent/` and nothing else.
+`lib/auth/onboarding.ts:17` mapped `admin` to `/admin` and `lib/auth/navigation.ts` gave the admin
+sidebar one entry pointing there, but `app/[locale]/(app)/` contained only `dashboard/`, `teacher/`
+and `parent/`. Three call sites could send an administrator to that route — `SessionGuard.tsx:65`
+(`routeForOnboardingState(state, 'admin')` when the state is `active`), `SessionGuard.tsx:69`
+(`dashboardFor('admin')` on a role mismatch) and `TwoFactorChallenge.tsx:183` after a completed
+challenge — and the result was a loop: the guard redirected, the route 404'd through the `(site)`
+catch-all, and the guard's own fallback rendered "Redirecting…" for ever.
 
-Three call sites can send an administrator there:
+**`app/[locale]/(app)/admin/page.tsx` and `AdminDashboard` now exist.** The page is a shell, exactly
+like the other three: no `/api/admin/*` endpoint is implemented, so its five cards name the five
+FR-K1 duties — provisioning, curriculum currency, security posture, quotas, daily endpoint access
+logs — and say plainly that each is not available yet.
 
-- `components/app/SessionGuard.tsx:65` — `routeForOnboardingState(state, 'admin')` returns `/admin` when the state is `active`
-- `components/app/SessionGuard.tsx:69` — `dashboardFor('admin')` on a role mismatch
-- `components/auth/TwoFactorChallenge.tsx:183` — `dashboardFor(me.role)` after a completed challenge
+**Why the test could not have caught it, and what changed.** `lib/auth/navigation.test.ts` had two
+tests covering the nav table and neither covered the admin row: the *sends each role to its own
+dashboard first* test omitted `admin` altogether, while *routes every non-dashboard item somewhere
+that exists* allow-listed `admin` inside its regex alternation. The test written to catch this class
+of regression had the regression written into it. Phase 1 added the missing first-item assertion.
+Phase 1b added a third test that resolves every `coming-soon` href against the page's own
+`generateStaticParams`, because a prefix regex accepts `/coming-soon/anything` and two of the four
+new admin entries needed slugs that did not exist yet.
 
-The result is a loop. `SessionGuard` sends the administrator to `/admin`; `/admin` matches the `(site)` catch-all (`(site)/[...rest]/page.tsx:8-10`) and 404s, or on a client navigation simply never resolves — and the guard's own fallback renders "Redirecting…" (`SessionGuard.tsx:106-108`) forever.
+### The unlisted administrator login
 
-**The breakage cannot fail a test, because a test allow-lists it.** `lib/auth/navigation.test.ts:83-89` is titled *routes every non-dashboard item somewhere that exists*:
+Administrators do **not** sign in at `/login`. `POST /api/auth/login` refuses them, and
+`POST /api/auth/admin/login` refuses everyone else — both with a 401 whose body is identical to a
+wrong password, so neither endpoint can be used to work out which addresses are administrators
+(prd.md FR-A2a).
 
-```ts
-// lib/auth/navigation.test.ts:87
-expect(item.href, item.key).toMatch(/^\/(dashboard|teacher|parent|admin|coming-soon\/)/)
-```
+`proxy.ts` is what makes the page unlisted. It was four lines wrapping next-intl; it now composes
+three handlers, in order:
 
-`admin` is in the alternation. The test that was written to catch exactly this class of regression has the regression written into it.
+1. `pathname === '/' + process.env.ADMIN_LOGIN_PATH` → **rewrite** to `/en/admin-login`. A rewrite,
+   not a redirect, so the address bar keeps the unlisted path and no locale prefix appears in it.
+2. any path whose last segment is `admin-login` → **404**, so the ordinary route is not a second,
+   listed door.
+3. everything else → the existing next-intl middleware, untouched.
 
-Compounding it, `lib/api/types.ts:65` excludes `admin` from `RegisterRequest.role`, so the frontend offers no way to create one — but the backend's `POST /auth/register` accepts an unrestricted `role` (register **A1**), so administrator accounts can exist and can sign in to nowhere.
+`ADMIN_LOGIN_PATH` carries **no `NEXT_PUBLIC_` prefix**, deliberately: that prefix would inline the
+value into the browser bundle and publish it to every visitor. Measured on a production build, the
+server chunk keeps the literal `process.env.ADMIN_LOGIN_PATH` read rather than folding it to a
+constant, and the value appears **nowhere** under `.next/` — so it is read at runtime and never
+enters a build artefact, client or server. Unset, the guard is `'' !== ''` and no rewrite happens:
+the administrator login is simply unreachable, which is the correct failure.
+
+> ⚠️ **The unlisted path is not an access control.** It keeps the entrance off the public site and
+> nothing more. The endpoint's role check is the lock, and it holds whether or not the path is known.
+> `proxy.test.ts` covers all three branches, including that ordinary locale routing is unchanged —
+> that is the assertion worth having, because a middleware that stops calling next-intl takes down
+> all 21 pages at once.
+
+The page lives in the `(auth)` group rather than `(site)` because that group renders no top nav and
+no footer: an operations door must not carry the marketing chrome. `AdminLoginForm` is a separate
+component from `LoginForm` so the choice of endpoint is fixed at the route rather than behind a
+prop a refactor could thread in from a URL; the challenge handoffs, the error mapping and the
+captcha reset are imported, not copied. It deliberately offers no "create an account" link
+(administrators are provisioned by SQL) and no "forgot password" link (that flow is public and
+address-keyed, so linking it would confirm the address reaches a real reset e-mail).
 
 ### A7 — the backup-code download can silently produce no file
 
@@ -619,15 +677,18 @@ No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:179-188`) uses `try`/`finall
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 
-### C4 — `.env.example` ships mock mode as the documented default
+### C4 — CLOSED PERMANENTLY (phase 1b)
 
-`.env.example:10`:
+`.env.example` documented `NEXT_PUBLIC_API_MODE=mock` as the default, three lines below an
+instruction to `cp .env.example .env.local`. Phase 1 flipped the value to `live`; **phase 1b then
+deleted the entire mock layer along with the flag**, which is why this is closed rather than fixed.
 
-```
-NEXT_PUBLIC_API_MODE=mock
-```
+The hazard was never the default on its own. It was that `API_MODE === 'mock'` was checked **before**
+`NODE_ENV`, so the value copied forward into a deployment's environment would ship the in-memory
+mock — seeded accounts and all — as the production backend, with nothing in the build warning,
+because an explicitly set flag was exactly the condition the client treated as intentional.
 
-`.env.example:3` tells the reader to `cp .env.example .env.local`, so the documented happy path produces a mock-mode configuration. That was correct when the backend did not exist. It is a hazard now: the first clause of `lib/api/client.ts:22-23` matches `'mock'` **before** `NODE_ENV` is consulted, so this value copied forward into a deployment's environment ships the in-memory mock — with its seeded accounts (`lib/api/mock/index.ts:31`) — as the production backend. Nothing in the build warns, because the flag being set explicitly is exactly the condition the client treats as intentional.
+`NEXT_PUBLIC_API_BASE_URL` is required in its place. See *Live data always* above.
 
 ### D5 — `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing
 

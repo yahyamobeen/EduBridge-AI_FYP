@@ -38,6 +38,12 @@ const SLUGS = [
   'announcements',
   'my-child',
   'how-to-help',
+  // The administrator surface (prd.md FR-K1). `curriculum` and `security` are
+  // already above and are reused; these two are new. Both must be listed here
+  // or `generateStaticParams` will not prerender them and the membership check
+  // below turns the admin sidebar into two 404s.
+  'quotas',
+  'logs',
 ] as const
 
 type Slug = (typeof SLUGS)[number]

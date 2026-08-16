@@ -59,6 +59,7 @@ from app.auth.service import (
 )
 from app.core.db import get_db
 from app.core.ratelimit import (
+    ADMIN_LOGIN_LIMIT,
     EMAIL_RESEND_LIMIT,
     EMAIL_VERIFY_LIMIT,
     GUARDIAN_CONFIRM_LIMIT,
@@ -104,7 +105,33 @@ def login_endpoint(request: Request, payload: LoginRequest, db: Session = Depend
     # The brute-force surface of the whole system. `429 RATE_LIMITED` was in the
     # contract and in errors.py from the start, and nothing enforced it.
     enforce(request, bucket="login", limit=LOGIN_LIMIT)
+    # Administrators are refused here with an INDISTINGUISHABLE 401 — see the
+    # role check in `login()` for why that is the requirement and not merely the
+    # implementation.
     return login(db, payload)
+
+
+@router.post("/auth/admin/login", response_model=LoginResponse)
+def admin_login_endpoint(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
+    """
+    Segregated administrator authentication (prd.md FR-A2a).
+
+    Reached through an unlisted path that the frontend rewrites to its login
+    page; the path is a server-only environment variable and never enters the
+    browser bundle. ⚠️ THE PATH IS NOT THE CONTROL — this endpoint is. It
+    refuses every non-administrator with the same 401 as a wrong password, so
+    knowing the URL buys an attacker nothing.
+
+    ONLY the entry point is segregated. `/auth/2fa/verify`, `/auth/2fa/resend`,
+    `/auth/refresh` and `/auth/logout` are deliberately shared: the challenge
+    token this endpoint issues is already bound to the user who will use it, so
+    a second set of admin-only continuations would add no security and would
+    fork a flow that is currently tested once. Do not "fix" that later.
+    """
+    # ITS OWN BUCKET. Sharing `login`'s would let anyone lock administrators out
+    # by hammering the public endpoint until the shared counter is exhausted.
+    enforce(request, bucket="admin_login", limit=ADMIN_LOGIN_LIMIT)
+    return login(db, payload, admin_portal=True)
 
 
 @router.post("/auth/refresh", response_model=AccessTokenResponse)
