@@ -30,7 +30,10 @@ const SLUGS = [
   'quizzes',
   'my-classes',
   'planner',
-  'settings',
+  // `settings` was here until Phase 7 built the real screen at `/settings`.
+  // Removed rather than left behind: a prerendered placeholder nothing links to
+  // is a page users can still reach by typing the URL, and it would say the
+  // feature is coming while it is live one path away.
   'spaces',
   'reports',
   'roster',

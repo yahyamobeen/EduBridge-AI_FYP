@@ -434,6 +434,26 @@ def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> 
     # TOTP accounts need nothing here: the code is generated on the user's own
     # device, which is the point of TOTP.
     if str(twofa["method"]) == "email_otp":
+        # ⚠️ BIND FIRST. `login` runs on `get_db`, which binds NOBODY, so a plain
+        #    read of `app_user` matches zero rows under `app_user_self_read`
+        #    (`id = app.current_user_id() OR app.is_admin()` — both false with
+        #    nothing bound) and `.one()` raises `NoResultFound` as a 500.
+        #
+        #    This was shipped broken: the first version of D18's fix read the
+        #    row without binding, and every `email_otp` sign-in 500ed. The two
+        #    sibling lookups in `two_factor_enroll` and `two_factor_resend` do
+        #    the same read and work precisely because each calls
+        #    `set_current_user_id` first, having resolved the user from a token.
+        #    This is that same pattern, and the trust is equivalent: the
+        #    password has already been verified above.
+        #
+        #    ⚠️ THE TEST DID NOT CATCH IT, AND COULD NOT HAVE. The integration
+        #       harness routes every session onto ONE connection, so the GUC the
+        #       fixture set while creating the user was still bound when the
+        #       request ran — the read succeeded for a reason production does not
+        #       have. `test_email_dispatch.py` now clears the binding before
+        #       calling the endpoint, which reproduces `get_db`.
+        set_current_user_id(db, user_id)
         recipient = (
             db.execute(
                 text("SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"),

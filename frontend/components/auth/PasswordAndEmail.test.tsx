@@ -100,7 +100,10 @@ describe('reset password', () => {
     expect(submit).toBeDisabled()
 
     await user.type(screen.getByLabelText(en.auth.resetPassword.confirmPassword), 'Password124')
-    expect(screen.getByText(en.auth.resetPassword.mismatch)).toBeInTheDocument()
+    // `mismatch` moved to `auth.password` in Phase 7 with the rest of the
+    // shared password copy, so the settings screen can render the same
+    // checklist without reading a reset-specific namespace.
+    expect(screen.getByText(en.auth.password.mismatch)).toBeInTheDocument()
     expect(submit).toBeDisabled()
 
     await user.clear(screen.getByLabelText(en.auth.resetPassword.confirmPassword))

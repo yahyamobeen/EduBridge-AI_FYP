@@ -168,8 +168,27 @@ class TestTheTrapsThatFailSilently:
         )
         assert client.get("/api/auth/me", headers=_bearer(first)).status_code == 401
 
-        # Past the stamp, past the allowance, past the truncation boundary.
-        time.sleep(2.2)
+        # ⚠️ WAIT UNTIL THE LOCAL CLOCK IS PROVABLY PAST THE CUTOFF, RATHER THAN
+        #    SLEEPING A FIXED 2.2s.
+        #
+        #    The fixed sleep passed in isolation and FAILED IN THE FULL SUITE —
+        #    caught by the Phase 5 gate. The reason is the subject of this very
+        #    test: `iat` is minted by the local clock and the stamp by the
+        #    database's, so "2.2 seconds after I called the endpoint" says
+        #    nothing about where the cutoff actually landed. When the skew went
+        #    the unfavourable way under load, the new token was still inside the
+        #    allowance and was correctly refused.
+        #
+        #    Deriving the wait from the stamp itself removes the guess: whatever
+        #    the offset or its direction, this loop exits only once a token
+        #    minted here must fall outside `cutoff = stamp_truncated + allowance`.
+        stamp = db.execute(
+            text("SELECT sessions_invalidated_at FROM app_user WHERE id = :u"), {"u": user_id}
+        ).scalar()
+        cutoff = stamp.replace(microsecond=0) + timedelta(seconds=1)
+        while datetime.now(UTC) <= cutoff:
+            time.sleep(0.05)
+
         later, _ = create_access_token(UUID(user_id))
 
         assert client.get("/api/auth/me", headers=_bearer(later)).status_code == 200, (

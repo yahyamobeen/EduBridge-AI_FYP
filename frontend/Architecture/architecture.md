@@ -265,6 +265,12 @@ Three decisions it encodes, each of which a shared component tree makes easy to 
 **Phase 1b deleted it entirely** — 841 lines across `lib/api/mock/{index,db,db.test}.ts`, plus the
 branch, plus the flag from `.env.example`, `vitest.config.mts`, `render.yaml` and the CI workflow.
 
+**The settings screen (Phase 7, FR-A8).** `app/[locale]/(app)/settings` is the client for all three account-management endpoints. Built from the Stitch prototype, which governs structure and copy while the API contract governs which fields exist. Four conflicts were decided by the owner: **board and class are read-only** (Phase 2 made both unwritable — finding B4 — and the prototype board list is wrong regardless, offering FBISE/Punjab/Sindh/Cambridge against an enum of PCTB and STBB, so labels come from `GET /reference/enums`); **Student ID is dropped** (no such field exists anywhere); **one language control sets both** the stored preference and the interface locale; **Appearance is dropped** (the application has zero `dark:` classes).
+
+⚠️ **The language control does two unrelated things, and missing the second is the easy mistake.** The stored preference is an API write that governs outgoing email; the interface locale is a URL segment, so it is a route change. The write happens FIRST — navigating first would leave the user reading a page in a language the server does not think they chose. The value sets differ (`ur-Latn` on the web is `roman_ur` in the API) and are mapped through `toApiLanguage`. **This contradicted `prd.md` FR-A8, whose Edge clause said the two must be presented as distinct settings; the requirement was amended in the same change rather than the screen.**
+
+⚠️ **Building the route moves four things together**, two of which are tests that exist to stop it moving alone: the nav href, the coming-soon `SLUGS` list, `navigation.test.ts`'s route-prefix regex, and its prerender-pairing test. The regex failure was observed naming `settings` before it was widened.
+
 **A11 — the navigation handoff is deleted (Phase 5).** `setNavigationHandler` and
 `handleOnboardingRedirect` let the client route a user to an onboarding step on a 403 without
 importing the router. ⚠️ **The only caller of `setNavigationHandler` in the repository was

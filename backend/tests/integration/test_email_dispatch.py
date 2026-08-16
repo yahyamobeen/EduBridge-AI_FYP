@@ -77,6 +77,20 @@ def _user(db, email: str, *, method: str | None = None) -> str:
             {"id": user_id, "m": method},
         )
     db.flush()
+
+    # ⚠️ UNBIND BEFORE HANDING THE ACCOUNT BACK, AND THIS IS NOT TIDINESS.
+    #
+    # The harness routes every application session onto ONE connection, so the
+    # `app.current_user_id` this helper set while inserting is STILL BOUND when
+    # the test then calls an endpoint. Unauthenticated routes run on `get_db`,
+    # which binds nobody — so without this line the request under test reads
+    # `app_user` with a binding production would not have, and any missing
+    # `set_current_user_id` in the code under test is invisible.
+    #
+    # That is not hypothetical: D18's first fix read the recipient row without
+    # binding, this file's login test passed, and every `email_otp` sign-in
+    # 500ed with `NoResultFound` in the browser.
+    db.execute(text("SELECT set_config('app.current_user_id', '', true)"))
     return str(user_id)
 
 
@@ -231,6 +245,10 @@ class TestD18LoginSendsTheEmailOtp:
         """
         address = unique_email("dispatch")
         db_user = _user(db, address)
+        # Re-bind for THIS insert only: `_user` clears the binding so the
+        # request under test runs unbound like `get_db` does, and
+        # `two_factor_enrollment` is owner-scoped so writing it needs one.
+        set_current_user_id(db, db_user)
         db.execute(
             text(
                 "INSERT INTO two_factor_enrollment "

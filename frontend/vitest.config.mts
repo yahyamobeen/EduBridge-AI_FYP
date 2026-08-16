@@ -16,6 +16,20 @@ export default defineConfig({
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: '0x-test-site-key',
     },
     setupFiles: ['./vitest.setup.ts'],
+    // ⚠️ RAISED FROM THE 5s DEFAULT BECAUSE THE DEFAULT WAS PRODUCING FALSE
+    //    FAILURES, NOT BECAUSE ANYTHING IS SLOW.
+    //
+    //    The multi-step signup forms drive `userEvent`, which advances real
+    //    timers per keystroke. Run alone they finish in well under a second;
+    //    run inside the full suite, where several worker threads compete for
+    //    CPU, they crossed 5s and failed — `SimpleSignupForm` once, then
+    //    `StudentSignupForm` at 5164ms. Both pass 20/20 in isolation, so the
+    //    timeout was measuring the machine's load rather than the code.
+    //
+    //    A flake that only appears in the full run is the worst kind: it
+    //    trains everyone to re-run the suite instead of reading it. 15s is
+    //    still far below anything a genuinely hung test would reach.
+    testTimeout: 15_000,
     include: ['**/*.test.{ts,tsx}'],
     exclude: ['node_modules/**', '.next/**'],
     // `proxy.test.ts` loads `next-intl/middleware`, whose ESM build imports the

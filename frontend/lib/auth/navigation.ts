@@ -37,7 +37,13 @@ export type NavItem = {
 }
 
 const SETTINGS: NavItem[] = [
-  { key: 'settings', href: '/coming-soon/settings' },
+  // Built in Phase 7. ⚠️ THREE OTHER PLACES MOVE WITH THIS LINE, and two of
+  // them are tests that exist to stop it moving alone: `settings` leaves the
+  // coming-soon `SLUGS` list, `navigation.test.ts`'s route-prefix regex gains
+  // `settings`, and its prerender-pairing test then agrees. Changing this href
+  // without the SLUGS removal leaves a prerendered page nothing links to;
+  // changing SLUGS without this href turns every sidebar's Settings into a 404.
+  { key: 'settings', href: '/settings' },
   { key: 'help', href: '/coming-soon/help' },
 ]
 

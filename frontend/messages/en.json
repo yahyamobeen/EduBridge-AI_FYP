@@ -303,18 +303,21 @@
       "spamHint": "If it has not arrived in a few minutes, check your spam folder.",
       "tryAnotherAddress": "Use a different address"
     },
+    "password": {
+      "rulesTitle": "Password requirements",
+      "rule_length": "At least 8 characters long",
+      "rule_maxLength": "No longer than 128 characters",
+      "rule_uppercase": "Contains an uppercase letter",
+      "rule_number": "Contains a number or symbol",
+      "ruleMet": "met",
+      "ruleNotMet": "not met yet",
+      "mismatch": "Both passwords must match."
+    },
     "resetPassword": {
       "title": "Reset password",
       "subtitle": "Create a new, secure password for your account.",
       "newPassword": "New Password",
       "confirmPassword": "Confirm Password",
-      "rulesTitle": "Password requirements",
-      "rule_length": "At least 8 characters long",
-      "rule_uppercase": "Contains an uppercase letter",
-      "rule_number": "Contains a number or symbol",
-      "ruleMet": "met",
-      "ruleNotMet": "not met yet",
-      "mismatch": "Both passwords must match.",
       "submit": "Update password",
       "updating": "Updating…",
       "doneTitle": "Password updated",
@@ -493,6 +496,57 @@
       "endpointLogsBody": "Which endpoints were called, by how many accounts, and how often. Metadata only.",
       "adminPrivacyTitle": "What an administrator cannot see",
       "adminPrivacyBody": "You can see audit records, access logs and usage metadata. You cannot read the content of any tutoring conversation — no administrator path to it exists, by design."
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your account preferences, curriculum context, and security.",
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "cancel": "Cancel",
+    "profile": {
+      "heading": "Profile & Context",
+      "fullName": "Full Name",
+      "board": "Examination Board",
+      "classLevel": "Class",
+      "contextLocked": "Your board and class are set when you register and cannot be changed here.",
+      "saveFailed": "Your changes could not be saved. Please try again."
+    },
+    "language": {
+      "heading": "Language & Regional",
+      "legend": "Primary Instruction Language",
+      "option_en": "English",
+      "option_ur": "اردو",
+      "option_ur-Latn": "Roman Urdu",
+      "note": "This changes the language of this site and of the email we send you.",
+      "saveFailed": "Your language could not be saved. Please try again."
+    },
+    "security": {
+      "heading": "Security",
+      "currentPassword": "Current Password",
+      "newPassword": "New Password",
+      "confirmPassword": "Confirm New Password",
+      "changePassword": "Change Password",
+      "changing": "Changing…",
+      "changed": "Your password has been changed.",
+      "wrongPassword": "That is not your current password.",
+      "signsYouOut": "Changing your password signs you out everywhere, including here.",
+      "twoFactorHeading": "Two-Factor Authentication",
+      "twoFactorLoading": "Checking…",
+      "twoFactorDisabled": "Not set up yet.",
+      "twoFactorMethod": "Method",
+      "method_totp": "Authenticator app",
+      "method_email_otp": "Emailed code",
+      "backupCodes": "Backup codes remaining"
+    },
+    "guardian": {
+      "heading": "Parental Link",
+      "status_none": "No parent linked yet.",
+      "status_pending": "Waiting for your parent to confirm.",
+      "status_verified": "Your parent has confirmed the link.",
+      "status_revoked": "This link was removed.",
+      "readOnly": "Manage this from the parental consent screen."
     }
   },
   "plan": {
