@@ -232,6 +232,17 @@ export type MeResponse = {
    */
   full_name: string | null
   role: Role
+  /**
+   * ⚠️ TOP-LEVEL, because `profile` is `null` for three roles out of four.
+   *
+   * The column moved to `app_user` so every role could have a stored language,
+   * and `PATCH /auth/me` accepts it from every role — but this response
+   * originally carried it only inside `profile`, making it writable by four
+   * roles and readable by one. A teacher who chose Urdu saw English.
+   *
+   * `profile.language_pref` still exists and reads the same column.
+   */
+  language_pref: ApiLanguage
   onboarding_state: OnboardingState
   email_verified: boolean
   two_factor: { enabled: boolean; method: TwoFactorMethod | null }

@@ -43,6 +43,7 @@ function baseMe(overrides: Partial<MeResponse> = {}): MeResponse {
     user_id: 'u-1',
     email: 'aisha@example.com',
     full_name: 'Aisha Khan',
+    language_pref: 'en',
     role: 'student',
     onboarding_state: 'active',
     email_verified: true,

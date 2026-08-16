@@ -298,10 +298,19 @@ class TestUpdateMe:
         body = resp.json()
         assert body["full_name"] == "Renamed Person"
         # Every MeResponse field, not just the one that changed.
+        #
+        # ⚠️ `language_pref` JOINED THE TOP LEVEL AFTER THIS TEST CAUGHT ITS
+        #    ABSENCE. `20260816200000` moved the column to `app_user` so all four
+        #    roles could have a stored language, and `PATCH /auth/me` accepted it
+        #    from all four — but this response carried it only inside `profile`,
+        #    which is `null` for teachers, parents and administrators. Writable
+        #    by every role, readable by one: a teacher who chose Urdu opened the
+        #    settings screen and saw English.
         assert set(body) == {
             "user_id",
             "email",
             "full_name",
+            "language_pref",
             "role",
             "onboarding_state",
             "email_verified",

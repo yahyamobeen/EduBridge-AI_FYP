@@ -676,6 +676,9 @@ def me(db: Session, user_id: UUID) -> dict:
         "email": row["email"],
         "full_name": row["full_name"],
         "role": str(row["role"]),
+        # From `app_user`, so every role has one. `profile.language_pref` below
+        # reads the same column for students; they cannot drift.
+        "language_pref": str(row["language_pref"]),
         "onboarding_state": onboarding_state,
         "email_verified": row["email_verified_at"] is not None,
         "two_factor": {

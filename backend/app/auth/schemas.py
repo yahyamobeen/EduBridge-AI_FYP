@@ -281,6 +281,18 @@ class MeResponse(BaseModel):
     email: str
     full_name: str | None
     role: str
+    # ⚠️ TOP-LEVEL, NOT ONLY INSIDE `profile` — and the omission was a real gap.
+    #
+    # `20260816200000` moved the column to `app_user` precisely so all four
+    # roles could HAVE a stored language, and `PATCH /auth/me` accepts it from
+    # all four. But this response reported it only through `profile`, which is
+    # `null` for teachers, parents and administrators — so it was WRITABLE BY
+    # EVERY ROLE AND READABLE BY ONE. A teacher who chose Urdu had no way to see
+    # that they had, and the settings screen showed them English.
+    #
+    # `profile.language_pref` is kept and now reads the same column, so the two
+    # cannot disagree.
+    language_pref: LanguageCode
     # FIVE states. `plan_selection_pending` is the one a user can reach AFTER
     # being active, when a 14-day trial lapses (prd.md §2.6 MON-4) — the only
     # backward transition in the system. Omitting it does not merely hide a

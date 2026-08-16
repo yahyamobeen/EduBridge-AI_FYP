@@ -23,6 +23,20 @@ _TEST_ENV = {
     "JWT_SECRET": "0" * 64,
     "JWT_REFRESH_SECRET": "1" * 64,
     "APP_ENV": "test",
+    # ⚠️ PINNED, BECAUSE `.env` LEAKS IN AND THIS FILE CLAIMS IT DOES NOT.
+    #
+    # `Settings` reads `backend/.env` as well as the environment, so any value
+    # there that this dict does not override reaches the unit tests. A developer
+    # `.env` carrying `EMAIL_PROVIDER=sendgrid` — not one of the two literals —
+    # makes `Settings()` raise, and every unit test that constructs one fails
+    # with a validation error about email delivery.
+    #
+    # It stayed hidden because `get_settings` is cached and
+    # `test_config_hardening.py` sorts first: it monkeypatches a VALID provider,
+    # populates the cache, and every later test inherits it. So the suite passed
+    # as a whole and any single file that touched settings failed on its own —
+    # the suite was green for a reason unrelated to the code.
+    "EMAIL_PROVIDER": "logging",
     # Valid Fernet key for TOTP encryption tests. This is a test-only key —
     # never used in production. Generated with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

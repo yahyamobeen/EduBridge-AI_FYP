@@ -219,8 +219,12 @@ function LanguageCard({
   const [pending, setPending] = useState<Locale | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // The stored preference, mapped onto a locale so one control can show both.
-  const stored: ApiLanguage = (me.profile?.language_pref ?? 'en') as ApiLanguage
+  // ⚠️ FROM THE TOP LEVEL, NOT FROM `profile`. Reading `me.profile?.language_pref`
+  //    here silently showed English to every teacher, parent and administrator,
+  //    because `profile` is `null` for them — while `PATCH /auth/me` was happily
+  //    accepting their choice. The column has been on `app_user` since
+  //    20260816200000; this is the read side catching up.
+  const stored: ApiLanguage = me.language_pref
 
   /**
    * ⚠️ THIS CONTROL DOES TWO UNRELATED THINGS, and missing the second is the

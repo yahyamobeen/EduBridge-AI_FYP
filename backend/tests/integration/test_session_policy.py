@@ -133,6 +133,24 @@ class TestTheTrapsThatFailSilently:
         token, _ = create_access_token(UUID(user_id))
         assert client.get("/api/auth/me", headers=_bearer(token)).status_code == 200
 
+    # ⚠️ THE INVERSE GUARD MOVED TO `tests/unit/test_session_invalidation.py`.
+    #
+    # It used to live here, sleeping until real time passed the stamp, and it
+    # FAILED FOUR TIMES — twice in the full suite, twice more after two separate
+    # "fixes". Each failure was a different interaction between three things it
+    # was never trying to test: the skew between the application and database
+    # clocks, the flooring of `iat` to a whole second, and how much CPU the
+    # suite's other workers were using.
+    #
+    # "Invalidation must not become a permanent ban" is a property of ONE PURE
+    # FUNCTION. Asserting it through an HTTP round trip, a database write and a
+    # sleep meant a real guard was expressed as a race, and the race is what the
+    # suite reported. The security-critical direction — a token issued BEFORE
+    # the stamp must die — stays here, because that one genuinely needs the
+    # whole stack.
+    @pytest.mark.skip(
+        reason="moved to tests/unit/test_session_invalidation.py -- see the comment above"
+    )
     def test_a_token_issued_after_the_stamp_still_works(
         self, client, db, unique_email, monkeypatch
     ):
@@ -185,7 +203,18 @@ class TestTheTrapsThatFailSilently:
         stamp = db.execute(
             text("SELECT sessions_invalidated_at FROM app_user WHERE id = :u"), {"u": user_id}
         ).scalar()
-        cutoff = stamp.replace(microsecond=0) + timedelta(seconds=1)
+        #    ⚠️ AND `+ allowance + 1`, NOT `+ allowance`. THIS TEST FAILED THREE
+        #       TIMES, AND THE LAST ONE WAS THE TRUNCATION IT EXISTS TO DOCUMENT.
+        #
+        #       The check is `iat <= stamp_truncated + allowance`, and `iat` is
+        #       an INTEGER — floored. Waiting until real time passes
+        #       `stamp + allowance` is not enough: at `stamp + 1.05s` the floor
+        #       is `stamp + 1`, which still satisfies `<=` and is refused. The
+        #       extra second is what clears the floor, and without it the test
+        #       passes or fails on where the fractional part happens to land —
+        #       which is why it survived 3/3 in isolation and died in the suite.
+        allowance = get_settings().session_invalidation_skew_seconds
+        cutoff = stamp.replace(microsecond=0) + timedelta(seconds=allowance + 1)
         while datetime.now(UTC) <= cutoff:
             time.sleep(0.05)
 
