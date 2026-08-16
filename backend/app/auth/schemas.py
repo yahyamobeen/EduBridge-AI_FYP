@@ -32,17 +32,64 @@ GROUP_LABELS: dict[str, str] = {
 }
 
 
+# ============================================================================
+# Shared bounds — finding D12.
+#
+# ⚠️ AN UNBOUNDED STRING THAT REACHES argon2 IS AN UNBOUNDED AMOUNT OF WORK.
+#    `LoginRequest.password` was a bare `str` while `RegisterRequest.password`
+#    was already 8..128, so the ONE endpoint an unauthenticated caller can hammer
+#    accepted a megabyte and hashed it — at deliberately expensive settings
+#    (`argon2_time_cost=3`, `memory_cost=65536`). That is a denial of service
+#    with no exploit required, just a large POST body.
+#
+# Tokens and codes are bounded for a related reason: they are looked up by HMAC
+# of their own value, so an enormous one costs a hash and a round trip before it
+# can be rejected. None of these is a security boundary on its own — the real
+# check is always the lookup — they are there so the cost of being wrong is
+# bounded.
+# ============================================================================
+
+# `generate_opaque_token` is `secrets.token_urlsafe(48)` -> 64 characters. The
+# ceiling is generous rather than exact so a future token length change does not
+# silently start rejecting valid tokens.
+_MAX_TOKEN = 512
+# Six digits today (email OTP), six for TOTP, and backup codes are short. Any
+# credential a human types is far below this.
+_MAX_CODE = 64
+# Matches `RegisterRequest.password`. Deliberately the same number in both
+# places rather than a stricter one here, because a login must accept every
+# password registration was willing to issue.
+_MIN_PASSWORD = 8
+_MAX_PASSWORD = 128
+
+# The five states, as ONE definition — finding D13. It was a `Literal` on
+# `MeResponse` and a bare `str` on four other responses, so four endpoints could
+# report a state the client's union does not contain and only `/auth/me` would
+# have failed. `plan_selection_pending` is the one a user reaches AFTER being
+# active, when a trial lapses (prd.md MON-4) — the only backward transition in
+# the system, and the one most likely to be dropped by a hand-written copy.
+OnboardingState = Literal[
+    "email_verification_pending",
+    "two_factor_enrollment_pending",
+    "guardian_link_pending",
+    "plan_selection_pending",
+    "active",
+]
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=_MIN_PASSWORD, max_length=_MAX_PASSWORD)
     full_name: str = Field(min_length=1, max_length=200)
     # NOT `UserRole` — `admin` is not self-registrable (see RegistrableRole).
     # An `admin` value is rejected by Pydantic, which `_validation_error_response`
     # renders as the ordinary 400 VALIDATION_ERROR envelope with a per-field
     # message, so no endpoint invents a code (tdd.md §7.3).
     role: RegistrableRole
-    # Required Cloudflare Turnstile token (register + login only).
-    turnstile_token: str = Field(min_length=1)
+    # Required Cloudflare Turnstile token (register + login only). Cloudflare
+    # documents up to 2048 characters, so the ceiling is above that rather than
+    # at it.
+    turnstile_token: str = Field(min_length=1, max_length=4096)
 
     board: BoardCode | None = None
     class_level: int | None = Field(default=None, ge=9, le=12)
@@ -102,7 +149,7 @@ class RegisterResponse(BaseModel):
     user_id: str
     email: str
     role: str
-    onboarding_state: str
+    onboarding_state: OnboardingState
 
 
 class BoardOut(BaseModel):
@@ -125,10 +172,20 @@ class EnumsResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # ⚠️ FINDING D12. This was a bare `str`: the brute-force surface of the whole
+    #    system accepted an unbounded body and fed it to argon2.
+    #
+    # ⚠️ MAXIMUM ONLY, NO MINIMUM, AND THE ASYMMETRY IS DELIBERATE. This field
+    #    carries an EXISTING password, so a minimum here is a guess about
+    #    history: any account whose password predates a policy change could
+    #    never sign in again, and a short typo would answer `400
+    #    VALIDATION_ERROR` instead of the `401 UNAUTHENTICATED` that every other
+    #    wrong password gets. The denial-of-service this finding is about is
+    #    entirely a question of the upper bound.
+    password: str = Field(max_length=_MAX_PASSWORD)
     # Required Cloudflare Turnstile token; a missing or empty value is a 400
     # VALIDATION_ERROR like any other missing required field.
-    turnstile_token: str = Field(min_length=1)
+    turnstile_token: str = Field(min_length=1, max_length=4096)
 
 
 class EmailVerificationRequired(BaseModel):
@@ -198,7 +255,7 @@ class GuardianInviteResponse(BaseModel):
 class GuardianConfirmRequest(BaseModel):
     # A parent with two children must say WHICH link is being confirmed, so the
     # token from the email travels in the body (a token is always a body field).
-    invite_token: str = Field(min_length=1)
+    invite_token: str = Field(min_length=1, max_length=_MAX_TOKEN)
 
 
 class GuardianConfirmResponse(BaseModel):
@@ -229,13 +286,7 @@ class MeResponse(BaseModel):
     # backward transition in the system. Omitting it does not merely hide a
     # screen: it means paid access is never enforced, because a lapsed student
     # keeps reporting `active` forever.
-    onboarding_state: Literal[
-        "email_verification_pending",
-        "two_factor_enrollment_pending",
-        "guardian_link_pending",
-        "plan_selection_pending",
-        "active",
-    ]
+    onboarding_state: OnboardingState
     email_verified: bool
     two_factor: TwoFactorOut
     profile: ProfileOut | None
@@ -252,7 +303,7 @@ class MeResponse(BaseModel):
 
 class TwoFactorEnrollRequest(BaseModel):
     method: Literal["totp", "email_otp"]
-    enrollment_token: str
+    enrollment_token: str = Field(min_length=1, max_length=_MAX_TOKEN)
 
 
 class TwoFactorEnrollResponseTOTP(BaseModel):
@@ -272,14 +323,14 @@ TwoFactorEnrollResponse = TwoFactorEnrollResponseTOTP | TwoFactorEnrollResponseE
 
 
 class TwoFactorConfirmRequest(BaseModel):
-    code: str
-    enrollment_token: str
+    code: str = Field(min_length=1, max_length=_MAX_CODE)
+    enrollment_token: str = Field(min_length=1, max_length=_MAX_TOKEN)
 
 
 class TwoFactorConfirmResponse(BaseModel):
     two_factor: TwoFactorOut
     backup_codes: list[str]
-    onboarding_state: str
+    onboarding_state: OnboardingState
     access_token: str
     expires_in: int
 
@@ -288,8 +339,8 @@ class TwoFactorConfirmResponse(BaseModel):
 
 
 class TwoFactorVerifyRequest(BaseModel):
-    pending_token: str
-    code: str
+    pending_token: str = Field(min_length=1, max_length=_MAX_TOKEN)
+    code: str = Field(min_length=1, max_length=_MAX_CODE)
     type: Literal["totp", "email_otp", "backup_code"]
 
 
@@ -297,11 +348,11 @@ class TwoFactorVerifyResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"  # noqa: S105
     expires_in: int
-    onboarding_state: str
+    onboarding_state: OnboardingState
 
 
 class TwoFactorResendRequest(BaseModel):
-    pending_token: str
+    pending_token: str = Field(min_length=1, max_length=_MAX_TOKEN)
 
 
 class TwoFactorResendResponse(BaseModel):
@@ -313,12 +364,12 @@ class TwoFactorResendResponse(BaseModel):
 
 
 class EmailVerifyRequest(BaseModel):
-    token: str
+    token: str = Field(min_length=1, max_length=_MAX_TOKEN)
 
 
 class EmailVerifyResponse(BaseModel):
     email_verified: bool
-    onboarding_state: str
+    onboarding_state: OnboardingState
     access_token: str
     expires_in: int
     enrollment_token: str
@@ -336,8 +387,8 @@ class PasswordForgotRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    token: str
-    new_password: str = Field(min_length=8, max_length=128)
+    token: str = Field(min_length=1, max_length=_MAX_TOKEN)
+    new_password: str = Field(min_length=_MIN_PASSWORD, max_length=_MAX_PASSWORD)
 
 
 # ============================================================================
@@ -354,8 +405,12 @@ class PasswordChangeRequest(BaseModel):
     # `current_password` is bounded for the same reason `new_password` is: it
     # reaches argon2, and an unbounded string is an unbounded amount of hashing
     # (finding D12, which fixes the rest of them).
-    current_password: str = Field(min_length=8, max_length=128)
-    new_password: str = Field(min_length=8, max_length=128)
+    # Maximum only, for the reason on `LoginRequest.password`: this is the
+    # password the account ALREADY has, and rejecting it for being short would
+    # refuse the very users most in need of changing it.
+    current_password: str = Field(max_length=_MAX_PASSWORD)
+    # The new one is a policy decision, so the minimum applies.
+    new_password: str = Field(min_length=_MIN_PASSWORD, max_length=_MAX_PASSWORD)
 
 
 class MeUpdateRequest(BaseModel):

@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.email import drain_pending_emails
 from app.auth.routes import router as auth_router
 from app.core.config import get_settings
 from app.core.db import DatabaseUnreachableError, assert_backend_role_cannot_bypass_rls
@@ -41,6 +42,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("database role verified: cannot bypass row level security")
 
     yield
+
+    # ⚠️ FINDING D8 — THE SHUTDOWN THAT DID NOT EXIST.
+    #
+    # `lifespan` ended at the bare `yield` above, so nothing ever drained the
+    # email dispatch queue. `send_async` returns before delivery, and
+    # `drain_pending_emails` was called from exactly one place in the whole
+    # repository: `tests/integration/conftest.py`. In production the only thing
+    # standing between a shutdown and a silently dropped verification email was
+    # the `atexit` hook in `email.py` — which does not run when a container is
+    # stopped with SIGTERM, which is how Render stops one.
+    #
+    # `_pending` also grew without bound: every Future was appended and nothing
+    # removed them, so a long-lived process accumulated one object per email
+    # sent since boot. Draining here is what makes that list finite in
+    # production rather than only under test.
+    #
+    # Bounded rather than unbounded: a mail provider that has stopped answering
+    # must not hold the shutdown open past the platform's kill timeout, because
+    # then the process is killed anyway and the drain achieved nothing.
+    try:
+        drain_pending_emails(timeout=5.0)
+    except Exception:  # noqa: BLE001 -- shutdown must complete regardless
+        logger.exception("email queue did not drain cleanly during shutdown")
 
 
 def create_app() -> FastAPI:

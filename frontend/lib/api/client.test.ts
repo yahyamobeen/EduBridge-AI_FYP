@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetTokenStoreForTests, getAccessToken } from '@/lib/auth/tokenStore'
-import {
-  __resetClientForTests,
-  apiFetch,
-  rememberSession,
-  setNavigationHandler,
-} from './client'
+import { __resetClientForTests, apiFetch, rememberSession } from './client'
 import { ApiError } from './errors'
 
 type Handler = (path: string) => { status: number; body: unknown }
@@ -132,45 +127,16 @@ describe('refresh on expiry', () => {
   })
 })
 
-describe('onboarding redirects', () => {
-  it('sends a gated student to the guardian step instead of showing an error', async () => {
-    const navigate = vi.fn()
-    setNavigationHandler(navigate, () => '/en/dashboard')
-    rememberSession('tok', 900)
-    handler = () => ({ status: 403, body: envelope('GATE_PENDING') })
-
-    await expect(apiFetch('/tutor/ask', { method: 'POST' })).rejects.toBeInstanceOf(ApiError)
-    expect(navigate).toHaveBeenCalledWith('/onboarding/guardian')
-  })
-
-  it('sends a lapsed trial to plan selection', async () => {
-    const navigate = vi.fn()
-    setNavigationHandler(navigate, () => '/en/dashboard')
-    rememberSession('tok', 900)
-    handler = () => ({ status: 403, body: envelope('SUBSCRIPTION_REQUIRED') })
-
-    await expect(apiFetch('/tutor/ask', { method: 'POST' })).rejects.toBeInstanceOf(ApiError)
-    expect(navigate).toHaveBeenCalledWith('/onboarding/plan')
-  })
-
-  it('does not redirect to the page it is already on', async () => {
-    // The gate page calls guardian endpoints; redirecting there would loop.
-    const navigate = vi.fn()
-    setNavigationHandler(navigate, () => '/en/onboarding/guardian')
-    rememberSession('tok', 900)
-    handler = () => ({ status: 403, body: envelope('GATE_PENDING') })
-
-    await expect(apiFetch('/auth/guardian/status')).rejects.toBeInstanceOf(ApiError)
-    expect(navigate).not.toHaveBeenCalled()
-  })
-
-  it('leaves other 403s to the screen to render', async () => {
-    const navigate = vi.fn()
-    setNavigationHandler(navigate, () => '/en/teacher')
-    rememberSession('tok', 900)
-    handler = () => ({ status: 403, body: envelope('FORBIDDEN_SCOPE') })
-
-    await expect(apiFetch('/reports/weekly')).rejects.toMatchObject({ code: 'FORBIDDEN_SCOPE' })
-    expect(navigate).not.toHaveBeenCalled()
-  })
-})
+// FINDING A11 — the four "onboarding redirects" tests are DELETED with the code
+// they covered (owner's decision, 2026-08-16).
+//
+// ⚠️ THEY PASSED, AND THEY DESCRIBED BEHAVIOUR THE APPLICATION DID NOT HAVE.
+//    Each one called `setNavigationHandler` itself, which is the only thing in
+//    the entire repository that ever did — no provider registered a handler, so
+//    in the running application `navigate` was permanently `null` and
+//    `handleOnboardingRedirect` returned on its first line every time.
+//
+//    The tests were not wrong about the code; they were wrong about the world.
+//    That is the more dangerous kind, because a green suite is exactly what
+//    stops anyone from checking. `SessionGuard` re-evaluates `onboarding_state`
+//    on every mount and is what actually moves a gated or lapsed user.

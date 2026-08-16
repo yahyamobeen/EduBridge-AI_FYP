@@ -167,3 +167,123 @@ class TestLoginHonoursTheLockout:
             login(db, LoginRequest(email=email, password=wrong, turnstile_token=TURNSTILE_TOKEN))
 
         assert exc.value.status_code == 401
+
+
+class TestD10VerificationIsCheckedBeforeLockout:
+    """
+    Finding D10 — the order of two refusals.
+
+    An unverified account carrying a live 2FA lockout was answered
+    `423 TWO_FACTOR_LOCKED`. That is wrong twice: it tells the user to wait out a
+    lockout on a factor they have not reached and cannot use, when the real next
+    step is to verify their address — and it discloses that the account has 2FA
+    state at all to someone who has not passed the earlier gate.
+
+    The onboarding order is verify, then enrol, then challenge. The refusals have
+    to follow it.
+    """
+
+    def test_an_unverified_account_with_a_live_lockout_is_told_to_verify(
+        self, client, db, unique_email
+    ):
+        from datetime import UTC, datetime, timedelta
+        from uuid import uuid4
+
+        from sqlalchemy import text
+
+        from app.auth.security import hash_password
+        from app.core.db import set_current_user_id
+
+        user_id = uuid4()
+        address = unique_email("d10")
+        set_current_user_id(db, user_id)
+        # NOT verified -- `email_verified_at` is deliberately absent.
+        db.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
+                "VALUES (:i, :e, :p, 'parent', 'active', 'D10 Probe')"
+            ),
+            {"i": user_id, "e": address, "p": hash_password("password123")},
+        )
+        db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:i)"), {"i": user_id})
+        # ...and locked out on a second factor they never reached.
+        db.execute(
+            text(
+                "INSERT INTO two_factor_enrollment "
+                "(user_id, method, status, totp_secret_encrypted, confirmed_at, "
+                " failed_attempts, locked_until) "
+                "VALUES (:i, 'totp', 'active', :s, now(), 3, :until)"
+            ),
+            {
+                "i": user_id,
+                "s": b"\x00" * 32,
+                "until": datetime.now(UTC) + timedelta(minutes=5),
+            },
+        )
+        db.flush()
+
+        resp = client.post(
+            "/api/auth/login",
+            json={
+                "email": address,
+                "password": "password123",
+                "turnstile_token": "test-turnstile-token",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "email_verification_required", (
+            "an unverified account was told about a 2FA lockout it cannot act on -- finding D10"
+        )
+
+    def test_a_verified_account_with_a_live_lockout_still_gets_423(self, client, db, unique_email):
+        """
+        The control. Reordering must not disable the lockout — only move it
+        behind the gate that comes first.
+        """
+        from datetime import UTC, datetime, timedelta
+        from uuid import uuid4
+
+        from sqlalchemy import text
+
+        from app.auth.security import hash_password
+        from app.core.db import set_current_user_id
+
+        user_id = uuid4()
+        address = unique_email("d10")
+        set_current_user_id(db, user_id)
+        db.execute(
+            text(
+                "INSERT INTO app_user "
+                "(id, email, password_hash, role, status, full_name, email_verified_at) "
+                "VALUES (:i, :e, :p, 'parent', 'active', 'D10 Probe', now())"
+            ),
+            {"i": user_id, "e": address, "p": hash_password("password123")},
+        )
+        db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:i)"), {"i": user_id})
+        db.execute(
+            text(
+                "INSERT INTO two_factor_enrollment "
+                "(user_id, method, status, totp_secret_encrypted, confirmed_at, "
+                " failed_attempts, locked_until) "
+                "VALUES (:i, 'totp', 'active', :s, now(), 3, :until)"
+            ),
+            {
+                "i": user_id,
+                "s": b"\x00" * 32,
+                "until": datetime.now(UTC) + timedelta(minutes=5),
+            },
+        )
+        db.flush()
+
+        resp = client.post(
+            "/api/auth/login",
+            json={
+                "email": address,
+                "password": "password123",
+                "turnstile_token": "test-turnstile-token",
+            },
+        )
+
+        assert resp.status_code == 423, resp.text
+        assert resp.json()["error"]["code"] == "TWO_FACTOR_LOCKED"

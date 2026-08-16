@@ -8,6 +8,7 @@ import { AlertCircleIcon, CheckCircleIcon, HistoryIcon } from '@/components/ui/I
 import { useRouter } from '@/i18n/navigation'
 import { resendVerification, startSession, verifyEmail } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
+import type { EmailVerifyResponse } from '@/lib/api/types'
 import {
   getUnverifiedEmail,
   setEnrollmentHandoff,
@@ -38,16 +39,47 @@ export function VerifyEmail({ token }: { token: string | null }) {
   const [state, setState] = useState<State>(token === null ? 'missing' : 'verifying')
   const [next, setNext] = useState<string | null>(null)
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
-  const attempted = useRef(false)
+  // ⚠️ FINDING D5 — THE IN-FLIGHT REQUEST, NOT A `hasAttempted` BOOLEAN.
+  //
+  // This used to be `useRef(false)` with an early return, which is precisely
+  // the shape `SessionGuard` records as deadlocking in development:
+  // `reactStrictMode` mounts, unmounts and remounts; the unmount sets
+  // `cancelled` and discards the in-flight response, the remount finds the ref
+  // still `true` — refs survive the double-invoke — and returns early. The first
+  // result is thrown away, the second request is never made, and the screen sits
+  // on "Verifying…" for ever with a healthy 200 in the network tab. Development
+  // only, so nothing in CI could see it.
+  //
+  // ⚠️ DELETING THE GUARD WOULD BE WORSE, WHICH IS WHY THE REF STAYS. The
+  //    verification token is SINGLE-USE and mail clients prefetch links, so a
+  //    second request consumes it and answers INVALID_TOKEN — turning "your
+  //    email is verified" into "this link is invalid" for a user who did nothing
+  //    wrong.
+  //
+  // Holding the PROMISE satisfies both: exactly one request is ever issued, and
+  // a remount subscribes to that same request instead of starting another or
+  // giving up. If it has already settled, `.then` still fires.
+  const inFlight = useRef<Promise<EmailVerifyResponse> | null>(null)
 
   useEffect(() => {
-    if (token === null || attempted.current) return
-    attempted.current = true
+    if (token === null) return
+
+    if (inFlight.current === null) {
+      const started = verifyEmail({ token })
+      // The real handler is attached on every mount below. This one only stops
+      // a rejection that lands during StrictMode's unmounted gap from surfacing
+      // as an unhandled promise rejection.
+      started.catch(() => {})
+      inFlight.current = started
+    }
+    // Held in a local so it is `Promise<EmailVerifyResponse>` rather than
+    // `... | null` at the await; the ref is nullable, this is not.
+    const request = inFlight.current
 
     let cancelled = false
     void (async () => {
       try {
-        const result = await verifyEmail({ token })
+        const result = await request
         if (cancelled) return
 
         // The token this returns is scoped to onboarding routes only; it is not

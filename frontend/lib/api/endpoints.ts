@@ -126,11 +126,34 @@ export function twoFactorEnroll(
   return apiFetch<TwoFactorEnrollResponse>('/auth/2fa/enroll', { method: 'POST', body })
 }
 
-/** Confirms the first code. Returns the backup codes ONCE, plus a session. */
+/**
+ * Confirms the first code. Returns the backup codes ONCE, plus a session.
+ *
+ * ⚠️ `noRetry` — finding D9, though NOT for the reason the register gave, and
+ * the difference is worth stating because it changes what to look for elsewhere.
+ *
+ * The register said a wrong CODE triggers refresh-and-retry and burns a second
+ * lockout attempt. It does not: a wrong code is `401 TWO_FACTOR_INVALID`, and
+ * `REFRESHABLE_401_CODES` is `{UNAUTHENTICATED, UNKNOWN}` — so the one path that
+ * increments `failed_attempts` was never retried. Measured, not assumed.
+ *
+ * What IS retryable is `401 UNAUTHENTICATED`, which this endpoint raises for
+ * "2FA enrollment not found or already active". Retrying that re-submits the
+ * same spent enrolment token for the same answer, after a token refresh that
+ * cannot succeed — enrolment happens BEFORE any session exists, so there is no
+ * refresh cookie to rotate. One wasted round trip on an already-failing path.
+ *
+ * Small, then. It is opted out anyway because the cost is a single word and the
+ * alternative is relying on a backend error code never changing.
+ */
 export function twoFactorConfirm(
   body: TwoFactorConfirmRequest,
 ): Promise<TwoFactorConfirmResponse> {
-  return apiFetch<TwoFactorConfirmResponse>('/auth/2fa/confirm', { method: 'POST', body })
+  return apiFetch<TwoFactorConfirmResponse>('/auth/2fa/confirm', {
+    method: 'POST',
+    body,
+    noRetry: true,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +233,12 @@ export function updateMe(body: MeUpdateRequest): Promise<MeResponse> {
  * live at once, and without `noRetry` every mistyped password would silently
  * fire a token refresh and replay the request.
  *
- * The `init.bearer === undefined` guard in client.ts does NOT cover this: unlike
- * `/2fa/confirm`, the credential here is not passed as `bearer`.
+ * ⚠️ The `init.bearer === undefined` guard in client.ts does NOT cover this —
+ * and, corrected while fixing D9, it covers NOTHING: `bearer` is not passed by
+ * a single wrapper in this file, so that condition is always true. Every 2FA
+ * credential travels in the body by design (tdd.md §3.1). The guard is a
+ * seatbelt for a seat nobody sits in; `noRetry` is what actually opts a route
+ * out.
  *
  * Resolves with nothing (204). ⚠️ EVERY REFRESH TOKEN IS REVOKED, INCLUDING THE
  * CALLER'S OWN — the next refresh will fail by design, and the caller should

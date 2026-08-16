@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import gate
 from app.auth.backup_codes import generate_backup_codes, hash_backup_code, verify_backup_code
-from app.auth.email import send_async as _queue_email
+from app.auth.email import send_after_commit as _queue_email
 from app.auth.email_templates import (
     build_password_reset_url,
     build_verification_url,
@@ -211,7 +211,7 @@ def register(db: Session, payload: RegisterRequest) -> dict:
         db, new_id, kind=TokenKind.email_verify, ttl_seconds=_EMAIL_LINK_TTL_SECONDS
     )
     subject, body = verification_email(build_verification_url(token, locale), locale)
-    _queue_email(email, subject, body)
+    _queue_email(db, email, subject, body)
 
     return {
         "user_id": str(new_id),
@@ -376,6 +376,23 @@ def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> 
         .one_or_none()
     )
 
+    # ⚠️ FINDING D10 — EMAIL VERIFICATION IS CHECKED FIRST, AND THE ORDER USED TO
+    #    BE THE OTHER WAY ROUND.
+    #
+    #    An unverified account with a live 2FA lockout was answered `423
+    #    TWO_FACTOR_LOCKED`, which is wrong twice over. It tells the user to wait
+    #    out a lockout on a second factor they have not reached and cannot use,
+    #    when the actual next step is to verify their address — and it discloses
+    #    that the account has 2FA state at all to someone who has not completed
+    #    the earlier gate. The onboarding order is verify, then enrol, then
+    #    challenge; the refusals have to follow it.
+    #
+    #    Masked: this is reachable with a correct password but no session. The
+    #    client keeps the unmasked address the user typed, because /email/resend
+    #    cannot act on a masked one.
+    if row["email_verified_at"] is None:
+        return {"status": "email_verification_required", "email": _mask_email(str(payload.email))}
+
     # Checked only AFTER the password is verified, so a wrong password against a
     # locked account still answers 401 and reveals nothing about the account.
     if twofa is not None and twofa["locked_until"] is not None:
@@ -384,12 +401,6 @@ def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> 
             locked_until = datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
         if locked_until > datetime.now(UTC):
             raise two_factor_locked(locked_until.isoformat())
-
-    if row["email_verified_at"] is None:
-        # Masked: this is reachable with a correct password but no session. The
-        # client keeps the unmasked address the user typed, because /email/resend
-        # cannot act on a masked one.
-        return {"status": "email_verification_required", "email": _mask_email(str(payload.email))}
 
     settings = get_settings()
     if twofa is None or str(twofa["status"]) != "active":
@@ -411,6 +422,28 @@ def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> 
         kind=TokenKind.two_factor_pending,
         ttl_seconds=settings.pending_token_ttl_seconds,
     )
+
+    # ⚠️ FINDING D18. `_issue_and_send_email_otp` was called from
+    # `two_factor_enroll` and `two_factor_resend` ONLY, so signing in to an
+    # `email_otp` account produced a challenge screen saying a code had been
+    # sent while NOTHING WAS SENT. The only way to receive the first code was to
+    # press Resend on a screen that exists to say the first one is on its way —
+    # the same shape as the registration bug fixed in Phase 1, and the reason
+    # Phase 1b's missing `resend` button labels were only half the problem.
+    #
+    # TOTP accounts need nothing here: the code is generated on the user's own
+    # device, which is the point of TOTP.
+    if str(twofa["method"]) == "email_otp":
+        recipient = (
+            db.execute(
+                text("SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"),
+                {"uid": user_id},
+            )
+            .mappings()
+            .one()
+        )
+        _issue_and_send_email_otp(db, user_id, recipient)
+
     return {
         "status": "two_factor_required",
         "pending_token": token,
@@ -824,7 +857,7 @@ def _issue_and_send_email_otp(db: Session, user_id: UUID, recipient: Mapping) ->
     subject, html = two_factor_otp_email(
         otp_code, expires_minutes=_EMAIL_OTP_TTL_SECONDS // 60, locale=locale
     )
-    _queue_email(str(recipient["email"]), subject, html)
+    _queue_email(db, str(recipient["email"]), subject, html)
 
 
 def _raise_for_token_status(db: Session, token: str, kind: TokenKind) -> None:
@@ -1420,7 +1453,7 @@ def resend_email_verification(db: Session, payload: EmailResendRequest) -> None:
         )
         locale = _locale_of(user_row)
         subject, html = verification_email(build_verification_url(token, locale), locale)
-        _queue_email(str(user_row["email"]), subject, html)
+        _queue_email(db, str(user_row["email"]), subject, html)
 
 
 def forgot_password(db: Session, payload: PasswordForgotRequest) -> None:
@@ -1446,7 +1479,7 @@ def forgot_password(db: Session, payload: PasswordForgotRequest) -> None:
         )
         locale = _locale_of(user_row)
         subject, html = password_reset_email(build_password_reset_url(token, locale), locale)
-        _queue_email(str(user_row["email"]), subject, html)
+        _queue_email(db, str(user_row["email"]), subject, html)
 
 
 def reset_password(db: Session, payload: PasswordResetRequest) -> None:

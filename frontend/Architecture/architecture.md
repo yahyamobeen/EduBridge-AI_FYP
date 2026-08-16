@@ -265,6 +265,14 @@ Three decisions it encodes, each of which a shared component tree makes easy to 
 **Phase 1b deleted it entirely** — 841 lines across `lib/api/mock/{index,db,db.test}.ts`, plus the
 branch, plus the flag from `.env.example`, `vitest.config.mts`, `render.yaml` and the CI workflow.
 
+**A11 — the navigation handoff is deleted (Phase 5).** `setNavigationHandler` and
+`handleOnboardingRedirect` let the client route a user to an onboarding step on a 403 without
+importing the router. ⚠️ **The only caller of `setNavigationHandler` in the repository was
+`client.test.ts`**, so `navigate` was permanently `null` and the redirect returned on its first
+line every time. Four tests passed while describing behaviour the application did not have, which is
+the more dangerous kind of green. `SessionGuard` re-evaluates `onboarding_state` on every mount and
+is what actually moves a gated or lapsed user; the suite went 289 -> 285.
+
 What it was, recorded so nobody rebuilds it: an in-memory router serving 18 endpoints from eight
 seeded accounts that all shared one password, plus magic strings — `verify-<user-id>` **minted a
 session from a URL with no password**, `123456` passed any two-factor challenge, and `BKUP0000` was a
@@ -351,7 +359,21 @@ An **allow-list**, not a status check. `TWO_FACTOR_INVALID` and `PENDING_TOKEN_E
 
 The retry itself is at `client.ts:168-170`, guarded three ways: not a challenge credential (`init.bearer === undefined`), not opted out (`!init.noRetry`), and on the allow-list. It runs **once** — `rawRequest` is called directly, not `apiFetch`, so there is no loop. `client.test.ts:96-105` asserts the original path is hit exactly twice and then gives up.
 
-`noRetry` is documented at `client.ts:105-113` and used at **three** call sites: `login`, `adminLogin` and `changePassword`. On `/auth/login` a 401 means the password was wrong, so refreshing would fire a guaranteed-to-fail request on every typo.
+`noRetry` is documented at `client.ts:105-113` and used at **four** call sites: `login`,
+`adminLogin`, `changePassword` and `twoFactorConfirm`.
+
+⚠️ **The `init.bearer === undefined` guard beside it protects nothing, and this was corrected in
+Phase 5.** No wrapper in `endpoints.ts` passes `bearer` — every 2FA credential travels in the body
+by design (tdd.md §3.1) — so that condition is always true. `noRetry` is the only thing that opts a
+route out of refresh-and-retry.
+
+⚠️ **`twoFactorConfirm` was added for finding D9, but NOT for the reason the register gave.** The
+register said a wrong CODE triggers a retry and burns a lockout attempt. Measured: a wrong code is
+`401 TWO_FACTOR_INVALID`, and `REFRESHABLE_401_CODES` is `{UNAUTHENTICATED, UNKNOWN}` — so the one
+path that increments `failed_attempts` was never retried. The retryable case is
+`401 UNAUTHENTICATED` ("enrolment not found or already active"), and retrying it refreshes a session
+that does not exist yet, because enrolment precedes any refresh cookie. One wasted round trip, not a
+burned attempt. On `/auth/login` a 401 means the password was wrong, so refreshing would fire a guaranteed-to-fail request on every typo.
 
 ⚠️ **`changePassword` is the subtle one, added in Phase 3.** `POST /auth/password/change` returns `401 UNAUTHENTICATED` for a wrong *current* password — the contract forbids a bespoke code — and `UNAUTHENTICATED` is necessarily on `REFRESHABLE_401_CODES`, because it normally means an expired token. It is therefore the **only** route where both meanings of that 401 are live at once. The `init.bearer === undefined` guard does **not** shield it: unlike `/2fa/confirm`, its credential travels in the body, not as `bearer`. Without `noRetry` every mistyped password would silently fire a token refresh and replay the request.
 

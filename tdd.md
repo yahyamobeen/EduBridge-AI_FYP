@@ -1106,6 +1106,26 @@ the winner's `Set-Cookie` has already replaced the token. Race events are audite
 detection reads the revoked row, so deleting it early turns a replayed stolen token into a silent 401
 instead of a family revocation.
 
+**Refusals follow the onboarding order (v0.3.8).** An account that is not yet email-verified is
+answered `email_verification_required` even when it carries a live second-factor lockout. The
+previous order returned `423 TWO_FACTOR_LOCKED` first, which told the user to wait out a lockout on
+a factor they had not reached and disclosed that the account had 2FA state at all. Verify, then
+enrol, then challenge — the refusals must match the journey.
+
+**Outgoing email is dispatched only after the transaction commits (v0.3.8).** A verification or
+reset link is queued against the session that minted its token and released when that session
+commits; a rollback discards it. Sending during the open transaction meant a request that failed
+late delivered a link for a token that no longer existed — unrecallable, and answerable only with
+`INVALID_TOKEN`. Signing in to an `email_otp` account also sends the code, which it previously did
+not: the challenge screen said one had been sent while nothing had.
+
+**Every credential-bearing field is length-bounded (v0.3.8).** Passwords, tokens and codes all carry
+a maximum, because an unbounded string reaching argon2 is an unbounded amount of work on the one
+endpoint an unauthenticated caller can hammer. ⚠️ Fields carrying an EXISTING password — login, and
+the current password on change — are bounded above only: a minimum there would refuse any account
+whose password predates a policy change, and would answer `400` where every other wrong password
+answers `401`.
+
 **Clients branch on `code`, never on `message`** — messages are localized and will change. An unrecognised
 code must still render a usable state rather than a blank screen (`prd.md` §20).
 

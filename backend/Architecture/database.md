@@ -526,6 +526,27 @@ carry `updated_at` columns with **no** trigger attached — finding D14.
 | `app.revoke_auth_token(p_id uuid)` | `VOLATILE` | Yes | `void` | `tokens.py:119` (`rotate_refresh_token`, `:98`) | `app_backend` | `20260802140000:152` |
 | `app.revoke_refresh_family(p_user_id uuid)` | `VOLATILE` | Yes | `integer` — how many were revoked, so the caller can audit it | `tokens.py:134` (`revoke_refresh_family`, `:125`) — reuse-detection breach response | `app_backend` | `20260802140000:163` |
 
+### `updated_at` is maintained on every table that has it — Phase 5 (`20260817150000`)
+
+`app.set_updated_at()` existed and nine tables used it. **Four carried the column with no trigger**,
+so the value was written once by its `DEFAULT now()` and never changed again — a column that reports
+creation time while looking exactly like the nine that report modification time.
+
+⚠️ **The register named three; the live catalogue had four.** Reading `initial_schema.sql` finds
+`teacher_profile`, `parent_profile` and `admin_profile`, which are adjacent in the file. Querying
+`pg_class`/`pg_trigger` adds **`mastery_estimate`**, declared 400 lines away — and it is the one
+with consequences, being one of the five progress tables a parent and a teacher read. Finding F1's
+lesson again: author from the catalogue, never from the migration files.
+
+⚠️ `app.set_updated_at()` had its `PUBLIC` execute revoked by `20260816190000` (C5). PostgreSQL
+checks `EXECUTE` on a trigger function **when the trigger is created**, not when it fires, so these
+must be applied as the owner — which is how migrations run, but not how an `app_backend` session
+would.
+
+⚠️ The trigger function uses `now()`, and that is correct here, unlike everywhere in Phase 4.
+`updated_at` records which TRANSACTION last touched the row, so rows written together sharing a
+timestamp is the intent; `clock_timestamp()` would make them disagree.
+
 ### Session policy — Phase 4 (`20260817120000`, `20260817130000`)
 
 **Four columns and three functions that give a session an end.** Before them,

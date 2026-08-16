@@ -1,0 +1,277 @@
+"""
+Email dispatch — findings D1 and D18 (Phase 5).
+
+Two defects on the same code path, which is why they are fixed and tested
+together.
+
+**D1** — `send_async` handed the message to a worker thread immediately, while
+the transaction that justified it was still open. The real commit happens in
+`get_db` AFTER the route returns, so a request that failed late sent a
+verification or reset link for a token row that was then rolled back. The user
+receives a link that can only ever answer INVALID_TOKEN. An email is
+unrecallable and a transaction is not, which is the wrong way round.
+
+**D18** — `login()` never sent the email OTP at all. `_issue_and_send_email_otp`
+was called from `two_factor_enroll` and `two_factor_resend` only, so an
+`email_otp` account reached a challenge screen saying a code had been sent while
+nothing was. The only way to get the first code was to press Resend on the
+screen that exists to say the first one is coming.
+"""
+
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import text
+
+from app.auth import email as email_module
+from app.auth.email import send_after_commit
+from app.auth.security import hash_password
+from app.core.db import set_current_user_id
+
+PASSWORD = "password123"  # noqa: S105 -- a fixture value, not a credential
+
+
+class _Recorder:
+    """Stands in for the mail provider and remembers what it was asked to send."""
+
+    sent: list[tuple[str, str, str]] = []
+
+    def send(self, to: str, subject: str, html_body: str) -> None:
+        type(self).sent.append((to, subject, html_body))
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """
+    Capture delivered messages.
+
+    ⚠️ Patched OVER conftest's `never_send_real_email`, which installs the
+    logging sender. Later monkeypatch wins, and the safety property that matters
+    — never reaching a real provider — is preserved either way.
+    """
+    _Recorder.sent = []
+    monkeypatch.setattr(email_module, "get_email_sender", _Recorder)
+    yield _Recorder.sent
+    _Recorder.sent = []
+
+
+def _user(db, email: str, *, method: str | None = None) -> str:
+    user_id = uuid4()
+    set_current_user_id(db, user_id)
+    db.execute(
+        text(
+            "INSERT INTO app_user "
+            "(id, email, password_hash, role, status, full_name, email_verified_at) "
+            "VALUES (:id, :e, :pw, 'parent', 'active', 'Dispatch Probe', now())"
+        ),
+        {"id": user_id, "e": email, "pw": hash_password(PASSWORD)},
+    )
+    db.execute(text("INSERT INTO parent_profile (user_id) VALUES (:id)"), {"id": user_id})
+    if method is not None:
+        db.execute(
+            text(
+                "INSERT INTO two_factor_enrollment "
+                "(user_id, method, status, totp_secret_encrypted, confirmed_at) "
+                "VALUES (:id, :m, 'active', NULL, now())"
+            ),
+            {"id": user_id, "m": method},
+        )
+    db.flush()
+    return str(user_id)
+
+
+class TestD1TheTransactionDecidesWhetherToSend:
+    def test_a_rollback_discards_the_queued_email(self, db, sent):
+        """
+        ⚠️ THE DEFECT, STATED AS A TEST. Before this fix the message was already
+        in flight by the time the rollback happened, so there was nothing to
+        discard — the user had a link for a token that no longer existed.
+        """
+        send_after_commit(db, "nobody@example.com", "Subject", "<p>body</p>")
+        db.rollback()
+        email_module.drain_pending_emails()
+
+        assert sent == [], "an email survived the rollback of the work that justified it"
+
+    def test_a_commit_dispatches_it(self, db, sent):
+        """
+        The control. Without it, a change that simply dropped every message
+        would pass the test above and look like a fix.
+        """
+        send_after_commit(db, "somebody@example.com", "Subject", "<p>body</p>")
+        db.commit()
+        email_module.drain_pending_emails()
+
+        assert [to for to, _, _ in sent] == ["somebody@example.com"]
+
+    def test_nothing_is_sent_before_the_commit(self, db, sent):
+        """
+        The ordering itself, rather than the outcome. Queuing must be inert
+        until the transaction resolves — otherwise the fix is only a narrower
+        race.
+        """
+        send_after_commit(db, "early@example.com", "Subject", "<p>body</p>")
+        email_module.drain_pending_emails()
+        assert sent == [], "the message was dispatched while the transaction was still open"
+
+        db.commit()
+        email_module.drain_pending_emails()
+        assert len(sent) == 1
+
+    def test_the_old_path_still_dispatches_immediately(self, db, sent):
+        """
+        ⚠️ THE CONTROL THAT PROVES THE TESTS ABOVE CAN FAIL.
+
+        `send_async` is what every caller used before this fix, and it is
+        deliberately still public — the after-commit path calls it. Asserting
+        that it fires with no transaction involved shows these tests are
+        distinguishing the two behaviours rather than passing because nothing
+        is ever sent.
+
+        If a future change routes a service caller back through `send_async`,
+        D1 is reintroduced and `test_nothing_is_sent_before_the_commit` fails.
+        """
+        email_module.send_async("immediate@example.com", "Subject", "<p>body</p>")
+        email_module.drain_pending_emails()
+
+        assert [to for to, _, _ in sent] == ["immediate@example.com"]
+
+    def test_no_service_caller_uses_the_immediate_path(self):
+        """
+        The structural half. `service.py` must reach email only through the
+        after-commit seam; a stray `send_async` import there is D1 returning,
+        and it would be invisible to every behavioural test that happens not to
+        cover that one call site.
+
+        ⚠️ IT MATCHES A CALL OR AN IMPORT, NOT A MENTION. The first version
+        asserted `"send_async" not in source` and failed immediately —
+        `_lookup_for_email_flow`'s docstring names `email.send_async` while
+        explaining the timing-attack fix. A prose reference is not a call site,
+        and a guard that cannot tell them apart is one somebody deletes.
+        """
+        import ast
+        from pathlib import Path
+
+        source = Path(__file__).resolve().parents[2] / "app" / "auth" / "service.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "app.auth.email"
+            for alias in node.names
+        }
+        called = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        } | {
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+
+        assert "send_after_commit" in imported, "service.py no longer uses the after-commit seam"
+        assert "send_async" not in imported, (
+            "service.py imports the immediate dispatch path again -- finding D1"
+        )
+        assert "send_async" not in called, "service.py calls send_async directly -- finding D1"
+
+    def test_a_second_commit_does_not_send_it_again(self, db, sent):
+        """
+        The outbox is popped, not read. A message left behind would be
+        re-delivered by the next commit on the same session — and `get_db`
+        commits once per request, so a long-lived session would duplicate.
+        """
+        send_after_commit(db, "once@example.com", "Subject", "<p>body</p>")
+        db.commit()
+        db.commit()
+        email_module.drain_pending_emails()
+
+        assert len(sent) == 1
+
+
+class TestD18LoginSendsTheEmailOtp:
+    def test_signing_in_to_an_email_otp_account_actually_sends_the_code(
+        self, client, db, sent, unique_email
+    ):
+        """
+        ⚠️ THE SCREEN SAID A CODE HAD BEEN SENT AND NOTHING HAD BEEN.
+
+        `_issue_and_send_email_otp` was reachable from enrolment and resend only.
+        Phase 1b fixed the missing `resend` button labels on this screen, which
+        made the workaround usable — this makes the workaround unnecessary.
+        """
+        address = unique_email("dispatch")
+        _user(db, address, method="email_otp")
+
+        resp = client.post(
+            "/api/auth/login",
+            json={
+                "email": address,
+                "password": PASSWORD,
+                "turnstile_token": "test-turnstile-token",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "two_factor_required"
+        assert resp.json()["method"] == "email_otp"
+
+        email_module.drain_pending_emails()
+        assert [to for to, _, _ in sent] == [address], (
+            "the challenge screen was reached with no code sent -- finding D18"
+        )
+
+    def test_a_totp_account_is_sent_nothing(self, client, db, sent, unique_email):
+        """
+        The complement, and it matters: a TOTP code is generated on the user's
+        own device. Mailing one would be both pointless and a second, weaker
+        channel for the same factor.
+        """
+        address = unique_email("dispatch")
+        db_user = _user(db, address)
+        db.execute(
+            text(
+                "INSERT INTO two_factor_enrollment "
+                "(user_id, method, status, totp_secret_encrypted, confirmed_at) "
+                "VALUES (:id, 'totp', 'active', :s, now())"
+            ),
+            {"id": db_user, "s": b"\x00" * 32},
+        )
+        db.flush()
+
+        resp = client.post(
+            "/api/auth/login",
+            json={
+                "email": address,
+                "password": PASSWORD,
+                "turnstile_token": "test-turnstile-token",
+            },
+        )
+
+        assert resp.json()["method"] == "totp"
+        email_module.drain_pending_emails()
+        assert sent == []
+
+    def test_a_failed_login_sends_nothing(self, client, db, sent, unique_email):
+        """
+        D1 and D18 meeting: the OTP is queued inside the login transaction, so a
+        wrong password must not mail a code. It also must not mail one to an
+        address an attacker merely guessed.
+        """
+        address = unique_email("dispatch")
+        _user(db, address, method="email_otp")
+
+        resp = client.post(
+            "/api/auth/login",
+            json={
+                "email": address,
+                "password": "wrong-password",
+                "turnstile_token": "test-turnstile-token",
+            },
+        )
+
+        assert resp.status_code == 401
+        email_module.drain_pending_emails()
+        assert sent == []

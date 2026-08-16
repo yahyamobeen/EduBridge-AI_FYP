@@ -14,7 +14,7 @@ database, so a database dump alone does not yield usable secrets (tdd.md §6.9).
 from __future__ import annotations
 
 import io
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
 import pyotp
@@ -77,10 +77,30 @@ def verify_totp_code(
     now = now or datetime.now(UTC)
 
     for offset in (-1, 0, 1):
-        # Compute the time for this offset, then get the counter for that time.
-        adjusted_time = now.timestamp() + (offset * totp.interval)
+        # ⚠️ AN AWARE `datetime`, NEVER A FLOAT — FINDING D7, AND IT IS A ONE-HOUR
+        #    BUG TWICE A YEAR.
+        #
+        #    This passed `now.timestamp() + offset * interval`, a float. Read
+        #    pyotp: `TOTP.at` does `datetime.fromtimestamp(int(for_time))` for a
+        #    non-datetime, which produces a **naive local** datetime, and
+        #    `TOTP.timecode` then branches on `tzinfo` —
+        #
+        #        if for_time.tzinfo:  calendar.timegm(for_time.utctimetuple())
+        #        else:                time.mktime(for_time.timetuple())
+        #
+        #    — so the float took the `mktime` path, which interprets a struct_time
+        #    as LOCAL time. The round trip is self-consistent on a machine at a
+        #    fixed offset, which is why it works in Karachi (UTC+5, no DST) and in
+        #    CI. Across a DST transition `mktime` is ambiguous and the counter
+        #    moves by 3600/interval steps, rejecting every valid code for an hour.
+        #
+        #    An aware datetime takes the `timegm` branch, which is pure UTC and has
+        #    no local-time step to be ambiguous about. `now` is already aware.
+        adjusted_time = now + timedelta(seconds=offset * totp.interval)
         if totp.verify(code, for_time=adjusted_time):
-            counter = int(adjusted_time) // totp.interval
+            # pyotp's own counter for that instant, rather than a second
+            # derivation here that could disagree with the one it verified against.
+            counter = totp.timecode(adjusted_time)
             if last_counter is not None and counter <= last_counter:
                 # Replay guard: this code was already accepted.
                 continue

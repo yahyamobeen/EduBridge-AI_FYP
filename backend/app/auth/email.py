@@ -25,6 +25,9 @@ import re
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Protocol
 
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
 from app.core.config import get_settings
 
 logger = logging.getLogger("edubridge.email")
@@ -165,9 +168,65 @@ def _deliver(to: str, subject: str, html_body: str) -> None:
 
 
 def send_async(to: str, subject: str, html_body: str) -> None:
-    """Queue an email. Returns immediately; delivery happens off the request."""
+    """
+    Queue an email. Returns immediately; delivery happens off the request.
+
+    ⚠️ THIS DISPATCHES NOW, WITH NO REGARD FOR THE TRANSACTION. Almost every
+    caller should use `send_after_commit` instead — see finding D1 below. This
+    stays public because the after-commit path calls it, and because a message
+    that depends on no database state is legitimately sent this way.
+    """
     future = _pool().submit(_deliver, to, subject, html_body)
     _pending.append(future)
+
+
+# ---------------------------------------------------------------------------
+# Finding D1 — dispatch must wait for the transaction that justified it.
+#
+# `send_async` hands the message to a worker thread IMMEDIATELY. Every caller
+# in `service.py` runs inside an open transaction that has not committed yet:
+# the real commit happens in `core/db.py`'s `get_db`, AFTER the route returns.
+#
+# So the ordering was: mint a token -> queue the email -> worker sends it ->
+# request fails -> transaction rolls back. The user receives a verification or
+# password-reset link for a token row that does not exist, and clicking it is an
+# INVALID_TOKEN they cannot do anything about. The email is unrecallable; the
+# database is not, which is exactly the wrong way round.
+#
+# The outbox lives in `Session.info`, so it is per-session and needs no globals
+# and no plumbing through call signatures beyond the session already in scope.
+# ---------------------------------------------------------------------------
+
+_OUTBOX = "edubridge_email_outbox"
+
+
+def send_after_commit(session: Session, to: str, subject: str, html_body: str) -> None:
+    """
+    Queue an email to be dispatched **only if this transaction commits**.
+
+    Discarded on rollback: an email about a row that no longer exists is worse
+    than no email, because the user acts on it.
+    """
+    session.info.setdefault(_OUTBOX, []).append((to, subject, html_body))
+
+
+@event.listens_for(Session, "after_commit")
+def _dispatch_outbox_on_commit(session: Session) -> None:
+    # `.pop` rather than read-then-clear: a send that raises must not leave the
+    # message queued for the next commit on the same session.
+    for message in session.info.pop(_OUTBOX, []):
+        send_async(*message)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _discard_outbox_on_rollback(session: Session, previous_transaction: object) -> None:
+    """
+    ⚠️ `after_soft_rollback`, NOT `after_rollback`. The latter fires only when a
+    DBAPI-level rollback actually happens; a session whose transaction never
+    reached the database would keep its outbox and dispatch it on the NEXT
+    commit — mailing a link for a token that was discarded.
+    """
+    session.info.pop(_OUTBOX, None)
 
 
 def drain_pending_emails(timeout: float = 10.0) -> None:

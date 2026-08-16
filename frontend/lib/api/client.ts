@@ -49,26 +49,32 @@ export function endSession(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Navigation handoff
+// FINDING A11 — the navigation handoff is DELETED (owner's decision, 2026-08-16)
 //
-// The client must be able to send a user to an onboarding step on 403, but it
-// must not import the router: that would make it untestable outside React and
-// couple the transport to the framework. The provider registers a handler.
+// There was a `setNavigationHandler` seam here, plus `handleOnboardingRedirect`
+// on the 403 path, so the client could send a user to an onboarding step without
+// importing the router. It was well built and it NEVER RAN: the only caller of
+// `setNavigationHandler` in the entire repository was `client.test.ts`. No
+// provider ever registered a handler, so `navigate` was permanently `null` and
+// the redirect returned on its first line every single time.
+//
+// ⚠️ DELETED RATHER THAN WIRED UP, and the reason is not that wiring it is hard.
+//    `SessionGuard` re-evaluates `onboarding_state` on every mount and catches
+//    the same two conditions, so nobody is ever stranded. What the seam would
+//    have added is catching a mid-session trial lapse BEFORE the next
+//    navigation — real, but small.
+//
+//    What it cost was worse: four passing tests describing behaviour the
+//    application does not have. A tested-but-dead path is how the next reader
+//    concludes the feature works, and it is how a reviewer concludes the 403
+//    redirect is covered.
+//
+// If the mid-session case is wanted later, the honest form is a React-side
+// interceptor that owns the router directly — not a global seam whose
+// registration can be forgotten silently.
 // ---------------------------------------------------------------------------
 
-type NavigateFn = (path: string) => void
-
-let navigate: NavigateFn | null = null
-let currentPath: () => string = () => ''
-
-export function setNavigationHandler(fn: NavigateFn, pathReader: () => string): void {
-  navigate = fn
-  currentPath = pathReader
-}
-
 export function __resetClientForTests(): void {
-  navigate = null
-  currentPath = () => ''
   lastLifetimeSeconds = 0
   refreshInFlight = null
 }
@@ -172,30 +178,9 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}): Prom
       if (await refreshOnce()) return rawRequest<T>(path, init)
     }
 
-    handleOnboardingRedirect(error)
+    // A11: `handleOnboardingRedirect(error)` stood here and did nothing —
+    // `navigate` was never registered. `SessionGuard` handles GATE_PENDING and
+    // SUBSCRIPTION_REQUIRED on mount, which is what actually runs.
     throw error
   }
-}
-
-/**
- * `GATE_PENDING` and `SUBSCRIPTION_REQUIRED` both mean "authenticated, but an
- * onboarding precondition is unmet". Neither is an error to show; both are a
- * signal to move the user to the step that clears them.
- */
-function handleOnboardingRedirect(error: ApiError): void {
-  if (error.status !== 403 || navigate === null) return
-
-  const target =
-    error.code === 'GATE_PENDING'
-      ? '/onboarding/guardian'
-      : error.code === 'SUBSCRIPTION_REQUIRED'
-        ? '/onboarding/plan'
-        : null
-
-  if (target === null) return
-  // The gate page itself calls guardian endpoints. Redirecting to a page we
-  // are already on would loop.
-  if (currentPath().endsWith(target)) return
-
-  navigate(target)
 }
