@@ -171,7 +171,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | Method | Path | Auth | Role | Purpose |
 |--------|------|------|------|---------|
 | GET | `/api/reference/enums` | No | — | Boards, class levels, **groups keyed by class**, mediums, languages. Signup reads its options from here rather than hard-coding them |
-| POST | `/api/auth/register` | No | — | Create student (board/class/**group**/medium/language); teacher/parent variants. **Issues no session** — the account starts at `email_verification_pending` |
+| POST | `/api/auth/register` | No | — | Create student (board/class/**group**/medium/language); teacher/parent variants. **`role` accepts `student`, `teacher`, `parent` only — never `admin`** (FR-A2a); an `admin` value is `400 VALIDATION_ERROR`. **Issues no session** — the account starts at `email_verification_pending` |
 | POST | `/api/auth/login` | No | — | Authenticate → `200` + `status` discriminator (never a session directly) |
 | POST | `/api/auth/email/verify` | No (token) | any | Verify address → **returns `access_token` + `enrollment_token`** (v0.3.2) |
 | POST | `/api/auth/email/resend` | No | any | Re-send the verification email (rate-limited) |

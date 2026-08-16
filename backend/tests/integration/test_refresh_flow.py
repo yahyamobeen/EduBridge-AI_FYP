@@ -91,7 +91,59 @@ def test_refresh_then_me(client, db):
     assert me.json()["onboarding_state"] == "email_verification_pending"
 
 
-def test_logout_then_refresh_401(client, db):
+def test_logout_clears_the_cookie_so_the_next_refresh_is_not_read_as_theft(client, db):
+    """
+    Finding A2.
+
+    THE PREVIOUS VERSION OF THIS TEST ASSERTED THE BUG AS CORRECT. It logged
+    out, then hand-fed the revoked token back to `/auth/refresh` and asserted
+    401 — which passes whether or not the cookie is cleared, because supplying
+    the cookie manually bypasses the very thing that was broken. Worse, the 401
+    it asserted came from the REUSE-DETECTION path, so the test's happy ending
+    was a `refresh_token_reuse_detected` audit row and an account-wide family
+    revocation on an ordinary sign-out.
+
+    What matters is the message, not the status. Both paths answer 401:
+      * "Missing refresh token."            -> no cookie was presented. Correct.
+      * "Invalid or expired refresh token." -> reuse detection. Revokes the
+                                               family and writes a breach row.
+    """
+    _, plain = _user_with_refresh_token(client, db)
+    client.cookies.clear()
+
+    resp = client.post("/api/auth/refresh", cookies={"refresh_token": plain})
+    assert resp.status_code == 200
+    access = resp.json()["access_token"]
+
+    logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {access}"})
+    assert logout.status_code == 204
+
+    # The response must ACTIVELY clear it, on the same path it was set on — a
+    # browser only overwrites a cookie when name and path match.
+    set_cookie = logout.headers.get("set-cookie", "")
+    assert "refresh_token=" in set_cookie, "logout sent no Set-Cookie at all"
+    assert "Path=/api/auth/refresh" in set_cookie, set_cookie
+    assert "Max-Age=0" in set_cookie or "expires=" in set_cookie.lower(), set_cookie
+
+    # And the client honoured it, so there is nothing left to present.
+    assert not client.cookies.get("refresh_token")
+
+    stale = client.post("/api/auth/refresh")
+    assert stale.status_code == 401
+    assert stale.json()["error"]["message"] == "Missing refresh token.", (
+        "sign-out left a usable cookie, so refresh took the reuse-detection path "
+        "and recorded a breach that never happened"
+    )
+
+
+def test_a_revoked_token_deliberately_re_presented_is_still_refused(client, db):
+    """
+    The property the old test was reaching for, kept and correctly labelled.
+
+    A revoked token must never work again, however it arrives — this is the
+    theft case, and here the reuse path firing is exactly right. Separated from
+    the test above so that one can assert the sign-out path is NOT this one.
+    """
     _, plain = _user_with_refresh_token(client, db)
     client.cookies.clear()
 
@@ -103,8 +155,9 @@ def test_logout_then_refresh_401(client, db):
     logout = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {access}"})
     assert logout.status_code == 204
 
-    stale = client.post("/api/auth/refresh", cookies={"refresh_token": rotated})
-    assert stale.status_code == 401
+    client.cookies.clear()
+    replayed = client.post("/api/auth/refresh", cookies={"refresh_token": rotated})
+    assert replayed.status_code == 401
 
 
 def test_registered_student_has_a_trial_row(client, db):

@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import (
     AuthContext,
     authenticated,
+    clear_refresh_cookie,
     read_refresh_token_cookie,
     require_role,
+    set_refresh_cookie,
 )
 from app.auth.schemas import (
     AccessTokenResponse,
@@ -55,7 +57,6 @@ from app.auth.service import (
     two_factor_verify,
     verify_email,
 )
-from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.ratelimit import (
     EMAIL_RESEND_LIMIT,
@@ -115,21 +116,7 @@ def refresh_endpoint(
     enforce(request, bucket="refresh", limit=REFRESH_LIMIT)
     old_token = read_refresh_token_cookie(request)
     result = refresh(db, old_token)
-    settings = get_settings()
-    response.set_cookie(
-        key="refresh_token",
-        value=result["refresh_token"],
-        httponly=True,
-        secure=settings.is_production,
-        # Lax is correct while the site and the API share a registrable domain.
-        # If they are ever split across sites this must become
-        # `SameSite=None; Secure`, or the cookie stops being sent and refresh
-        # fails in production only.
-        samesite="lax",
-        max_age=settings.refresh_token_ttl_days * 86400,
-        # Scoped, so the cookie is not attached to every API call.
-        path="/api/auth/refresh",
-    )
+    set_refresh_cookie(response, result["refresh_token"])
     # The rotated token goes ONLY into the httpOnly cookie. It is deliberately
     # absent from AccessTokenResponse so it cannot reach a log or a client store.
     return AccessTokenResponse(
@@ -140,8 +127,15 @@ def refresh_endpoint(
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout_endpoint(ctx: Annotated[AuthContext, Depends(authenticated)]) -> None:
+def logout_endpoint(
+    response: Response, ctx: Annotated[AuthContext, Depends(authenticated)]
+) -> None:
     logout(ctx.session, ctx.user_id)
+    # Finding A2. Revoking the rows without clearing the cookie left the browser
+    # presenting a revoked token on the next refresh, which reuse detection
+    # correctly read as theft -- so every sign-out revoked the family again and
+    # wrote a false `refresh_token_reuse_detected` audit row.
+    clear_refresh_cookie(response)
     return
 
 
@@ -183,17 +177,9 @@ def two_factor_confirm_endpoint(
     enforce(request, bucket="2fa_confirm", limit=TWO_FA_CONFIRM_LIMIT)
     result = two_factor_confirm(db, payload)
 
-    # Set refresh token as httpOnly cookie
-    settings = get_settings()
-    response.set_cookie(
-        key="refresh_token",
-        value=result["refresh_token"],
-        httponly=True,
-        secure=settings.is_production,
-        samesite="lax",
-        max_age=settings.refresh_token_ttl_days * 86400,
-        path="/api/auth/refresh",
-    )
+    # The refresh token goes ONLY into the httpOnly cookie; it is deliberately
+    # absent from the response model so it cannot reach a log or a client store.
+    set_refresh_cookie(response, result["refresh_token"])
 
     # Return response without refresh_token
     return TwoFactorConfirmResponse(
@@ -215,17 +201,9 @@ def two_factor_verify_endpoint(
     enforce(request, bucket="2fa_verify", limit=TWO_FA_VERIFY_LIMIT)
     result = two_factor_verify(db, payload)
 
-    # Set refresh token as httpOnly cookie
-    settings = get_settings()
-    response.set_cookie(
-        key="refresh_token",
-        value=result["refresh_token"],
-        httponly=True,
-        secure=settings.is_production,
-        samesite="lax",
-        max_age=settings.refresh_token_ttl_days * 86400,
-        path="/api/auth/refresh",
-    )
+    # The refresh token goes ONLY into the httpOnly cookie; it is deliberately
+    # absent from the response model so it cannot reach a log or a client store.
+    set_refresh_cookie(response, result["refresh_token"])
 
     # Return response without refresh_token
     return TwoFactorVerifyResponse(

@@ -84,13 +84,24 @@ discriminator naming the next step — one of three response shapes
 (`routes.py:133-139`) so it cannot reach a log or a client store. Cookie `path` is
 `/api/auth/refresh`, so it is not attached to every call.
 
-> **Known defect A1 — live today.** `RegisterRequest.role` is an unrestricted `UserRole`
-> (`schemas.py:39`). **Anyone can self-register as an administrator.**
+> **A1 — FIXED, Phase 1 (2026-08-16).** `RegisterRequest.role` was an unrestricted `UserRole`, so
+> **anyone could self-register as an administrator** and reach `active` in one request. It is now
+> `RegistrableRole` (`models/enums.py`), which is `UserRole` minus `admin` — a narrower **type**
+> rather than a validator, so the restriction appears in the generated OpenAPI schema and Pydantic
+> rejects `admin` through `_validation_error_response` as the ordinary `400 VALIDATION_ERROR`
+> envelope. Second layer: migration `20260816120000` narrows `app_user_insert` to
+> `WITH CHECK (id = app.current_user_id() AND role <> 'admin')`, so the database refuses an
+> administrator row to `app_backend` even if a future endpoint forgets the schema. **Promotion to
+> administrator remains an owner-run SQL operation**, which that policy does not constrain.
 >
-> **Known defect A2 — live today.** `logout_endpoint` (`routes.py:143`) revokes refresh rows but
-> never calls `delete_cookie`, so the browser keeps sending the now-revoked token. The next refresh
-> reads as **token theft** and writes a false `refresh_token_reuse_detected` audit row
-> (`tokens.py:140-146`).
+> **A2 — FIXED, Phase 1 (2026-08-16).** `logout_endpoint` revoked the refresh rows and never cleared
+> the cookie, so the browser kept presenting a revoked token; the next refresh read it as **token
+> theft**, revoked the family and wrote a false `refresh_token_reuse_detected` audit row. Every
+> ordinary sign-out fabricated a security incident. The cookie's attributes had been written out by
+> hand at **three** set sites, and a browser only overwrites a cookie when name and path match — so
+> the fix was `set_refresh_cookie()` / `clear_refresh_cookie()` in `dependencies.py`, one definition
+> shared by all four call sites. `tests/unit/test_refresh_cookie.py` asserts each attribute of the
+> deletion against the setter's own value rather than a literal, so the pair cannot drift.
 >
 > **Known defects D2 and D12.** Refresh rotation is three non-atomic statements
 > (`tokens.py:118-122` then `issue_refresh_token`). `LoginRequest.password` (`schemas.py:124`) has
@@ -199,9 +210,11 @@ GUARDIAN_ALREADY_LINKED`; `pending` → `200`.
 > **Known defect D16.** Unauthenticated, unrate-limited, and it reports `settings.environment` in the
 > body (`main.py:91`).
 >
-> **Known defect A5.** `/openapi.json` is **not** disabled in production. `docs_url=None`
-> (`main.py:52`) gates only the Swagger HTML, not the schema route — so the full endpoint surface is
-> published even when `/docs` is closed.
+> **A5 — FIXED, Phase 1 (2026-08-16).** `docs_url` and `redoc_url` gate only the two HTML *viewers*;
+> both are pages that fetch `/openapi.json`, which kept its default. Production therefore served the
+> complete schema — every route, field name, bound and enum — unauthenticated, while `/docs`
+> returned 404 and looked closed. `main.py` now passes
+> `openapi_url=None if settings.is_production else "/openapi.json"`.
 
 ---
 

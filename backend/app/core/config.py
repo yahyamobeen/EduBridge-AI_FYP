@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,7 +32,15 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "EduBridge AI"
-    environment: str = Field(default="development", validation_alias="APP_ENV")
+    # Finding A4. This was a bare `str` compared with `== "production"`, so
+    # `APP_ENV=prod`, `Production` or a value with a trailing space read as
+    # DEVELOPMENT in a production deployment: `/docs` served, the logging email
+    # sender permitted, and -- worst -- `secure` dropped from the refresh cookie,
+    # putting a live credential on the wire in cleartext. A `Literal` turns every
+    # one of those typos into a boot failure instead.
+    environment: Literal["development", "test", "production"] = Field(
+        default="development", validation_alias="APP_ENV"
+    )
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     api_base_path: str = Field(default="/api", validation_alias="API_BASE_PATH")
 
@@ -74,7 +83,14 @@ class Settings(BaseSettings):
     # "resend" sends via the Resend API, and needs `uv sync --extra email`.
     # No provider is settled; `logging` is the default so nothing is chosen by
     # accident.
-    email_provider: str = Field(default="logging", validation_alias="EMAIL_PROVIDER")
+    # Finding A3. Also a bare `str`. Every consumer tests `== "logging"` or
+    # `== "resend"`, so `EMAIL_PROVIDER=Resend` matched NEITHER -- it fell
+    # through to the logging sender AND past the production guard below, which
+    # also tests `== "logging"`. A production deployment would have written every
+    # 2FA code and every password-reset link to stdout while reporting healthy.
+    email_provider: Literal["logging", "resend"] = Field(
+        default="logging", validation_alias="EMAIL_PROVIDER"
+    )
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
     email_from: str = Field(default="", validation_alias="EMAIL_FROM")
     app_base_url: str = Field(default="http://localhost:3000", validation_alias="APP_BASE_URL")
@@ -101,7 +117,25 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.environment.lower() == "production"
+        # No `.lower()` and no `.strip()`: `_normalise_choice` has already done
+        # both before validation, and anything that survived is one of exactly
+        # three literals. Defensive re-normalisation here would hide a failure
+        # that should have happened at boot.
+        return self.environment == "production"
+
+    @field_validator("environment", "email_provider", mode="before")
+    @classmethod
+    def _normalise_choice(cls, value: object) -> object:
+        """
+        Trim and lower-case BEFORE the Literal is checked.
+
+        `APP_ENV=Production ` with a trailing space is a plausible thing to paste
+        into a dashboard field, and it should start the application rather than
+        refuse it. `APP_ENV=prod` is a different thing entirely -- an abbreviation
+        that was never a valid value -- and that must still fail. Normalising
+        forgives formatting; the Literal refuses guesses.
+        """
+        return value.strip().lower() if isinstance(value, str) else value
 
     @field_validator("jwt_secret", "jwt_refresh_secret")
     @classmethod
@@ -171,6 +205,18 @@ class Settings(BaseSettings):
             )
         if self.email_provider == "resend" and not self.email_from:
             raise ValueError("EMAIL_PROVIDER=resend requires EMAIL_FROM to be set.")
+        # Finding D11. `app_base_url` is what every verification and reset link
+        # is built from. Left at its localhost default in production it mails
+        # links nobody can open; set to `http://` it puts single-use credentials
+        # — the reset token is one — into cleartext on the wire.
+        if self.is_production and not self.app_base_url.startswith("https://"):
+            raise ValueError(
+                "APP_BASE_URL must be an https:// address in production (it is "
+                f"currently {self.app_base_url!r}). Every verification and "
+                "password-reset link is built from it, so a localhost value "
+                "mails links nobody can open and an http:// value puts reset "
+                "tokens in cleartext."
+            )
         return self
 
 

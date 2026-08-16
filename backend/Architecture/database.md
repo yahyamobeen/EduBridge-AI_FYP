@@ -60,14 +60,50 @@ mistake to make here:
 The arithmetic from statements to objects:
 
 ```
-72  CREATE POLICY statements
+73  CREATE POLICY statements
  −2  statements that live inside the FOREACH loop at 20260801120100:232-247
  +12  policy objects that loop creates (2 policies × 6 curriculum tables)
- −9  drop-and-recreate restatements of names that already exist
-     (6 curriculum *_read in 20260802140000; app_user_insert in 20260802150000;
-      guardian_link_create and guardian_link_update in 20260803090000)
- = 73 distinct live policy objects
+−10  drop-and-recreate restatements of names that already exist
+     (6 curriculum *_read in 20260802140000; app_user_insert in 20260802150000
+      and again in 20260816120000; guardian_link_create and guardian_link_update
+      in 20260803090000)
+ = 73 policy objects THE MIGRATIONS PRODUCE
+ +4  policies that exist in the live database and in NO migration — see below
+ = 77 policy objects currently live
 ```
+
+> ⚠️ **Finding F1 — the migrations and the live database disagree.** Measured 2026-08-16 by
+> querying `pg_policy` directly; the earlier figure of 73 in this document was derived by counting
+> statements in the migration files and was wrong about what is deployed.
+>
+> Four policies exist **only** in the live database:
+>
+> | Table | Policy | Verb | Predicate |
+> |---|---|---|---|
+> | `audit_log_default` | `audit_default_admin_read` | SELECT | `app.is_admin()` |
+> | `audit_log_default` | `audit_default_insert` | INSERT | `WITH CHECK (true)` |
+> | `api_request_log_default` | `reqlog_default_admin_read` | SELECT | `app.is_admin()` |
+> | `api_request_log_default` | `reqlog_default_insert` | INSERT | `WITH CHECK (true)` |
+>
+> They mirror the parent tables' `audit_admin_read` / `audit_insert`, so they look deliberate —
+> somebody applied them in the SQL editor and never wrote the migration. `grep` across
+> `supabase/migrations/` finds none of the four names.
+>
+> **Why this is more than untidiness.** `20260802150000:33-38` enables *and forces* Row-Level
+> Security on both default partitions. A database rebuilt from the migration files alone would
+> therefore have those partitions forced with **no policies at all** — and PostgreSQL applies a
+> partition's own policies to rows routed into it from the parent. So a fresh environment may refuse
+> every audit and request-log write, while production is fine. That is the worst shape a divergence
+> can take: it cannot be reproduced anywhere the migrations are the source of truth.
+>
+> **Not fixed here.** Authoring the reconciling migration is Phase 2 work, and it must be written
+> from what is live rather than from what someone assumes was intended. It is also the concrete
+> answer to the open question of whether the eleven migrations replay from zero into the deployed
+> schema: **they do not.**
+>
+> `tests/integration/test_rls.py::TestPartitionDirectAccessDenied` still passes, and its docstring
+> is now inaccurate — it says the partitions were left "with no policies", which was true of the
+> migration and is not true of the database.
 
 Scaffolded-only directories, named honestly: `ml/`, `mcp-servers/`, `infra/` and
 `backend/app/workers/` contain **`.gitkeep` files only** (`mcp-servers/` and `infra/` additionally
@@ -272,7 +308,7 @@ citation points at the recreation, with the superseded original noted.
 |---|---|---|---|---|---|
 | `app_user` | `app_user_self_read` | SELECT | `id = cuid() OR app.is_admin()` | — | `20260801120100:143` |
 | `app_user` | `app_user_self_update` | UPDATE | `id = cuid()` | `id = cuid()` | `20260801120100:147` |
-| `app_user` | `app_user_insert` | INSERT | — | `id = cuid()` | `20260802150000:51` (restates `20260801120100:157`) |
+| `app_user` | `app_user_insert` | INSERT | — | `id = cuid() AND role <> 'admin'` | `20260816120000:39` (narrows `20260802150000:51`, which restated `20260801120100:157`) |
 | `student_profile` | `student_profile_read` | SELECT | `user_id = cuid() OR app.is_verified_guardian_of(user_id) OR app.is_admin()` | — | `20260801120100:160` |
 | `student_profile` | `student_profile_write` | ALL | `user_id = cuid()` | `user_id = cuid()` | `20260801120100:168` |
 | `teacher_profile` | `teacher_profile_self` | ALL | `user_id = cuid() OR app.is_admin()` | `user_id = cuid()` | `20260801120100:173` |

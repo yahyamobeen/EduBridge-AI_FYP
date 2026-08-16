@@ -40,10 +40,36 @@ GATED_PATHS = [
 ]
 
 
+def _provisioned_admin(db) -> str:
+    """
+    An administrator that ALREADY EXISTS, or skip.
+
+    Since 20260816120000, `app_user_insert` refuses `role = 'admin'` to
+    `app_backend` (finding A1), so a test cannot create one — which is the point.
+    An administrator is provisioned by the repository owner running SQL as the
+    table owner, and this helper reflects that rather than working around it.
+
+    `service_conn` is NOT an alternative: it is a separate connection in a
+    separate transaction, so a row inserted there is invisible to `db` and both
+    roll back.
+    """
+    admin = db.execute(
+        text("SELECT id FROM app_user WHERE role = 'admin' AND status = 'active' LIMIT 1")
+    ).scalar_one_or_none()
+    if admin is None:
+        pytest.skip("needs an owner-provisioned administrator; see the phase 1b handoff, 1.6.6")
+    return str(admin)
+
+
 def _create_user(db, email, *, role="student", class_level=9, profile=True) -> str:
     """`profile=False` builds a student with NO student_profile row — the shape
     the gate has to fail closed on, because an unknown class level is
     indistinguishable from an unreadable one."""
+    if role == "admin":
+        raise ValueError(
+            "administrators are not application-creatable since 20260816120000 — "
+            "use _provisioned_admin(db)"
+        )
     user_id = uuid4()
     set_current_user_id(db, user_id)
     db.execute(
@@ -178,7 +204,11 @@ class TestGuardianGateOnLearningEndpoints:
             assert resp.status_code == 403, (path, resp.text)
             assert resp.json()["error"]["code"] == "GATE_PENDING", path
 
-    @pytest.mark.parametrize("role", ["teacher", "parent", "admin"])
+    # `admin` was a third case here until 20260816120000 made administrators
+    # uncreatable by `app_backend` (finding A1). The property it asserted --
+    # `guardian_required` is False for every non-student -- is covered per role
+    # in tests/unit/test_gate.py, which needs no database at all.
+    @pytest.mark.parametrize("role", ["teacher", "parent"])
     def test_non_students_are_never_gated(self, role, db, unique_email):
         user = _create_user(db, unique_email("mx"), role=role)
         client = _gate_client()
@@ -204,8 +234,8 @@ class TestTeacherSubjectScope:
     def test_teacher_with_scope_passes_the_subject_route(self, db, unique_email):
         teacher = _create_user(db, unique_email("mx"), role="teacher")
         subject_id = db.execute(text("SELECT id FROM subject ORDER BY name LIMIT 1")).scalar_one()
-        # Scope rows are provisioned by an admin (tss_admin_write), so seed as one.
-        admin = _create_user(db, unique_email("mx"), role="admin")
+        # Scope rows are provisioned by an admin (tss_admin_write), so bind as one.
+        admin = _provisioned_admin(db)
         set_current_user_id(db, UUID(admin))
         db.execute(
             text("INSERT INTO teacher_subject_scope (teacher_id, subject_id) VALUES (:t, :s)"),
@@ -249,7 +279,7 @@ class TestTeacherSubjectScope:
         scoped, other = (
             db.execute(text("SELECT id FROM subject ORDER BY name LIMIT 2")).scalars().all()
         )
-        admin = _create_user(db, unique_email("mx"), role="admin")
+        admin = _provisioned_admin(db)
         set_current_user_id(db, UUID(admin))
         db.execute(
             text("INSERT INTO teacher_subject_scope (teacher_id, subject_id) VALUES (:t, :s)"),

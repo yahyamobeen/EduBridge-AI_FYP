@@ -3,13 +3,14 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth.gate import is_guardian_gate_pending
 from app.auth.security import decode_access_token
+from app.core.config import get_settings
 from app.core.db import SessionLocal, set_current_user_id
 from app.core.errors import forbidden_scope, gate_pending, unauthenticated
 from app.models.enums import UserRole
@@ -88,11 +89,69 @@ def authenticated(
         session.close()
 
 
+REFRESH_COOKIE_NAME = "refresh_token"
+
+# Scoped, so the cookie is not attached to every API call.
+REFRESH_COOKIE_PATH = "/api/auth/refresh"
+
+
 def read_refresh_token_cookie(request: Request) -> str:
-    token = request.cookies.get("refresh_token")
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
         raise unauthenticated("Missing refresh token.")
     return token
+
+
+def set_refresh_cookie(response: Response, token: str) -> None:
+    """
+    THE ONE DEFINITION OF THE REFRESH COOKIE'S ATTRIBUTES.
+
+    It was written out by hand at three call sites — `/auth/refresh`,
+    `/auth/2fa/confirm` and `/auth/2fa/verify` — which is survivable until
+    something has to *delete* it. A browser only overwrites a cookie when the
+    name, path and domain all match, so a deletion that disagrees with the
+    setter on any of them silently leaves the old cookie in place. Four
+    hand-maintained copies of the same tuple is how that disagreement arrives.
+
+    `SameSite=Lax` is correct while the site and the API share a registrable
+    domain. If they are ever split across sites this must become
+    `SameSite=None; Secure`, or the cookie stops being sent and refresh fails in
+    production only.
+    """
+    settings = get_settings()
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=settings.refresh_token_ttl_days * 86400,
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    """
+    Finding A2: logout revoked the rows and left the cookie.
+
+    The browser kept sending it, so the next `/auth/refresh` found
+    `revoked = true`, read that as two parties holding one token, revoked the
+    whole family and wrote a `refresh_token_reuse_detected` audit row. Every
+    ordinary sign-out fabricated a security incident, and the log that exists to
+    surface real theft filled with noise.
+
+    `delete_cookie` must mirror `set_refresh_cookie` on `path`, `secure`,
+    `samesite` and `httponly` — hence both living here, reading the same
+    constants and the same settings.
+    """
+    settings = get_settings()
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+    )
 
 
 # ----------------------------------------------------------------------------

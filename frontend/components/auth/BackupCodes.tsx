@@ -28,6 +28,7 @@ export function BackupCodes({
   const t = useTranslations('auth.backupCodes')
   const [acknowledged, setAcknowledged] = useState(false)
   const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle')
+  const [downloadFailed, setDownloadFailed] = useState(false)
 
   async function copy() {
     try {
@@ -38,16 +39,39 @@ export function BackupCodes({
     }
   }
 
+  /**
+   * TWO BUGS LIVED IN THE FOUR LINES THIS REPLACES, and both produced NO file
+   * and NO error — on codes that are shown exactly once and never shown again.
+   *
+   *  1. The anchor was never added to the document. A programmatic click on a
+   *     detached anchor is not reliably honoured; Firefox is the failure case.
+   *  2. `URL.revokeObjectURL` ran on the same tick as `click()`, destroying the
+   *     blob before the download had started reading it.
+   *
+   * The `catch` matters as much as the fix. `copy()` directly above already
+   * surfaces its failure, and the file's own docstring says the point is that
+   * "the failure is visible rather than silent" — this function was the one
+   * that did not follow it.
+   */
   function download() {
-    const blob = new Blob([`${t('fileHeading')}\n\n${codes.join('\n')}\n`], {
-      type: 'text/plain',
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'edubridge-backup-codes.txt'
-    link.click()
-    URL.revokeObjectURL(url)
+    try {
+      const blob = new Blob([`${t('fileHeading')}\n\n${codes.join('\n')}\n`], {
+        type: 'text/plain',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'edubridge-backup-codes.txt'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      // Deferred, so the download has the object URL for as long as it needs
+      // it. Revoking synchronously is what broke it.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      setDownloadFailed(false)
+    } catch {
+      setDownloadFailed(true)
+    }
   }
 
   return (
@@ -95,6 +119,12 @@ export function BackupCodes({
       {copied === 'failed' && (
         <p role="status" className="text-body-sm text-on-surface-variant">
           {t('copyFailed')}
+        </p>
+      )}
+
+      {downloadFailed && (
+        <p role="status" className="text-body-sm text-on-surface-variant">
+          {t('downloadFailed')}
         </p>
       )}
 

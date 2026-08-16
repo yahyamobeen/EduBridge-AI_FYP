@@ -243,6 +243,7 @@
       "copied": "Copied",
       "download": "Download",
       "copyFailed": "Could not copy automatically. Select the codes above and copy them by hand.",
+      "downloadFailed": "Could not download the file. Select the codes above and copy them somewhere safe before continuing.",
       "fileHeading": "EduBridge AI backup codes — each code works once.",
       "acknowledge": "I have saved these codes somewhere safe. I understand they will not be shown again.",
       "continue": "Continue"

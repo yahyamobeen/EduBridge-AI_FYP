@@ -243,6 +243,7 @@
       "copied": "Copy ho gaye",
       "download": "Download",
       "copyFailed": "Khudkar tor par copy nahi ho saka. Upar diye codes muntakhib kar ke khud copy karein.",
+      "downloadFailed": "File download nahi ho saki. Aage barhne se pehle upar diye codes muntakhib kar ke kisi mehfooz jagah par mehfooz kar lein.",
       "fileHeading": "EduBridge AI backup codes — har code aik bar kaam karta hai.",
       "acknowledge": "Main ne ye codes mehfooz jagah par rakh liye hain. Mujhe maloom hai ke ye dobara nahi dikhaye jayenge.",
       "continue": "Aage barhein"

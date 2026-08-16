@@ -51,6 +51,13 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None if settings.is_production else "/redoc",
+        # Finding A5. `docs_url` and `redoc_url` gate only the two HTML VIEWERS.
+        # Both are just pages that fetch this URL, which kept its default — so
+        # production served the complete schema, unauthenticated, while /docs
+        # returned 404 and looked closed. That schema lists every route, every
+        # field name and bound, and every enum, including which roles register
+        # accepts. It is a map, and it was public.
+        openapi_url=None if settings.is_production else "/openapi.json",
         lifespan=lifespan,
     )
 

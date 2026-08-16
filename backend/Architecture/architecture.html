@@ -835,15 +835,31 @@ flowchart TB
       purpose <span class="ln">config.py:58-63</span>: a defaulted encryption key is worse than a missing one, because
       every deployment that forgot to set it would share the same key and nobody would find out.</p>
 
-      <div class="callout danger">
-        <span class="t">Known defects A4, A5 and D11</span>
-        <code>is_production</code> <span class="ln">config.py:103</span> is an unvalidated string compare against
-        <code>"production"</code>, so <code>APP_ENV=prod</code> or a trailing space silently exposes <code>/docs</code>,
-        permits the logging sender, and <strong>drops <code>secure</code> from the refresh cookie</strong>.
-        <code>/openapi.json</code> is not disabled in production — <code>docs_url=None</code>
-        <span class="ln">main.py:52</span> gates only the Swagger HTML, not the schema route. <code>app_base_url</code>
-        <span class="ln">config.py:80</span> has no production validation, so a misconfigured deployment mails
-        <code>http://localhost:3000</code> links.
+      <div class="callout">
+        <span class="t">A3, A4, A5 and D11 — fixed, Phase 1 (2026-08-16)</span>
+        All four had the same shape: a setting typed as a bare <code>str</code>, and consumers comparing it
+        for equality against one expected spelling. Anything else raised nothing — it matched no branch and
+        fell through to the default, and <strong>every one of those defaults was the insecure one</strong>.
+        <ul>
+          <li><code>environment</code> and <code>email_provider</code> are now <code>Literal</code> types, so a
+            value outside the closed set is a <strong>boot failure</strong> rather than a silent downgrade.
+            <code>APP_ENV=prod</code> used to read as <em>development</em> in production: <code>/docs</code>
+            served, the logging sender permitted, and <code>secure</code> dropped from the refresh cookie.
+            <code>EMAIL_PROVIDER=Resend</code> matched neither <code>"resend"</code> nor <code>"logging"</code>,
+            so it selected the logging sender <strong>and</strong> passed the production guard, which also
+            tested <code>== "logging"</code> — every two-factor code and reset link to stdout.</li>
+          <li><code>_normalise_choice</code> (<code>mode="before"</code>) trims and lower-cases first, so
+            <code>Production&nbsp;</code> starts and <code>prod</code> still fails. Formatting is forgiven;
+            guesses are not.</li>
+          <li><code>openapi_url=None</code> in production. <code>docs_url</code> gates only the Swagger HTML;
+            the schema route kept its default and published the whole surface unauthenticated.</li>
+          <li><code>app_base_url</code> must begin <code>https://</code> in production. Left at its localhost
+            default it mails links nobody can open; over <code>http://</code> it puts single-use reset tokens
+            in cleartext.</li>
+        </ul>
+        A guard that already existed became <strong>reachable</strong> as a side effect:
+        <code>EMAIL_PROVIDER=Logging</code> previously bypassed the production check <em>and</em> selected the
+        thing that check exists to prevent. Pinned by <code>tests/unit/test_config_hardening.py</code>.
       </div>
 
       <h3>Captcha, passwords and TOTP</h3>

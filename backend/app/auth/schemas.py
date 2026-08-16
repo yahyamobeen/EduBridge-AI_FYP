@@ -7,8 +7,8 @@ from app.models.enums import (
     BoardCode,
     LanguageCode,
     MediumCode,
+    RegistrableRole,
     StudentGroup,
-    UserRole,
 )
 
 # Mirrors the `ck_group_matches_class` CHECK constraint in the applied schema so
@@ -36,7 +36,11 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
-    role: UserRole
+    # NOT `UserRole` — `admin` is not self-registrable (see RegistrableRole).
+    # An `admin` value is rejected by Pydantic, which `_validation_error_response`
+    # renders as the ordinary 400 VALIDATION_ERROR envelope with a per-field
+    # message, so no endpoint invents a code (tdd.md §7.3).
+    role: RegistrableRole
     # Required Cloudflare Turnstile token (register + login only).
     turnstile_token: str = Field(min_length=1)
 
@@ -56,7 +60,7 @@ class RegisterRequest(BaseModel):
         second for an empty form tells the user their group is wrong when they
         never chose one.
         """
-        if self.role != UserRole.student:
+        if self.role != RegistrableRole.student:
             return
 
         missing = {
@@ -82,7 +86,7 @@ class RegisterRequest(BaseModel):
         rejects it with an opaque one. Call after
         `validate_required_student_fields`, which guarantees both are present.
         """
-        if self.role != UserRole.student:
+        if self.role != RegistrableRole.student:
             return
         if self.class_level is None or self.student_group is None:
             return

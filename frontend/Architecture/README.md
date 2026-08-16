@@ -53,12 +53,12 @@ The test-file count is confirmed independently by the runner: `npm test` reports
 
 Seven findings from the Epic 1 review land in this application. They are documented in [architecture.md](architecture.md#known-defects) with their exact locations rather than left until fixed:
 
-| # | Summary |
-|---|---|
-| A6 | The `admin` role routes to `/admin`, which does not exist — and a test allow-lists it |
-| A7 | Backup-code download can silently produce no file |
-| A8 | Sign-out no-ops on a network failure |
-| C4 | `.env.example` ships `NEXT_PUBLIC_API_MODE=mock` as the documented default |
+| # | Summary | Status |
+|---|---|---|
+| A6 | The `admin` role routes to `/admin`, which does not exist — and a test allow-lists it | **Open** — the page is built in Phase 1b. Phase 1 added the missing admin assertion to `navigation.test.ts`, which is what should have caught it: the sibling href test allow-listed `admin` while the first-item test omitted it, so neither covered the admin row |
+| A7 | Backup-code download can silently produce no file | **Fixed** (Phase 1) — the anchor is appended before the click and removed after, `revokeObjectURL` is deferred rather than run on the same tick, and a failure now renders `downloadFailed` in all three locales. Two bugs in four lines, on codes shown exactly once with no way back and no regenerate endpoint |
+| A8 | Sign-out no-ops on a network failure | **Fixed** (Phase 1) — `signOut` wraps `logout()` in `try`/`catch` with the redirect in `finally`. `logout()` clears the session and then **re-throws by design**, so the redirect must not depend on it resolving |
+| C4 | `.env.example` ships `NEXT_PUBLIC_API_MODE=mock` as the documented default | **Fixed** (Phase 1) — the template now defaults to `live`. Phase 1b deletes the mock layer outright, superseding this; the two are deliberately redundant so the demo hazard closes even if 1b slips |
 | D5 | `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing |
 | D6 | An unvalidated `onboarding_state` reaches `router.replace(undefined)` |
 | D17 | `error.tsx` logs the error object it refuses to render |

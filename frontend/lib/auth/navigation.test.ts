@@ -62,6 +62,11 @@ describe('the map itself', () => {
     expect(navFor('student')[0]?.href).toBe('/dashboard')
     expect(navFor('teacher')[0]?.href).toBe('/teacher')
     expect(navFor('parent')[0]?.href).toBe('/parent')
+    // `admin` was missing here while the href test below allow-listed it, so
+    // NEITHER test covered the admin row — which is how finding A6 survived: the
+    // role routes to /admin, and no such page exists. The page is built in
+    // phase 1b; this assertion is the one that should have caught it.
+    expect(navFor('admin')[0]?.href).toBe('/admin')
   })
 
   it('gives every item a translated label in all three locales', async () => {

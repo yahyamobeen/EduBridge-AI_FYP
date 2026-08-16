@@ -81,7 +81,7 @@ from app.core.ratelimit import (
     TWO_FA_VERIFY_USER_LIMIT,
     enforce_subject,
 )
-from app.models.enums import TokenKind, UserRole
+from app.models.enums import RegistrableRole, TokenKind
 
 # The one plan in v1, seeded by 20260802120000_subscriptions_and_oauth.sql and
 # referenced by subscription.plan_code.
@@ -113,10 +113,16 @@ def register(db: Session, payload: RegisterRequest) -> dict:
     new_id = uuid4()
 
     # REQUIRED, despite looking odd on an unauthenticated endpoint. `app_user`
-    # inserts are open (`app_user_insert` is WITH CHECK (true)), but every
-    # profile policy is `WITH CHECK (user_id = app.current_user_id())`, and so
-    # is `subscription_owner`. Without binding the id we are about to create,
-    # RLS refuses the profile and subscription inserts below.
+    # itself is now owner-scoped -- `app_user_insert` is
+    # `WITH CHECK (id = app.current_user_id() AND role <> 'admin')` -- and every
+    # profile policy is `WITH CHECK (user_id = app.current_user_id())`, as is
+    # `subscription_owner`. Without binding the id we are about to create, RLS
+    # refuses the app_user row itself and every insert below it.
+    #
+    # The comment here previously said `app_user_insert` was `WITH CHECK (true)`.
+    # That was accurate for 20260801120100 and stopped being true at
+    # 20260802150000, which reconciled it to the owner-scoped form. Corrected
+    # while adding the `role <> 'admin'` clause.
     set_current_user_id(db, new_id)
 
     try:
@@ -139,7 +145,7 @@ def register(db: Session, payload: RegisterRequest) -> dict:
             raise email_already_registered() from exc
         raise
 
-    if payload.role == UserRole.student:
+    if payload.role == RegistrableRole.student:
         db.execute(
             text(
                 "INSERT INTO student_profile "
@@ -167,14 +173,14 @@ def register(db: Session, payload: RegisterRequest) -> dict:
             text("INSERT INTO subscription (user_id, plan_code) VALUES (:user_id, :plan)"),
             {"user_id": new_id, "plan": _DEFAULT_PLAN_CODE},
         )
-    elif payload.role == UserRole.teacher:
+    elif payload.role == RegistrableRole.teacher:
         db.execute(
             text(
                 "INSERT INTO teacher_profile (user_id, institution) VALUES (:user_id, :institution)"
             ),
             {"user_id": new_id, "institution": payload.institution},
         )
-    elif payload.role == UserRole.parent:
+    elif payload.role == RegistrableRole.parent:
         db.execute(
             text("INSERT INTO parent_profile (user_id) VALUES (:user_id)"),
             {"user_id": new_id},
@@ -719,11 +725,31 @@ def two_factor_enroll(db: Session, payload: TwoFactorEnrollRequest) -> dict:
     set_current_user_id(db, user_id)
     enforce_subject(bucket="2fa_enroll", subject=str(user_id), limit=TWO_FA_ENROLL_USER_LIMIT)
 
-    # Reject if 2FA is already active (cannot re-enroll)
+    # One read, two checks. The bind above is what makes it see the row at all —
+    # `two_factor_enrollment_owner` matches on `app.current_user_id()`.
     enrollment_check = db.execute(
-        text("SELECT status FROM two_factor_enrollment WHERE user_id = :uid"),
+        text("SELECT status, locked_until FROM two_factor_enrollment WHERE user_id = :uid"),
         {"uid": user_id},
     ).first()
+
+    # Finding A9: the lockout was enforced at login, confirm, verify and resend,
+    # but NOT here -- and this path sends an email one-time password.
+    #
+    # SCOPE, HONESTLY: this was never a way to bypass guessing. `/2fa/confirm`
+    # checks the lockout, and `app.upsert_2fa_enrollment` deliberately preserves
+    # `failed_attempts` and `locked_until` across a re-enrolment, so the counter
+    # survives. What it allowed was MAIL FLOODING a locked account -- bounded at
+    # five per five minutes per account by `enforce_subject` above, and needing a
+    # live enrolment token, so a nuisance rather than a breach. It is fixed
+    # because a lockout that four of five entry points honour is not a lockout.
+    if (
+        enrollment_check is not None
+        and enrollment_check.locked_until is not None
+        and enrollment_check.locked_until > datetime.now(UTC)
+    ):
+        raise two_factor_locked(enrollment_check.locked_until.isoformat())
+
+    # Reject if 2FA is already active (cannot re-enroll)
     if enrollment_check and str(enrollment_check.status) == "active":
         raise AppError(
             status_code=400,

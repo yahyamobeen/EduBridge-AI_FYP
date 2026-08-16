@@ -785,12 +785,28 @@ Four validators refuse to start rather than run misconfigured:
 (`config.py:58-63`): a defaulted encryption key is worse than a missing one, because every
 deployment that forgot to set it would share the same key and nobody would find out.
 
-> **Known defects A4, A5 and D11.** `is_production` (`config.py:103`) is an unvalidated string
-> compare against `"production"`, so `APP_ENV=prod` or a trailing space silently exposes `/docs`,
-> permits the logging sender, and **drops `secure` from the refresh cookie**. `/openapi.json` is not
-> disabled in production — `docs_url=None` (`main.py:52`) gates only the Swagger HTML, not the
-> schema route. `app_base_url` (`config.py:80`) has no production validation, so a misconfigured
-> deployment mails `http://localhost:3000` links.
+> **A3, A4, A5 and D11 — FIXED, Phase 1 (2026-08-16).**
+>
+> All four had the same shape: a setting typed as a bare `str`, and consumers comparing it for
+> equality against one expected spelling. Anything else raised nothing — it matched no branch and
+> fell through to the default, and **every one of those defaults was the insecure one.**
+>
+> - `environment` and `email_provider` are now `Literal` types, so a value outside the closed set is
+>   a **boot failure** rather than a silent downgrade. `APP_ENV=prod` used to read as *development*
+>   in production: `/docs` served, the logging sender permitted, and `secure` dropped from the
+>   refresh cookie. `EMAIL_PROVIDER=Resend` matched neither `"resend"` nor `"logging"`, so it
+>   selected the logging sender **and** passed the production guard, which also tested
+>   `== "logging"` — every two-factor code and reset link to stdout.
+> - `_normalise_choice` (`mode="before"`) trims and lower-cases first, so `Production ` starts and
+>   `prod` still fails. Formatting is forgiven; guesses are not.
+> - `openapi_url=None` in production. `docs_url` gates only the Swagger HTML; the schema route kept
+>   its default and published the whole surface unauthenticated.
+> - `app_base_url` must begin `https://` in production. Left at its localhost default it mails links
+>   nobody can open; over `http://` it puts single-use reset tokens in cleartext.
+>
+> A guard that already existed became **reachable** as a side effect: `EMAIL_PROVIDER=Logging`
+> previously bypassed the production check *and* selected the thing that check exists to prevent.
+> Pinned by `tests/unit/test_config_hardening.py`.
 
 ### 9.4 Captcha, passwords and TOTP
 

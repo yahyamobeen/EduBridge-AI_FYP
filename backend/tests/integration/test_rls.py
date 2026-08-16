@@ -307,3 +307,65 @@ class TestParentReadsProgressButNeverChat:
         ).scalar_one()
 
         assert progress == 0, "a pending (unverified) parent must not read progress"
+
+
+class TestAdminIsNotSelfRegistrable:
+    """
+    Finding A1, second layer. Migration 20260816120000.
+
+    The first layer is `RegistrableRole`, which removes `admin` from the
+    registration schema and is asserted in tests/unit/test_register_schema.py.
+    This is the layer that holds when the first is bypassed — a future endpoint
+    that writes `app_user` without going through `RegisterRequest`, for
+    instance. Card 1.5 promises the database catches a missed application check;
+    for this one field, it now does.
+
+    Deliberately NOT a test of the API. `POST /auth/register` cannot even
+    express the request any more, so an endpoint test would assert Pydantic's
+    behaviour rather than the policy's.
+    """
+
+    def test_app_backend_cannot_insert_an_administrator(self, db):
+        user_id = uuid4()
+        set_current_user_id(db, user_id)
+
+        # A savepoint, so the deliberate failure does not poison the rest of the
+        # enclosing test transaction.
+        with pytest.raises((ProgrammingError, DBAPIError)) as caught, db.begin_nested():
+            db.execute(
+                text(
+                    "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
+                    "VALUES (:id, :email, 'x', 'admin', 'active', 'Should Not Exist')"
+                ),
+                {"id": user_id, "email": f"admin-{user_id}@example.com"},
+            )
+
+        # 42501 is insufficient_privilege, which is what a WITH CHECK violation
+        # raises. Asserting the message rather than only the type, because a
+        # unique-violation or a bad-enum error would also be a ProgrammingError
+        # and would make this pass for the wrong reason.
+        assert "row-level security" in str(caught.value).lower()
+
+    def test_the_same_insert_succeeds_for_a_non_administrator(self, db):
+        """
+        The control. Without it, a policy that refused EVERY insert would pass
+        the test above and nobody could register at all.
+        """
+        user_id = uuid4()
+        set_current_user_id(db, user_id)
+
+        db.execute(
+            text(
+                "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
+                "VALUES (:id, :email, 'x', 'teacher', 'active', 'Perfectly Fine')"
+            ),
+            {"id": user_id, "email": f"teacher-{user_id}@example.com"},
+        )
+        db.flush()
+
+        assert (
+            db.execute(
+                text("SELECT count(*) FROM app_user WHERE id = :id"), {"id": user_id}
+            ).scalar_one()
+            == 1
+        )
