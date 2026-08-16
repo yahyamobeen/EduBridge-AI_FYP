@@ -13,6 +13,8 @@ Two implementations ship:
 
 * ``ResendEmailSender`` — sends via the Resend REST API. Production.
 
+* ``SendGridEmailSender`` — sends via the SendGrid Web API. Production.
+
 The factory picks based on ``settings.email_provider``.
 """
 
@@ -110,15 +112,50 @@ class ResendEmailSender:
         logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
 
 
+class SendGridEmailSender:
+    """
+    Production: send via the SendGrid Web API (https://sendgrid.com).
+
+    Like `ResendEmailSender`, the SDK is an OPTIONAL extra (``uv sync --extra
+    email``) and is imported inside `send` so an environment that never mails
+    does not need it installed.
+    """
+
+    def send(self, to: str, subject: str, html_body: str) -> None:
+        try:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import Mail
+        except ImportError as exc:  # pragma: no cover -- configuration error
+            raise RuntimeError(
+                "EMAIL_PROVIDER=sendgrid but the sendgrid SDK is not installed. "
+                "Run `uv sync --extra email`, or set EMAIL_PROVIDER=logging."
+            ) from exc
+
+        settings = get_settings()
+        if not settings.sendgrid_api_key:
+            raise RuntimeError("EMAIL_PROVIDER=sendgrid but SENDGRID_API_KEY is empty.")
+        message = Mail(
+            from_email=settings.email_from,
+            to_emails=[to],
+            subject=subject,
+            html_content=html_body,
+        )
+        SendGridAPIClient(settings.sendgrid_api_key).send(message)
+        logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
+
+
 def get_email_sender() -> EmailSender:
     """
     Factory. Returns ``ResendEmailSender`` when ``EMAIL_PROVIDER=resend``,
+    ``SendGridEmailSender`` when ``EMAIL_PROVIDER=sendgrid``, and
     ``LoggingEmailSender`` otherwise. The default (``logging``) is safe for
     development, CI, and any environment without a configured API key.
     """
     settings = get_settings()
     if settings.email_provider == "resend":
         return ResendEmailSender()
+    if settings.email_provider == "sendgrid":
+        return SendGridEmailSender()
     return LoggingEmailSender()
 
 

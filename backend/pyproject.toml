@@ -38,7 +38,7 @@ dev = [
 #   uv sync --extra email
 # Adding a second provider means one more class and one more extra, not a
 # change to any route or service.
-email = ["resend>=2.0.0"]
+email = ["resend>=2.0.0", "sendgrid>=6.11.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

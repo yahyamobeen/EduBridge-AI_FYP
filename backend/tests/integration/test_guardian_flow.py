@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
+from app.auth import service as service_module
 from app.auth.security import create_access_token
 from app.auth.tokens import issue_guardian_invite_token
 from app.core.db import set_current_user_id
@@ -83,6 +84,39 @@ class TestInvite:
             {"s": student},
         ).scalar_one()
         assert link_status == "pending"
+
+    def test_invite_queues_an_email_to_the_parent(self, client, db, unique_email, monkeypatch):
+        """The invite must actually be emailed, not just marked `invite_sent`."""
+        sent: list[tuple[str, str, str]] = []
+
+        def _capture(to: str, subject: str, html_body: str) -> None:
+            sent.append((to, subject, html_body))
+
+        monkeypatch.setattr(service_module, "_queue_email", _capture)
+
+        student = _create_user(
+            db, unique_email("gate"), role="student", class_level=9, full_name="Ayesha"
+        )
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": parent_email},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["invite_sent"] is True
+
+        assert len(sent) == 1, f"expected one queued email, got {len(sent)}"
+        to, subject, html = sent[0]
+        assert to == parent_email
+        assert "Ayesha" in subject
+        # The confirm URL carries the locale segment and a token query param.
+        assert "/en/guardian/confirm?token=" in html
 
     def test_self_link_is_forbidden(self, client, db, unique_email):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)

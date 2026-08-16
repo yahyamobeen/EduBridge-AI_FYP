@@ -13,8 +13,10 @@ from app.auth import gate
 from app.auth.backup_codes import generate_backup_codes, hash_backup_code, verify_backup_code
 from app.auth.email import send_async as _queue_email
 from app.auth.email_templates import (
+    build_guardian_invite_url,
     build_password_reset_url,
     build_verification_url,
+    guardian_invite_email,
     password_reset_email,
     two_factor_otp_email,
     verification_email,
@@ -1221,7 +1223,12 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # whether an arbitrary address exists from this endpoint's response codes.
     student = (
         db.execute(
-            text("SELECT email FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            text(
+                "SELECT u.email, u.full_name, sp.language_pref "
+                "FROM app_user u "
+                "LEFT JOIN student_profile sp ON sp.user_id = u.id "
+                "WHERE u.id = :uid AND u.deleted_at IS NULL"
+            ),
             {"uid": student_id},
         )
         .mappings()
@@ -1280,7 +1287,13 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # email link cannot be redeemed after a resend. Both are owner-scoped writes
     # under RLS as the student.
     revoke_user_tokens(db, student_id, kind=TokenKind.guardian_invite.value)
-    issue_guardian_invite_token(db, student_id)
+    plain_token = issue_guardian_invite_token(db, student_id)
+
+    locale = web_locale(student["language_pref"])
+    url = build_guardian_invite_url(plain_token, locale)
+    student_name = str(student["full_name"] or "Student")
+    subject, html = guardian_invite_email(url, student_name, locale)
+    _queue_email(parent_email, subject, html)
 
     return {
         "invite_sent": True,

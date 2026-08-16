@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     # accident.
     email_provider: str = Field(default="logging", validation_alias="EMAIL_PROVIDER")
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
+    sendgrid_api_key: str = Field(default="", validation_alias="SENDGRID_API_KEY")
     email_from: str = Field(default="", validation_alias="EMAIL_FROM")
     app_base_url: str = Field(default="http://localhost:3000", validation_alias="APP_BASE_URL")
 
@@ -171,6 +172,8 @@ class Settings(BaseSettings):
             )
         if self.email_provider == "resend" and not self.email_from:
             raise ValueError("EMAIL_PROVIDER=resend requires EMAIL_FROM to be set.")
+        if self.email_provider == "sendgrid" and not self.email_from:
+            raise ValueError("EMAIL_PROVIDER=sendgrid requires EMAIL_FROM to be set.")
         return self
 
 

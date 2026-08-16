@@ -16,6 +16,7 @@
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.3.6 | 2026-08-16 | EduBridge AI Team | **Transactional email provider resolved to SendGrid (free tier).** Verification links, 2FA codes, password resets and the guardian invite are delivered via **SendGrid**, which sends to any inbox — the previous default (`logging`) and the Resend sandbox could not reach real parent addresses. No product-requirement change. |
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial PRD draft derived from the approved FYP proposal and the agreed planning blueprint. Adopts supervisor PRD format; extended to engineering depth for TDD derivation. |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Added **TEL-5** endpoint access logging + admin daily-logs view; entity `ApiRequestLog`; RBAC + Admin-dashboard updates (kept in sync with TDD v0.1.1). |
 | 0.3.5 | 2026-08-09 | EduBridge AI Team | **Consistency pass, driven by writing the User Stories & Epics deliverable.** Three capabilities that the product had promised but never specified gain requirements: **FR-A7** password reset (built and fully designed in `tdd.md`, yet no FR had ever covered it), **FR-A8** manage own account (granted to every role by the §4.2 matrix since v0.1.0, with no requirement and no endpoint behind it), and **FR-18** the English-language subject under a new **Epic C3** (one of four `content_strategy` values the router has dispatched on since v0.2.0). Three §4.2 cells that could not work are closed: a **parent can no longer create spaces, issue join codes or post announcements**, because the `guardian_link` write boundary makes the student-initiated invite the only route to a verified link — a join code produces no invite token. **§15 CL-2** loses "chat history" as a digest input; chat is owner-only and a teacher has no read path, so the digest carries no tutor-derived signal at all. **§15 CL-3** recasts "replay an avatar explanation" as a recommendation rather than a parent control. **§4.3 and §6.1** gain the **fail-closed rule** for an unknown class level, which had existed only in `tdd.md`. The **P0 Definition of Done** now includes second-factor enrolment and plan selection, both P0 and both previously missing, and the P0 scope list gains Epic C2. Record fixes: §12.2 retitled (it describes four strategies, not two), Epic C tiered P1 rather than P2, §2.3 and §29 aligned on O1's epics, and §19 reordered so I18N-4a precedes I18N-5 and the RTL mirroring rule sits with I18N-4 instead of inside the identifier rule. |
@@ -382,7 +383,7 @@ register ──► email_verification_pending
 
 ### 6.2 Parent onboarding / linking
 
-1. Parent receives an invite email, triggered by their child entering the parent's address (§4.3).
+1. Parent receives an invite email, triggered by their child entering the parent's address (§4.3). Transactional mail — invite, verification links and 2FA codes — is delivered via **SendGrid** (free tier), which sends to any inbox (v0.3.8).
 2. Parent **signs up** for their own account, then confirms the link from it. Confirmation is an
    authenticated action: the link is only `verified` once a distinct, separately authenticated parent
    account has accepted it.
