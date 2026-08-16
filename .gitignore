@@ -54,6 +54,7 @@ logs/
 Thumbs.db
 .idea/
 .vscode/
+.vs/
 *.swp
 
 # ---- Supabase CLI local state (per-developer, not source) ----
