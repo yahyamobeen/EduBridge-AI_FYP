@@ -3,7 +3,8 @@ Email locale and template behaviour. No database, no network.
 
 WHAT THIS GUARDS. Every verification and reset link was built as
 `{base}/en/...` regardless of who was receiving it, in a product whose premise
-is Urdu-first (prd.md §3.1) and which stores `language_pref` on every student.
+is Urdu-first (prd.md §3.1) and which stores `language_pref` on every ACCOUNT
+(on every student only, until 20260816200000 moved the column to `app_user`).
 An Urdu-medium student in Lahore got an English page from the one email that
 decides whether they can use the account at all.
 """
@@ -33,8 +34,13 @@ class TestWebLocale:
         assert web_locale(stored) == expected
 
     def test_missing_language_falls_back_to_english(self):
-        # `language_pref` lives on student_profile, so it is NULL for every
-        # teacher, parent and admin. Falling back beats guessing.
+        # ⚠️ THE MEANING OF `None` CHANGED IN 20260816200000, and the fallback
+        # deliberately did not. It used to arrive for every teacher, parent and
+        # administrator, because `language_pref` lived on `student_profile` —
+        # so the fallback WAS the behaviour for three roles out of four, and
+        # FR-A8's "the stored preference governs outgoing email" was unmeetable
+        # for them. The column is on `app_user` now and NOT NULL, so `None`
+        # means no user row at all. Falling back still beats guessing.
         assert web_locale(None) == "en"
 
     def test_an_unknown_code_falls_back_rather_than_producing_a_broken_url(self):

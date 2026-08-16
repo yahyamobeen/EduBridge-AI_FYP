@@ -25,6 +25,8 @@ from app.auth.schemas import (
     LoginRequest,
     LoginResponse,
     MeResponse,
+    MeUpdateRequest,
+    PasswordChangeRequest,
     PasswordForgotRequest,
     PasswordResetRequest,
     RegisterRequest,
@@ -35,10 +37,12 @@ from app.auth.schemas import (
     TwoFactorEnrollResponse,
     TwoFactorResendRequest,
     TwoFactorResendResponse,
+    TwoFactorStatusResponse,
     TwoFactorVerifyRequest,
     TwoFactorVerifyResponse,
 )
 from app.auth.service import (
+    change_password,
     enums,
     forgot_password,
     guardian_confirm,
@@ -54,7 +58,9 @@ from app.auth.service import (
     two_factor_confirm,
     two_factor_enroll,
     two_factor_resend,
+    two_factor_status,
     two_factor_verify,
+    update_me,
     verify_email,
 )
 from app.core.db import get_db
@@ -66,6 +72,8 @@ from app.core.ratelimit import (
     GUARDIAN_INVITE_LIMIT,
     GUARDIAN_STATUS_LIMIT,
     LOGIN_LIMIT,
+    ME_UPDATE_LIMIT,
+    PASSWORD_CHANGE_LIMIT,
     PASSWORD_FORGOT_LIMIT,
     PASSWORD_RESET_LIMIT,
     REFRESH_LIMIT,
@@ -73,6 +81,7 @@ from app.core.ratelimit import (
     TWO_FA_CONFIRM_LIMIT,
     TWO_FA_ENROLL_LIMIT,
     TWO_FA_RESEND_LIMIT,
+    TWO_FA_STATUS_LIMIT,
     TWO_FA_VERIFY_LIMIT,
     enforce,
 )
@@ -169,6 +178,73 @@ def logout_endpoint(
 @router.get("/auth/me", response_model=MeResponse)
 def me_endpoint(ctx: Annotated[AuthContext, Depends(authenticated)]) -> MeResponse:
     return MeResponse(**me(ctx.session, ctx.user_id))
+
+
+# ---------------------------------------------------------------------------
+# FR-A8 — manage own account (prd.md:450, tdd.md §3.1). Role: ALL FOUR, so none
+# of these is behind `require_role`.
+#
+# All three pass `subject=` to the limiter, for the reason in ratelimit.py: they
+# are authenticated, and an address key would make one student in a shared
+# school lab spend the whole building's allowance.
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/auth/me", response_model=MeResponse)
+def me_update_endpoint(
+    request: Request,
+    payload: MeUpdateRequest,
+    ctx: Annotated[AuthContext, Depends(authenticated)],
+) -> MeResponse:
+    """
+    `full_name` and `language_pref` only.
+
+    `board`, `class_level` and `student_group` are absent from `MeUpdateRequest`
+    AND unwritable at the database (20260816160000, finding B4) — a student who
+    could set their own class would leave the parental-consent gate for ever.
+    Two layers on purpose: this one gives a clear 400, that one holds if this
+    model ever grows a field by accident.
+    """
+    enforce(request, bucket="me_update", limit=ME_UPDATE_LIMIT, subject=str(ctx.user_id))
+    return MeResponse(**update_me(ctx.session, ctx.user_id, payload))
+
+
+@router.post("/auth/password/change", status_code=status.HTTP_204_NO_CONTENT)
+def password_change_endpoint(
+    request: Request,
+    payload: PasswordChangeRequest,
+    ctx: Annotated[AuthContext, Depends(authenticated)],
+) -> None:
+    """
+    Requires the current password (tdd.md:194, user-stories.md:115).
+
+    204 rather than a body: the count of sessions ended is written to
+    `audit_log`, and returning it would tell a caller who just proved they know
+    the password something they can already learn, at the cost of a shape to
+    maintain.
+
+    ⚠️ EVERY REFRESH TOKEN IS REVOKED, including the caller's own. The client
+    must expect its next refresh to fail and treat that as "sign in again",
+    which is the intended behaviour and not an error to paper over. Access
+    tokens survive up to their TTL; closing that window is Phase 4.
+    """
+    enforce(
+        request, bucket="password_change", limit=PASSWORD_CHANGE_LIMIT, subject=str(ctx.user_id)
+    )
+    change_password(ctx.session, ctx.user_id, payload)
+
+
+@router.get("/auth/2fa/status", response_model=TwoFactorStatusResponse)
+def two_factor_status_endpoint(
+    request: Request,
+    ctx: Annotated[AuthContext, Depends(authenticated)],
+) -> TwoFactorStatusResponse:
+    """
+    Own second-factor state. NEVER the secret (tdd.md:195) — the view it reads
+    was built without that column, so the guarantee is structural.
+    """
+    enforce(request, bucket="2fa_status", limit=TWO_FA_STATUS_LIMIT, subject=str(ctx.user_id))
+    return TwoFactorStatusResponse(**two_factor_status(ctx.session, ctx.user_id))
 
 
 @router.get("/reference/enums", response_model=EnumsResponse)

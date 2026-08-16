@@ -351,7 +351,9 @@ An **allow-list**, not a status check. `TWO_FACTOR_INVALID` and `PENDING_TOKEN_E
 
 The retry itself is at `client.ts:168-170`, guarded three ways: not a challenge credential (`init.bearer === undefined`), not opted out (`!init.noRetry`), and on the allow-list. It runs **once** — `rawRequest` is called directly, not `apiFetch`, so there is no loop. `client.test.ts:96-105` asserts the original path is hit exactly twice and then gives up.
 
-`noRetry` is documented at `client.ts:105-113` and used at exactly one call site: `login` (`endpoints.ts:61`). On `/auth/login` a 401 means the password was wrong, so refreshing would fire a guaranteed-to-fail request on every typo.
+`noRetry` is documented at `client.ts:105-113` and used at **three** call sites: `login`, `adminLogin` and `changePassword`. On `/auth/login` a 401 means the password was wrong, so refreshing would fire a guaranteed-to-fail request on every typo.
+
+⚠️ **`changePassword` is the subtle one, added in Phase 3.** `POST /auth/password/change` returns `401 UNAUTHENTICATED` for a wrong *current* password — the contract forbids a bespoke code — and `UNAUTHENTICATED` is necessarily on `REFRESHABLE_401_CODES`, because it normally means an expired token. It is therefore the **only** route where both meanings of that 401 are live at once. The `init.bearer === undefined` guard does **not** shield it: unlike `/2fa/confirm`, its credential travels in the body, not as `bearer`. Without `noRetry` every mistyped password would silently fire a token refresh and replay the request.
 
 ### Transport-level onboarding redirects
 

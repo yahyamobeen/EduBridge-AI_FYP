@@ -12,6 +12,8 @@ import type {
   LoginRequest,
   LoginResponse,
   MeResponse,
+  MeUpdateRequest,
+  PasswordChangeRequest,
   PasswordForgotRequest,
   PasswordResetRequest,
   RegisterRequest,
@@ -22,6 +24,7 @@ import type {
   TwoFactorEnrollResponse,
   TwoFactorResendRequest,
   TwoFactorResendResponse,
+  TwoFactorStatusResponse,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponse,
 } from './types'
@@ -181,6 +184,46 @@ export function guardianConfirm(
 
 export function getMe(): Promise<MeResponse> {
   return apiFetch<MeResponse>('/auth/me')
+}
+
+// ---------------------------------------------------------------------------
+// FR-A8 — manage own account. The settings screen is the only caller.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the WHOLE `MeResponse`, not a patch result, so a caller can replace
+ * its cached user outright instead of merging two shapes.
+ */
+export function updateMe(body: MeUpdateRequest): Promise<MeResponse> {
+  return apiFetch<MeResponse>('/auth/me', { method: 'PATCH', body })
+}
+
+/**
+ * ⚠️ `noRetry` IS LOAD-BEARING HERE, AND THIS IS THE ONLY ROUTE WHERE IT IS
+ *    SUBTLE.
+ *
+ * A wrong CURRENT password returns `401 UNAUTHENTICATED` — the contract makes
+ * that "also the only response meaning 'wrong password'" (tdd.md:1053) and
+ * forbids inventing a code (tdd.md:1074). `UNAUTHENTICATED` is also in
+ * `REFRESHABLE_401_CODES` (errors.ts), because it normally means an expired
+ * access token. So this is the one endpoint where BOTH meanings of that 401 are
+ * live at once, and without `noRetry` every mistyped password would silently
+ * fire a token refresh and replay the request.
+ *
+ * The `init.bearer === undefined` guard in client.ts does NOT cover this: unlike
+ * `/2fa/confirm`, the credential here is not passed as `bearer`.
+ *
+ * Resolves with nothing (204). ⚠️ EVERY REFRESH TOKEN IS REVOKED, INCLUDING THE
+ * CALLER'S OWN — the next refresh will fail by design, and the caller should
+ * treat that as "sign in again" rather than as an error.
+ */
+export function changePassword(body: PasswordChangeRequest): Promise<void> {
+  return apiFetch<void>('/auth/password/change', { method: 'POST', body, noRetry: true })
+}
+
+/** Own second factor. Never returns the secret. */
+export function twoFactorStatus(): Promise<TwoFactorStatusResponse> {
+  return apiFetch<TwoFactorStatusResponse>('/auth/2fa/status')
 }
 
 /**

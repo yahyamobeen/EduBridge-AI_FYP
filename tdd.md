@@ -192,7 +192,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | GET | `/api/auth/me` | Yes | any | Current identity + **`onboarding_state`** |
 | PATCH | `/api/auth/me` | Yes | any | Update own profile and **stored `language_pref`**, which governs outgoing email (v0.3.7 — FR-A8) |
 | POST | `/api/auth/password/change` | Yes | any | Change password from inside the account; **requires the current password** (v0.3.7 — FR-A8) |
-| GET | `/api/auth/2fa/status` | Yes | any | Own second-factor method and state. **Never returns the secret** (v0.3.7 — FR-A8) |
+| GET | `/api/auth/2fa/status` | Yes | any | Own second-factor method and state, plus **`backup_codes_remaining`**. **Never returns the secret** (v0.3.7 — FR-A8; count added v0.3.8) |
 
 **Key design decisions:**
 - Passwords hashed with **argon2id** (never MD5 — the supervisor's template's MD5 is the explicit anti-pattern we avoid). Refresh tokens stored hashed, rotated, revocable.
@@ -1072,6 +1072,10 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 **`INVALID_TOKEN` vs `TOKEN_EXPIRED` is not a coin toss.** A token that was already *used* is `400 INVALID_TOKEN`. `410` is what makes the client offer a resend, and offering one for a link that already worked sends the user round a loop they have finished. Only an **unused, lapsed** token is `410`. `app.check_token_status` returns `token_revoked` precisely so the two can be told apart.
 
 **No endpoint invents a code.** `/2fa/resend` against a TOTP enrolment answers `400 VALIDATION_ERROR` with `details.fields`, not a bespoke `INVALID_METHOD`: a code outside this table reaches the client as an unrecognised string and renders as "something went wrong".
+
+**`POST /api/auth/password/change` answers `401 UNAUTHENTICATED` when the *current* password is wrong** — not a new `WRONG_PASSWORD` code, by the rule above and by the `UNAUTHENTICATED` row's own "also the only response meaning 'wrong password'". *(Stated explicitly in v0.3.8, because it has a consequence no other route has.)*
+
+> ⚠️ **This is the one route where both meanings of `401 UNAUTHENTICATED` are live at once** — an expired access token *and* a wrong password. Clients keep an allow-list of 401 codes worth retrying after a token refresh, and `UNAUTHENTICATED` is necessarily on it. **A client must therefore opt this route out of refresh-and-retry**, or every mistyped password silently fires a token refresh and replays the request. The reference client does so with `noRetry: true` (`lib/api/endpoints.ts`). The guard that shields `/2fa/confirm` — "the credential travelled as `bearer`" — does not apply here, because this credential travels in the body.
 
 Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
 

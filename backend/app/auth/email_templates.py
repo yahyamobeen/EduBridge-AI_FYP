@@ -37,9 +37,15 @@ def web_locale(language_pref: str | None) -> str:
     """
     Map a stored `language_code` to the locale segment the frontend routes on.
 
-    `None` for every non-student role — `language_pref` lives on
-    `student_profile` — and for a student whose profile is unreadable. Falls
-    back to English rather than guessing.
+    ⚠️ `None` NO LONGER MEANS "not a student". Until `20260816200000`
+    `language_pref` lived on `student_profile`, so every teacher, parent and
+    administrator arrived here as `None` and was silently given English — which
+    made FR-A8's "the stored preference governs outgoing email" unmeetable for
+    three roles out of four. The column is on `app_user` now and is
+    `NOT NULL DEFAULT 'en'`, so `None` means the caller has no user row at all.
+
+    The fallback stays for that case and for an unrecognised value: English
+    rather than a guess.
     """
     if language_pref is None:
         return _DEFAULT_LOCALE

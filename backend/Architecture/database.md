@@ -164,14 +164,34 @@ entity-relationship diagrams — one per domain, never one unreadable master —
 
 | Table | Defined at | Notes |
 |---|---|---|
-| `app_user` | `20260801120000_initial_schema.sql:97` | `email citext UNIQUE`, `password_hash` (argon2id), `role user_role`, `status user_status`, `email_verified_at`, soft-delete `deleted_at`. Trigger `trg_app_user_updated` at `:109`. |
-| `student_profile` | `:114` | `board`, `class_level` (9–12), `student_group`, `medium`, `language_pref`. `ck_group_matches_class` at `:124` forbids an FSc group on a Matric class and vice versa. |
+| `app_user` | `20260801120000_initial_schema.sql:97` | `email citext UNIQUE`, `password_hash` (argon2id), `role user_role`, `status user_status`, `email_verified_at`, **`language_pref language_code NOT NULL DEFAULT 'en'`** (added by `20260816200000`), soft-delete `deleted_at`. Trigger `trg_app_user_updated` at `:109`. |
+| `student_profile` | `:114` | `board`, `class_level` (9–12), `student_group`, `medium`, `language_pref` (⚠️ **superseded — read by nothing**, see below). `ck_group_matches_class` at `:124` forbids an FSc group on a Matric class and vice versa. |
 | `teacher_profile` | `:133` | `institution` only. |
 | `parent_profile` | `:140` | Timestamps only. |
 | `admin_profile` | `:146` | Free-text `scope`. |
 
 `class_level` on `student_profile` is the input to the parental-consent gate — see
 [B4](#b-known-gaps--the-database-would-not-catch-a-missed-check).
+
+> ⚠️ **`language_pref` EXISTS ON BOTH TABLES, AND ONLY `app_user` IS READ (`20260816200000`).**
+>
+> It began on `student_profile`. FR-A8 grants account management to **all four roles** and requires
+> the stored preference to govern outgoing email — but the lookup behind every outgoing mail,
+> `app.lookup_user_for_email_flow`, LEFT JOINed a table that teachers, parents and administrators
+> have no row in. It returned `NULL` for them and the caller fell back to English, silently and for
+> ever. **No non-student could receive Urdu mail**, and no endpoint work could fix it, because there
+> was nowhere to store the answer. Measured on the live administrator account before the migration:
+> `language_pref -> None`; after: `'en'`.
+>
+> `app_user.language_pref` is now the single source of truth for outgoing email **and** for
+> `MeResponse.profile.language_pref` (`_ME_QUERY` selects `u.language_pref`, not `sp.`), so the
+> settings screen cannot display one language while mail is sent in another.
+>
+> The `student_profile` column is **deliberately kept and deliberately unread**. Dropping it would
+> take `20260816160000`'s `GRANT UPDATE (language_pref) ON student_profile` with it, leaving that
+> table with no updatable column at all and deleting a passing authorization test for no gain.
+> Registration writes both with the same value; only `app_user` is ever updated afterwards. **If you
+> are reading `sp.language_pref` anywhere, that is the bug.**
 
 ### Guardian link — the parental-consent gate
 
@@ -505,6 +525,31 @@ carry `updated_at` columns with **no** trigger attached — finding D14.
 | `app.insert_auth_token(p_user_id uuid, p_kind token_kind, p_token_hash text, p_expires_at timestamptz)` | `VOLATILE` | Yes | `uuid` | `tokens.py:54` (`_insert_token`, `:50`) — every token-issuing path | `app_backend` | `20260802140000:182` |
 | `app.revoke_auth_token(p_id uuid)` | `VOLATILE` | Yes | `void` | `tokens.py:119` (`rotate_refresh_token`, `:98`) | `app_backend` | `20260802140000:152` |
 | `app.revoke_refresh_family(p_user_id uuid)` | `VOLATILE` | Yes | `integer` — how many were revoked, so the caller can audit it | `tokens.py:134` (`revoke_refresh_family`, `:125`) — reuse-detection breach response | `app_backend` | `20260802140000:163` |
+
+### Account management — `/auth/password/change` (FR-A8)
+
+| Function | Volatility | Definer? | Returns | Called from | Grant | Defined at |
+|---|---|---|---|---|---|---|
+| `app.change_password(p_new_password_hash text)` | `VOLATILE` | Yes | `TABLE(changed boolean, tokens_revoked integer)` | `backend/app/auth/service.py` (`change_password`) → `POST /auth/password/change` | `app_backend` | `20260816210000` |
+
+⚠️ **It takes no user identifier, and that is the whole design.** Every other `SECURITY DEFINER`
+function here accepts the user it should act on. This one derives its subject from
+`app.current_user_id()`, which `authenticated` bound — so the shape of finding **C1** ("accepts a
+caller-chosen user") cannot exist here at all. The alternative, a `p_user_id` parameter guarded by
+`p_user_id = app.current_user_id()`, works only for as long as nobody deletes the guard; there is no
+guard to delete. This is possible **only because the endpoint is authenticated** — the
+pre-authentication functions have no caller identity to derive from, which is why C1 needs a
+redesign rather than a check.
+
+⚠️ **Two return fields because one cannot carry the answer.** `tokens_revoked = 0` is a legitimate
+success for a user with no live sessions, so the count cannot also mean "refused" — a caller writing
+the natural `if not result:` would report success on a password that never changed. `changed`
+answers the security question; `tokens_revoked` answers the audit one.
+
+**Fail-closed at every exit**, and the session revocation runs *after* the password write is
+confirmed to have hit a row, so a refusal can never log anybody out. Verifying the CURRENT password
+stays in Python, where argon2 lives — `20260816160000` revoked `UPDATE` on `app_user` and never
+`SELECT`, so `app_user_self_read` still serves the hash to its owner.
 
 ### Two-factor authentication — `/auth/2fa/*`
 

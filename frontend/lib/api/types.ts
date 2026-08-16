@@ -221,7 +221,16 @@ export type StudentProfile = {
 export type MeResponse = {
   user_id: string
   email: string
-  full_name: string
+  /**
+   * NULLABLE, and it was typed `string` here while this very file said so
+   * elsewhere: `GuardianConfirmResponse.student_name` carries the comment
+   * "`app_user.full_name` is nullable, and `MeResponse.full_name` already says
+   * so". It did not. The backend is `full_name: str | None`
+   * (`schemas.py:225`) because the column is nullable
+   * (`initial_schema.sql:103`), and `Guardian.test.tsx:188` records a 500 that
+   * the same mistake caused on the confirm path.
+   */
+  full_name: string | null
   role: Role
   onboarding_state: OnboardingState
   email_verified: boolean
@@ -231,6 +240,43 @@ export type MeResponse = {
 }
 
 export type RefreshResponse = { access_token: string; expires_in: number }
+
+// ---------------------------------------------------------------------------
+// FR-A8 — manage own account. All three are authenticated.
+// ---------------------------------------------------------------------------
+
+/**
+ * `full_name` and `language_pref` only.
+ *
+ * `board`, `class_level` and `student_group` are deliberately absent. Class
+ * level is the parental-consent gate input, and board and group scope every
+ * progress record a student has — the API rejects all three, and the settings
+ * screen renders them read-only for the same reason.
+ *
+ * At least one field must be present; an empty object is a 400.
+ */
+export type MeUpdateRequest = {
+  full_name?: string
+  language_pref?: ApiLanguage
+}
+
+export type PasswordChangeRequest = {
+  current_password: string
+  new_password: string
+}
+
+/**
+ * Never carries the secret. The view behind it was built without that column,
+ * so this is structural rather than a field the type happens to omit.
+ *
+ * `locked_until` is an ISO-8601 instant, not a duration.
+ */
+export type TwoFactorStatusResponse = {
+  enabled: boolean
+  method: TwoFactorMethod | null
+  locked_until: string | null
+  backup_codes_remaining: number
+}
 
 // ---------------------------------------------------------------------------
 // Subscription

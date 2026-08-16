@@ -7,6 +7,7 @@ import { ArrowIcon } from '@/components/ui/Icon'
 import { Link, useRouter } from '@/i18n/navigation'
 import { logout } from '@/lib/api/endpoints'
 import type { MeResponse } from '@/lib/api/types'
+import { avatarInitial, displayName } from '@/lib/auth/displayName'
 import { navFor, ROLE_ACCENT } from '@/lib/auth/navigation'
 
 /**
@@ -40,7 +41,7 @@ export function DashboardShell({
 
   const items = navFor(me.role)
   const accent = ROLE_ACCENT[me.role]
-  const initial = me.full_name.trim().charAt(0).toUpperCase() || '?'
+  const initial = avatarInitial(me)
 
   /**
    * The redirect must happen on BOTH paths.
@@ -80,7 +81,9 @@ export function DashboardShell({
           {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate font-headline text-body-lg text-on-surface">{me.full_name}</p>
+          <p className="truncate font-headline text-body-lg text-on-surface">
+            {displayName(me)}
+          </p>
           <p className="truncate text-body-sm text-on-surface-variant">{subtitle}</p>
         </div>
       </div>

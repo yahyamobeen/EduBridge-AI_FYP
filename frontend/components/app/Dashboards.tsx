@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl'
 import { DashboardShell, PlaceholderCard } from '@/components/app/DashboardShell'
 import { SessionGuard } from '@/components/app/SessionGuard'
 import type { MeResponse } from '@/lib/api/types'
+import { firstName } from '@/lib/auth/displayName'
 
 /**
  * The four role dashboards.
@@ -36,7 +37,7 @@ export function StudentDashboard() {
         <DashboardShell me={me} subtitle={classSummary(me)}>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
-              {t('welcome', { name: me.full_name.split(' ')[0] ?? me.full_name })}
+              {t('welcome', { name: firstName(me) })}
             </h1>
             <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
           </header>
@@ -82,7 +83,7 @@ export function TeacherDashboard() {
         <DashboardShell me={me} subtitle={t('role')}>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
-              {t('welcome', { name: me.full_name.split(' ')[0] ?? me.full_name })}
+              {t('welcome', { name: firstName(me) })}
             </h1>
             <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
           </header>
@@ -110,7 +111,7 @@ export function ParentDashboard() {
         <DashboardShell me={me} subtitle={t('role')}>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
-              {t('welcome', { name: me.full_name.split(' ')[0] ?? me.full_name })}
+              {t('welcome', { name: firstName(me) })}
             </h1>
             <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
           </header>
@@ -152,7 +153,7 @@ export function AdminDashboard() {
         <DashboardShell me={me} subtitle={t('role')}>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
-              {t('welcome', { name: me.full_name.split(' ')[0] ?? me.full_name })}
+              {t('welcome', { name: firstName(me) })}
             </h1>
             <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
           </header>

@@ -75,6 +75,21 @@ EMAIL_RESEND_LIMIT = Limit(max_requests=30, window_seconds=300)
 PASSWORD_FORGOT_LIMIT = Limit(max_requests=30, window_seconds=300)
 PASSWORD_RESET_LIMIT = Limit(max_requests=60, window_seconds=300)
 
+# FR-A8 — manage own account. ALL THREE ARE KEYED ON THE USER, not the address:
+# they are authenticated, so a subject is available, and an address key would
+# make one student in a school lab spend the whole building's allowance.
+#
+# `password/change` is the tight one and is a genuine brute-force surface — it
+# accepts the CURRENT password, so an unlocked laptop is an offline-style
+# guessing oracle. Same shape as REGISTER rather than LOGIN, because nobody
+# changes their password ten times a minute.
+PASSWORD_CHANGE_LIMIT = Limit(max_requests=5, window_seconds=300)
+# Loose by comparison: these two cost a query and reveal nothing an
+# authenticated caller does not already have. The ceiling exists so a runaway
+# client loop cannot hammer the database, not to bound an attack.
+ME_UPDATE_LIMIT = Limit(max_requests=30, window_seconds=300)
+TWO_FA_STATUS_LIMIT = Limit(max_requests=60, window_seconds=60)
+
 # Per-ACCOUNT. These are the numbers that actually bound an attack, and they are
 # unaffected by how many people share an address.
 TWO_FA_ENROLL_USER_LIMIT = Limit(max_requests=5, window_seconds=300)

@@ -338,3 +338,74 @@ class PasswordForgotRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+
+# ============================================================================
+# FR-A8 — manage own account (tdd.md §3.1, prd.md:450). Role: ALL FOUR.
+# ============================================================================
+
+
+class PasswordChangeRequest(BaseModel):
+    # Both bounds copied from `RegisterRequest.password` and
+    # `PasswordResetRequest.new_password` rather than chosen again. A stricter
+    # rule here would reject passwords the same system issued, and the client is
+    # explicitly not the authority on the policy (ResetPassword.tsx:21-30).
+    #
+    # `current_password` is bounded for the same reason `new_password` is: it
+    # reaches argon2, and an unbounded string is an unbounded amount of hashing
+    # (finding D12, which fixes the rest of them).
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class MeUpdateRequest(BaseModel):
+    """
+    PATCH /api/auth/me.
+
+    ⚠️ TWO FIELDS, AND THE OMISSIONS ARE THE POINT. `class_level` is the input
+    the parental-consent gate reads, and `board` / `student_group` scope every
+    progress, mastery and coverage record ever written for a student — changing
+    one silently reinterprets their whole history. `20260816160000:86-94`
+    records that none of the three is editable even by its owner, and the
+    database enforces that independently of this model.
+    """
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=200)
+    # Accepted for EVERY role since 20260816200000 moved the column to
+    # `app_user`. It used to live on `student_profile`, so a teacher, parent or
+    # administrator had nowhere to store it and always received English mail.
+    language_pref: LanguageCode | None = None
+
+    def validate_at_least_one_field(self) -> None:
+        """
+        An empty body is a 400, not a silent success.
+
+        PATCH with no fields would otherwise return 200 and the current row,
+        which is indistinguishable from "your change was saved" to a client that
+        posted the wrong shape.
+        """
+        if self.full_name is None and self.language_pref is None:
+            raise validation_error(
+                message="Provide at least one field to update.",
+                details={"fields": {"full_name": "Provide this or language_pref."}},
+            )
+
+
+class TwoFactorStatusResponse(BaseModel):
+    """
+    GET /api/auth/2fa/status.
+
+    ⚠️ NO SECRET, NO HASHES, NO COUNTER. `tdd.md:195` says "Never returns the
+    secret" and `user-stories.md:97` makes retrieving it a failure criterion.
+    The source is `two_factor_status_v`, which was built without those columns
+    (20260801120000:236-242) — so the guarantee is structural rather than a
+    field this model happens not to declare.
+    """
+
+    enabled: bool
+    method: Literal["totp", "email_otp"] | None = None
+    locked_until: str | None = None
+    # From `unused_backup_codes` on the view. `user-stories.md:93` requires the
+    # remaining count be visible "without regenerating"; it is not in tdd.md
+    # §3.1, so that row is amended in the same change.
+    backup_codes_remaining: int = 0

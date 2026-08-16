@@ -51,6 +51,33 @@ def _student(db, email: str, *, class_level: int = 9) -> str:
     return str(user_id)
 
 
+def _teacher(db, email: str) -> str:
+    """
+    A teacher, bound as themselves.
+
+    Exists for one assertion: FR-A8 grants account management to ALL FOUR roles,
+    and until `20260816200000` `language_pref` lived on `student_profile` — a
+    table this user has no row in. There was nowhere to store the answer, so
+    `app.lookup_user_for_email_flow` returned NULL and every teacher, parent and
+    administrator silently received English mail.
+    """
+    user_id = uuid4()
+    set_current_user_id(db, user_id)
+    db.execute(
+        text(
+            "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
+            "VALUES (:id, :e, 'x', 'teacher', 'active', 'Test Teacher')"
+        ),
+        {"id": user_id, "e": email},
+    )
+    db.execute(
+        text("INSERT INTO teacher_profile (user_id, institution) VALUES (:id, 'Test School')"),
+        {"id": user_id},
+    )
+    db.flush()
+    return str(user_id)
+
+
 def _refused(db, statement: str, params: dict) -> str:
     with pytest.raises(ProgrammingError) as exc:
         db.execute(text(statement), params)
@@ -92,7 +119,7 @@ class TestAppUserColumnsAreRefused:
         assert column in message
 
 
-class TestTheOneColumnThatIsAllowed:
+class TestTheColumnsThatAreAllowed:
     def test_a_user_may_edit_their_own_full_name(self, db, unique_email):
         """
         The control. Without it, a migration that revoked UPDATE and granted
@@ -112,6 +139,62 @@ class TestTheOneColumnThatIsAllowed:
             text("SELECT full_name FROM app_user WHERE id = :uid"), {"uid": user_id}
         ).scalar()
         assert name == "Renamed Person"
+
+    def test_a_teacher_may_set_their_own_stored_language(self, db, unique_email):
+        """
+        FR-A8 for the three roles it never reached.
+
+        The control for `20260816200000`'s grant. Before that migration this
+        statement had no column to write: `language_pref` was on
+        `student_profile`, and a teacher has no row there. A migration that
+        added the column and forgot `GRANT UPDATE (language_pref)` would pass
+        every refusal test in this file and fail here — which is the failure
+        worth catching, because §2.2 revoked table-wide UPDATE and a new column
+        therefore arrives ungranted.
+        """
+        user_id = _teacher(db, unique_email("colgrant"))
+        set_current_user_id(db, user_id)
+
+        db.execute(
+            text("UPDATE app_user SET language_pref = 'ur' WHERE id = :uid"),
+            {"uid": user_id},
+        )
+        db.flush()
+
+        pref = db.execute(
+            text("SELECT language_pref FROM app_user WHERE id = :uid"), {"uid": user_id}
+        ).scalar()
+        assert str(pref) == "ur"
+
+    def test_the_stored_language_reaches_the_email_flow_lookup(self, db, unique_email):
+        """
+        ⚠️ THE ASSERTION THAT MAKES THE MIGRATION WORTH ANYTHING, and the one a
+        column-grant test alone would miss.
+
+        `app.lookup_user_for_email_flow` is what decides the locale of outgoing
+        mail (`service.py:676-678`), and it is SECURITY DEFINER, so a grant
+        tells you nothing about what it returns. Before `20260816200000` it
+        LEFT JOINed `student_profile` and handed back NULL for this user; the
+        caller then fell back to English, silently and for ever.
+
+        Asserted through the function rather than through the ORM on purpose —
+        the function is what production calls.
+        """
+        email = unique_email("colgrant")
+        user_id = _teacher(db, email)
+        set_current_user_id(db, user_id)
+        db.execute(
+            text("UPDATE app_user SET language_pref = 'ur' WHERE id = :uid"),
+            {"uid": user_id},
+        )
+        db.flush()
+
+        pref = db.execute(
+            text("SELECT language_pref FROM app.lookup_user_for_email_flow(:e)"),
+            {"e": email},
+        ).scalar()
+        assert pref is not None, "a teacher's language is NULL again -- the LEFT JOIN is back"
+        assert str(pref) == "ur"
 
     def test_the_updated_at_trigger_still_fires_without_a_grant_on_it(self, db, unique_email):
         """
@@ -276,6 +359,14 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
         accidental `GRANT UPDATE` on `subscription.plan_code` would let a user
         move themselves onto a different plan, and a column-name-only assertion
         would pass straight through it.
+
+        IT HAS NOW CAUGHT A FOURTH CHANGE. `20260816200000` moved
+        `language_pref` onto `app_user` for FR-A8 (a teacher has no
+        `student_profile` row, so no teacher could ever receive Urdu email) and
+        granted UPDATE on the new column. This failed on the next run naming
+        exactly that column, and was updated only afterwards -- the order
+        matters, because an expectation edited in advance of the change it is
+        meant to catch has proved nothing.
         """
         rows = db.execute(
             text(
@@ -294,6 +385,14 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
         assert actual == [
             # 20260816160000 (B2, B3, B4) — the only self-editable fields.
             ("app_user", "full_name", "UPDATE"),
+            # 20260816200000 (FR-A8) — the stored preference that governs
+            # outgoing email, for every role rather than students only.
+            ("app_user", "language_pref", "UPDATE"),
+            # Kept deliberately: dropping it would leave `student_profile` with
+            # no updatable column at all. Nothing READS it any more —
+            # `app_user.language_pref` is the source of truth as of
+            # 20260816200000 — but the grant is still the thing that proves
+            # `board`, `class_level` and `student_group` are not writable.
             ("student_profile", "language_pref", "UPDATE"),
             # 20260816170000 (B5) — INSERT only, so `status` and
             # `current_period_end` cannot be supplied and take their defaults.

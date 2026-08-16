@@ -21,14 +21,14 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **18** | `grep -c "^@router\." backend/app/auth/routes.py` |
+| Implemented routes | **21** | `grep -c "^@router\." backend/app/auth/routes.py` |
 | Routers in the backend | **1** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
 | **Total specified** | **49** | 23 + 3 + 6 + 6 + 11 |
-| **Specified but missing** | **31** | 49 − 18 — enumerated in §4 below. Unchanged: phase 1b added one specified endpoint AND implemented it in the same change |
+| **Specified but missing** | **28** | 49 − 21 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged |
 
-**All 18 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
+**All 21 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
 router. `GET /health` (`backend/app/main.py:86`) is defined on the application object rather than the
 router, sits outside `/api`, and is not one of the 49 — `tdd.md` does not specify it.
 
@@ -230,6 +230,68 @@ GUARDIAN_ALREADY_LINKED`; `pending` → `200`.
 > **Known defect D3.** Card 1.6's own failure criterion (`user-stories.md:172`) — "a student
 > satisfies their own gate by registering a throwaway parent account" — is satisfiable today.
 
+### 2.7 FR-A8 — manage own account
+
+Built in Phase 3 (2026-08-16), closing finding **E1**. All three are authenticated, open to **all
+four roles**, and keyed on the **acting user** rather than the address — a shared school lab or
+carrier NAT would otherwise make one student spend the whole building's allowance.
+
+| Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
+|---|---|---|---|---|---|---|
+| `PATCH /api/auth/me` | `me_update_endpoint` `routes.py:194` | `update_me` `service.py:678` | `MeUpdateRequest` `schemas.py:361` → `MeResponse` `schemas.py:222` | `authenticated` | `me_update` (30 / 5 min) | §3.1 row `tdd.md:193` |
+| `POST /api/auth/password/change` | `password_change_endpoint` `routes.py:213` | `change_password` `service.py:611` | `PasswordChangeRequest` `schemas.py:348` → — (204) | `authenticated` | `password_change` (5 / 5 min) | §3.1 row `tdd.md:194` |
+| `GET /api/auth/2fa/status` | `two_factor_status_endpoint` `routes.py:238` | `two_factor_status` `service.py:711` | `TwoFactorStatusResponse` `schemas.py:394` | `authenticated` | `2fa_status` (60 / min) | §3.1 row `tdd.md:195` |
+
+**`PATCH /auth/me` writes `full_name` and `language_pref`, and nothing else can be written.** The
+request model has no other field, *and* `app_backend` holds `UPDATE` on exactly those two columns of
+`app_user` — so a future model that grew a `class_level` field would be refused by PostgreSQL rather
+than silently permitted. `class_level` is the parental-consent gate input (finding **B4**), and
+`board` / `student_group` scope every progress record a student has.
+
+It returns a whole `MeResponse` by delegating to `me()` (`service.py`), so the PATCH and GET shapes
+cannot drift into describing one account two ways.
+
+**`POST /auth/password/change` goes through `app.change_password`** (`20260816210000`), not a plain
+`UPDATE` — `20260816160000` revoked table-wide `UPDATE` on `app_user` precisely so a password write
+would have to pass through something that also ends every session.
+
+> ⚠️ **The function takes NO user identifier.** Its subject is `app.current_user_id()`, which
+> `authenticated` bound. The plan called for `change_password(p_user_id, p_new_hash)` guarded by
+> `p_user_id = app.current_user_id()`; that is the shape of finding **C1** with a check bolted on,
+> and a check can be dropped by a later edit that reads like a simplification. Removing the
+> parameter makes the whole class unreachable here.
+>
+> ⚠️ **It returns `(changed boolean, tokens_revoked integer)`, and one field could not do the job.**
+> `0` sessions revoked is a legitimate success for a user with none live, so the count cannot also
+> signal refusal — a caller writing the natural `if not result:` would report 204 on a password that
+> never changed.
+
+**A wrong CURRENT password is `401 UNAUTHENTICATED`**, per `tdd.md` §7.3, which makes that code
+"also the only response meaning 'wrong password'" and forbids inventing one. ⚠️ That makes this the
+**only** route where both meanings of that 401 are live at once, so a client must opt it out of
+refresh-and-retry — see the note added to §7.3.
+
+**Reading `password_hash` for the argon2 comparison needs no privileged path.** `20260816160000`
+revoked `UPDATE`, never `SELECT`, so `app_user_self_read` still serves it to the bound user. The
+comparison stays in Python, where argon2 lives.
+
+**`GET /auth/2fa/status` is one `SELECT` against `two_factor_status_v`**, a view that existed unused
+from the initial schema until `20260816150000` gave it `security_invoker = true` (finding **B1**).
+Before that it ran as its owner and returned every account's second-factor state to any caller —
+measured at the time as 7 of 7 rows readable, now 0.
+
+> It never returns the secret, and that is **structural rather than a field this response happens to
+> omit**: the view was built without `totp_secret_encrypted` or `last_used_counter`. Deliberately
+> NOT `app.get_unused_backup_codes`, which returns the backup-code **hashes** — the verify path
+> needs those because argon2 is non-deterministic; a status endpoint has no business reading them.
+> Deliberately NOT folded into `GET /auth/me` either: one extra round trip on a screen the user
+> visits occasionally, rather than a join on the dashboard's hot path.
+
+Pinned by `tests/integration/test_account_management.py` (27 tests), including that a second account
+cannot see the first's enrolment, that a refusal writes nothing and ends no session, and that a
+teacher's chosen language reaches `app.lookup_user_for_email_flow` — asserted through the function
+production actually calls, not through the ORM.
+
 ### 2.6 Outside the router
 
 | Route | Defined at | Auth | Limit | Specified? |
@@ -267,22 +329,30 @@ endpoint, and that an authorization-matrix test asserts it on each such route. T
 
 This is the honest build-state record. Each row cites the `tdd.md` line that specifies it. **None of
 these paths exists in `backend/app/`** — verified by `grep -rn "@router\." backend/app`, which returns
-18 decorators, all listed in §2.
+21 decorators, all listed in §2.
 
-### 4.1 Auth and account management — 5 missing (of 22 in §3.1)
+### 4.1 Auth and account management — 2 missing (of 22 in §3.1)
 
 | # | Method | Path | Role | Purpose | `tdd.md` |
 |---|---|---|---|---|---|
 | 1 | `POST` | `/api/auth/2fa/backup-codes` | any | Regenerate backup codes, invalidating the old set | `tdd.md:184` |
 | 2 | `POST` | `/api/admin/users/{id}/2fa/reset` | Admin | Identity-verified recovery reset; always audited | `tdd.md:185` |
-| 3 | `PATCH` | `/api/auth/me` | any | Update own profile and stored `language_pref`, which governs outgoing email (FR-A8) | `tdd.md:192` |
-| 4 | `POST` | `/api/auth/password/change` | any | Change password from inside the account; requires the current password (FR-A8) | `tdd.md:193` |
-| 5 | `GET` | `/api/auth/2fa/status` | any | Own second-factor method and state; never returns the secret (FR-A8) | `tdd.md:194` |
 
-Rows 3–5 are the FR-A8 account-management gap, finding **E1** in the register. Note the ordering constraint recorded in
-the phase plan: the **column grants must be narrowed first** (finding B2/B3), because with today's
-table-wide grants and `app_user_self_update` permitting `role`, `PATCH /auth/me` would be a privilege
-escalation and password change would have no correct write path.
+> **E1 — FIXED, Phase 3 (2026-08-16).** The three FR-A8 account-management routes that used to be
+> rows 3–5 here are built and live in [§2.7](#27-fr-a8--manage-own-account). ⚠️ **Their `tdd.md`
+> citations in this table were off by one** (192/193/194 for rows that are at 193/194/195) —
+> corrected while moving them, because a citation nobody re-opens is how a document stops being
+> evidence.
+>
+> **The ordering constraint this section recorded was real and was honoured.** The column grants had
+> to be narrowed first (findings B2/B3, migration `20260816160000`): with table-wide grants and
+> `app_user_self_update` permitting `role`, `PATCH /auth/me` would have been a privilege escalation
+> and password change would have had no correct write path. Phase 2 closed that, and Phase 3 then
+> found the write path had to be a function rather than a grant — `app.change_password`.
+>
+> **Row 1 is still missing and Phase 3 depends on that being true.** `GET /auth/2fa/status` reports
+> `backup_codes_remaining` precisely so the count can be read *without* calling the endpoint that
+> replaces every code, which is card 1.3's success criterion (`user-stories.md:93`).
 
 > **A6 — FIXED, phase 1b (2026-08-16).** Three frontend call sites routed an `admin` account to
 > `/admin`, which did not exist, so the account looped on "Redirecting…" for ever. The page is now

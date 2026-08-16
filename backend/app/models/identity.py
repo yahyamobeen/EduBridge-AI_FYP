@@ -66,6 +66,14 @@ class AppUser(Base):
         _pg_enum(UserStatus), nullable=False, default=UserStatus.active
     )
     full_name: Mapped[str | None] = mapped_column(Text)
+    # 20260816200000. Moved here from `student_profile`, which teachers, parents
+    # and administrators have no row in — so FR-A8's "the stored preference
+    # governs outgoing email" could not be met for three roles out of four.
+    # `StudentProfile.language_pref` below still exists and is read by nothing;
+    # this is the source of truth.
+    language_pref: Mapped[LanguageCode] = mapped_column(
+        _pg_enum(LanguageCode), nullable=False, default=LanguageCode.en
+    )
     email_verified_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")

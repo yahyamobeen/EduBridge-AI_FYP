@@ -28,6 +28,8 @@ from app.auth.schemas import (
     GuardianConfirmRequest,
     GuardianInviteRequest,
     LoginRequest,
+    MeUpdateRequest,
+    PasswordChangeRequest,
     PasswordForgotRequest,
     PasswordResetRequest,
     RegisterRequest,
@@ -128,8 +130,9 @@ def register(db: Session, payload: RegisterRequest) -> dict:
     try:
         db.execute(
             text(
-                "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
-                "VALUES (:id, :email, :pwhash, :role, 'active', :full_name)"
+                "INSERT INTO app_user "
+                "(id, email, password_hash, role, status, full_name, language_pref) "
+                "VALUES (:id, :email, :pwhash, :role, 'active', :full_name, :lang)"
             ),
             {
                 "id": new_id,
@@ -137,6 +140,13 @@ def register(db: Session, payload: RegisterRequest) -> dict:
                 "pwhash": hash_password(payload.password),
                 "role": payload.role.value,
                 "full_name": payload.full_name,
+                # `RegisterRequest.language_pref` was always accepted for every
+                # role and, before 20260816200000, only ever STORED for
+                # students. A teacher's answer was read once for the
+                # verification email below and then thrown away. INSERT on
+                # app_user is still table-wide (only UPDATE narrowed in
+                # 20260816160000), so this needs no additional grant.
+                "lang": payload.language_pref.value,
             },
         )
         db.flush()
@@ -451,8 +461,14 @@ def logout(db: Session, user_id: UUID) -> None:
 
 _ME_QUERY = text(
     """
-    SELECT u.id, u.email, u.full_name, u.role, u.email_verified_at,
-           sp.board, sp.class_level, sp.student_group, sp.medium, sp.language_pref,
+    -- `language_pref` comes from `u`, NOT from `sp`. It moved to app_user in
+    -- 20260816200000 so that FR-A8 could reach the three roles without a
+    -- student_profile row; `student_profile.language_pref` still exists and is
+    -- deliberately read by nothing. Sourcing it here keeps ONE value behind
+    -- both `MeResponse.profile.language_pref` and outgoing email, so the
+    -- settings screen cannot show one thing while mail is sent in another.
+    SELECT u.id, u.email, u.full_name, u.role, u.email_verified_at, u.language_pref,
+           sp.board, sp.class_level, sp.student_group, sp.medium,
            tf.method  AS tf_method,
            tf.status  AS tf_status,
            gl.status  AS guardian_status,
@@ -582,6 +598,166 @@ def me(db: Session, user_id: UUID) -> dict:
         },
         "profile": profile,
         "guardian": {"required": guardian_required, "status": guardian_status},
+    }
+
+
+# ----------------------------------------------------------------------------
+# FR-A8 — manage own account (tdd.md §3.1). Every route below is authenticated,
+# so the session is already bound and every statement runs under the ordinary
+# owner-scoped policies. None of them touches `get_service_db`.
+# ----------------------------------------------------------------------------
+
+
+def change_password(db: Session, user_id: UUID, payload: PasswordChangeRequest) -> int:
+    """
+    POST /api/auth/password/change. Returns the number of sessions ended.
+
+    ⚠️ 401 UNAUTHENTICATED FOR A WRONG CURRENT PASSWORD, NOT A NEW CODE.
+    `tdd.md:1053` makes UNAUTHENTICATED "also the only response meaning 'wrong
+    password'", and `tdd.md:1074` says "No endpoint invents a code." A
+    WRONG_PASSWORD code would reach the client as an unrecognised string and
+    render as "something went wrong".
+
+    ⚠️ THAT MAKES THIS THE ONLY ROUTE WHERE BOTH MEANINGS OF 401 ARE LIVE AT
+    ONCE — expired token and wrong password — which is why the client wrapper
+    must pass `noRetry: true`. Without it every mistyped password fires a token
+    refresh (`REFRESHABLE_401_CODES` in errors.ts).
+
+    READING `password_hash` NEEDS NO PRIVILEGED PATH. §2.2 revoked UPDATE and
+    never SELECT, so `app_user_self_read` still serves it to the bound user.
+    After the column-grant work the instinct is to reach for a function for
+    every `app_user` access; here that would move an argon2 comparison inside
+    something running as the database owner, for no gain.
+    """
+    row = (
+        db.execute(
+            text("SELECT password_hash FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    # `authenticated` already proved this row exists and is active; reaching
+    # here means it stopped being true mid-request.
+    if row is None:
+        raise unauthenticated()
+
+    if not verify_password(payload.current_password, row["password_hash"]):
+        raise unauthenticated("Incorrect password.")
+
+    # The function takes NO user identifier — it acts on `app.current_user_id()`,
+    # which `authenticated` bound. See 20260816210000 for why that is stronger
+    # than passing one and checking it.
+    result = (
+        db.execute(
+            text("SELECT changed, tokens_revoked FROM app.change_password(:new_hash)"),
+            {"new_hash": hash_password(payload.new_password)},
+        )
+        .mappings()
+        .one()
+    )
+    # ⚠️ `changed` IS CHECKED, and it is not ceremony. `tokens_revoked` is 0 for
+    #    a legitimate change by a user with no live sessions, so the count
+    #    cannot carry this signal — that is why the function returns two fields.
+    if not result["changed"]:
+        raise unauthenticated()
+
+    db.execute(
+        text(
+            "INSERT INTO audit_log (actor_id, action, target) "
+            "VALUES (:uid, 'password_changed', 'app_user')"
+        ),
+        {"uid": user_id},
+    )
+    # NO db.commit(). `authenticated` commits on success (dependencies.py:84);
+    # committing here would end the transaction and silently discard the user
+    # binding for anything that ran afterwards.
+    return int(result["tokens_revoked"])
+
+
+def update_me(db: Session, user_id: UUID, payload: MeUpdateRequest) -> dict:
+    """
+    PATCH /api/auth/me — `full_name` and `language_pref` only.
+
+    Returns a full `MeResponse` by delegating to `me()` rather than assembling
+    one, so the PATCH and GET shapes cannot drift. It costs one extra query on a
+    route nobody calls in a loop.
+
+    ⚠️ THE COLUMN LIST IS BUILT FROM THE FIELDS ACTUALLY SUPPLIED, so a PATCH of
+    one field does not overwrite the other with None. Both columns carry their
+    own UPDATE grant (`full_name` from 20260816160000, `language_pref` from
+    20260816200000) and nothing else on `app_user` does — so a future edit that
+    added a column here would be refused by PostgreSQL rather than silently
+    permitted.
+    """
+    payload.validate_at_least_one_field()
+
+    assignments = []
+    params: dict[str, object] = {"uid": user_id}
+    if payload.full_name is not None:
+        assignments.append("full_name = :full_name")
+        params["full_name"] = payload.full_name
+    if payload.language_pref is not None:
+        assignments.append("language_pref = :language_pref")
+        params["language_pref"] = payload.language_pref.value
+
+    # Every fragment above is a fixed literal chosen by the two `if`s; the
+    # values are bound. `updated_at` is left to `trg_app_user_updated`.
+    db.execute(text(f"UPDATE app_user SET {', '.join(assignments)} WHERE id = :uid"), params)  # noqa: S608
+
+    return me(db, user_id)
+
+
+def two_factor_status(db: Session, user_id: UUID) -> dict:
+    """
+    GET /api/auth/2fa/status.
+
+    ONE SELECT against `two_factor_status_v`, which existed unused since
+    20260801120000 and was given `security_invoker = true` by 20260816150000
+    (finding B1) — before that it ran as its owner and a caller bound to a user
+    owning nothing read every account's second-factor state through it.
+    Measured then: 7 of 7 rows readable; now 0. `user_id` is therefore NOT in
+    the WHERE clause by accident of trust — it is there because the view now
+    applies `two_factor_enrollment`'s owner policy to the caller.
+
+    ⚠️ DO NOT SWITCH THIS TO `app.get_unused_backup_codes`. That returns the
+    HASHES (20260803120000:284-293), which the verify path needs because argon2
+    is non-deterministic and a status endpoint has no business reading.
+
+    ⚠️ DO NOT FOLD THIS INTO `GET /auth/me`. That is one deliberate extra round
+    trip, on a screen the user visits occasionally, to keep the dashboard's
+    hot-path query from growing a join nobody there needs.
+
+    An account that never enrolled has no row at all, which is `enabled: false`
+    rather than an error.
+    """
+    row = (
+        db.execute(
+            text(
+                "SELECT method, status, locked_until, unused_backup_codes "
+                "  FROM two_factor_status_v WHERE user_id = :uid"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        return {
+            "enabled": False,
+            "method": None,
+            "locked_until": None,
+            "backup_codes_remaining": 0,
+        }
+
+    enabled = str(row["status"]) == "active"
+    return {
+        "enabled": enabled,
+        # Mirrors `MeResponse.two_factor`, which reports the method only while
+        # the enrolment is active — a pending enrolment is not a second factor.
+        "method": str(row["method"]) if enabled else None,
+        "locked_until": row["locked_until"].isoformat() if row["locked_until"] else None,
+        "backup_codes_remaining": int(row["unused_backup_codes"] or 0),
     }
 
 
@@ -792,8 +968,10 @@ def two_factor_enroll(db: Session, payload: TwoFactorEnrollRequest) -> dict:
     recipient = (
         db.execute(
             text(
-                "SELECT u.email, sp.language_pref FROM app_user u "
-                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+                # `u.language_pref` since 20260816200000. The LEFT JOIN this
+                # replaced returned NULL for every non-student, so a teacher who
+                # had chosen Urdu still received an English OTP mail.
+                "SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"
             ),
             {"uid": user_id},
         )
@@ -1125,8 +1303,10 @@ def two_factor_resend(db: Session, payload: TwoFactorResendRequest) -> dict:
     recipient = (
         db.execute(
             text(
-                "SELECT u.email, sp.language_pref FROM app_user u "
-                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+                # `u.language_pref` since 20260816200000. The LEFT JOIN this
+                # replaced returned NULL for every non-student, so a teacher who
+                # had chosen Urdu still received an English OTP mail.
+                "SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"
             ),
             {"uid": user_id},
         )
