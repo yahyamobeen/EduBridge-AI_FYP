@@ -1,0 +1,94 @@
+-- ============================================================================
+-- EduBridge AI — column-level UPDATE authorization (findings B2, B3, B4)
+--
+-- THE GAP, STATED EXACTLY. Row-Level Security decides WHICH ROWS a request may
+-- touch. Nothing decided WHICH COLUMNS, because every grant was table-wide:
+--
+--   SELECT count(*) FROM pg_attribute a
+--     JOIN pg_class c ON c.oid = a.attrelid
+--     JOIN pg_namespace n ON n.oid = c.relnamespace
+--    WHERE n.nspname = 'public' AND a.attacl IS NOT NULL;
+--   -- 0
+--
+-- Zero columns in the entire schema carried their own access control list. That
+-- is finding **B2**, and this file creates the first entries.
+--
+-- ⚠️ A MEASUREMENT TRAP, RECORDED SO NOBODY REPEATS IT.
+--    `information_schema.column_privileges` reports 622 rows for `app_backend`,
+--    which reads as "column-level authorization already exists". It does not:
+--    that view EXPANDS a table-level grant into one row per column, so it cannot
+--    distinguish "granted on the table" from "granted on this column".
+--    `pg_attribute.attacl` is the only thing that answers the question.
+--
+-- WHAT IT BUYS. `app_user_self_update` is `USING (id = app.current_user_id())`,
+-- so with a table-wide UPDATE grant a user could write their own:
+--   * `role`              -> become an administrator (**B3**)
+--   * `status`            -> un-suspend themselves (**B3**)
+--   * `email_verified_at` -> skip email verification (**B3**)
+--   * `password_hash`     -> set a known hash without the current password (**B3**)
+-- and on `student_profile`, their own `class_level` — **B4**, the parental-consent
+-- gate input. `20260803090000` spent an entire migration proving `verified` is
+-- reachable by exactly one path, while the decision to REQUIRE it stayed
+-- student-writable. This closes that.
+--
+-- ⚠️ B4 IS NOT MITIGATED BY THE CHECK CONSTRAINT, AND IT LOOKS LIKE IT IS.
+--    Probing `UPDATE student_profile SET class_level = 11` alone comes back as a
+--    CHECK VIOLATION on `ck_group_matches_class`, not a permission error,
+--    because `science` is not a Class 11 group. That reads as "already
+--    protected". It is not: the constraint rejects an INCONSISTENT PAIR, never
+--    the escalation. Measured before this migration, setting both columns in one
+--    statement succeeded —
+--        UPDATE student_profile SET class_level = 11, student_group = 'pre_medical'
+--    — moving a Class 9 student to Class 11 and out of the gate entirely.
+--    Data validation is not authorization. Pinned by
+--    `test_column_grants.py::test_the_real_escape_shape_is_refused`.
+--
+-- ⚠️ INSERT IS A SEPARATE PRIVILEGE AND IS DELIBERATELY UNTOUCHED. Registration
+--    writes whole rows and must keep working. Only UPDATE narrows.
+--
+-- CALL SITES WALKED BEFORE REVOKING (caller-and-callee rule):
+--   * `grep -rn "UPDATE .*app_user\|UPDATE .*student_profile" backend/app` ->
+--     **ZERO** application statements. Nothing in `backend/app/` updates either
+--     table directly.
+--   * Two migration functions do, and BOTH are `SECURITY DEFINER`, so they
+--     execute as the owner and are unaffected by any grant to `app_backend`:
+--       - `app.consume_token_and_verify_email`  (20260803120000:425) sets
+--         `email_verified_at`
+--       - `app.consume_password_reset_token`    (20260803120000:472) sets
+--         `password_hash` and `updated_at`
+--   * One TEST fixture updated `status` directly and has been rewritten to
+--     insert the row already suspended. That it needed changing is the fix
+--     working, not a regression.
+--
+-- ⚠️ CONSEQUENCE FOR PHASE 3. `POST /auth/password/change` cannot use a plain
+--    UPDATE any more and needs `app.change_password()`. That is deliberate: a
+--    password write should go through a function that also revokes the refresh
+--    family, not through a grant that happens to allow it.
+--
+-- WHAT IS DELIBERATELY *NOT* GRANTED: `updated_at`. A `BEFORE UPDATE` trigger
+-- sets it (`app.set_updated_at()`), and PostgreSQL checks column privileges
+-- against the columns named in the STATEMENT, not against columns a trigger
+-- assigns to NEW. Verified by measurement, not assumed — see the phase handoff.
+--
+-- Idempotent: `REVOKE` of a privilege already absent and `GRANT` of one already
+-- held are both no-ops, and the Supabase CLI does not wrap a file in a
+-- transaction.
+-- ============================================================================
+
+-- ── app_user ────────────────────────────────────────────────────────────────
+-- BEFORE: UPDATE on every column, so `role`, `status`, `email_verified_at` and
+--         `password_hash` were all self-writable under app_user_self_update.
+REVOKE UPDATE ON public.app_user FROM app_backend;
+-- AFTER:  one column. `full_name` is the only field a user may edit about
+--         themselves, and it is what `PATCH /auth/me` (phase 3.2) will write.
+GRANT UPDATE (full_name) ON public.app_user TO app_backend;
+
+-- ── student_profile ─────────────────────────────────────────────────────────
+-- BEFORE: UPDATE on every column, including `class_level` — the input the
+--         parental-consent gate reads to decide whether consent is required.
+REVOKE UPDATE ON public.student_profile FROM app_backend;
+-- AFTER:  interface language only. `board`, `class_level` and `student_group`
+--         scope every progress, mastery and coverage record ever written for
+--         this student; changing one silently reinterprets their whole history,
+--         which is why none of the three is editable even by their owner.
+GRANT UPDATE (language_pref) ON public.student_profile TO app_backend;

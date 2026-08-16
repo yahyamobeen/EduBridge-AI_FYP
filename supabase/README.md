@@ -13,7 +13,7 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**11 applied.** `ls supabase/migrations/*.sql | wc -l`
+**19 applied.** `ls supabase/migrations/*.sql | wc -l`
 
 | # | File | Contents |
 |---|---|---|
@@ -28,6 +28,14 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 | 9 | `20260803120000_2fa_email_password_lookups.sql` | 16 `SECURITY DEFINER` functions for the eight pre-session endpoints (two-factor, email verification, password reset) |
 | 10 | `20260803160000_2fa_lockout_and_email_locale.sql` | Corrective: re-enrolling can no longer launder a lockout; activation records the consumed TOTP counter; `check_token_status` returns `revoked`; adds `lookup_user_for_email_flow`; drops the duplicate `issue_token_for_email` |
 | 11 | `20260803180000_login_2fa_lookup.sql` | `app.lookup_2fa_for_login` — login read `two_factor_enrollment` with a plain `SELECT` before a session existed, got zero rows under Row-Level Security, and read that as "not enrolled" |
+| 12 | `20260816120000_block_admin_self_registration.sql` | **Phase 1** (A1). `app_user_insert` gains `role <> 'admin'` — the second layer behind `RegistrableRole`. Not a new policy: the owner-scoped form has been live since #7 |
+| 13 | `20260816130000_reconcile_default_partition_policies.sql` | **Phase 1b** (F1). Codifies the four policies that existed live and in **no** migration, so a database rebuilt from these files no longer refuses every audit and request-log write. Proved byte-identical to live before applying, so a no-op against production. Deliberately copies `WITH CHECK (true)` including its weakness — that is **B15** |
+| 14 | `20260816140000_login_lookup_returns_role.sql` | **Phase 1b** (FR-A2a). `app.lookup_user_for_login` returns `role`, so `login()` can refuse administrators at the public endpoint. A return-type change needs a DROP, and **the DROP takes the REVOKE, GRANT and COMMENT with it** — all four are re-issued |
+| 15 | `20260816150000_two_factor_status_view_security_invoker.sql` | **Phase 2** (B1). `two_factor_status_v` ran as its **owner**, so the policies underneath were skipped — measured: 7 of 7 accounts readable from the application role while the table itself returned 0. Now 0 |
+| 16 | `20260816160000_column_level_update_grants.sql` | **Phase 2** (B2, B3, B4). The first column-level grants in the schema. `UPDATE` narrowed to `app_user.full_name` and `student_profile.language_pref`; `role`, `status`, `email_verified_at`, `password_hash` and `class_level` stop being self-writable |
+| 17 | `20260816170000_split_read_from_write_on_owner_tables.sql` | **Phase 2** (B5, B6, B7). Seven `FOR ALL` policies split. Subscription activation is no longer self-grantable, revocation becomes a **one-way door** (`WITH CHECK (revoked = true)`), and the five progress tables are read-only |
+| 18 | `20260816180000_scope_guardian_functions_to_caller.sql` | **Phase 2** (C2). Both guardian functions check their caller. ⚠️ They have **different** callers — the parent confirms, the **student** invites |
+| 19 | `20260816190000_revoke_public_execute_on_helpers.sql` | **Phase 2** (C5). Seven helper functions stop being executable by `PUBLIC` (the register said five). `app_backend` is granted explicitly: `is_admin()` is in 35 policies and `current_user_id()` in 41, and without EXECUTE they **error rather than deny** |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.

@@ -313,16 +313,16 @@ are recorded in detail. The summary a reader of *this* page needs:
 
 | # | Finding | Effect on the second layer |
 |---|---|---|
-| B1 | `two_factor_status_v` is a **view**, so the RLS-enablement loop (which reads `pg_tables`) never saw it; `GRANT … ON ALL TABLES` includes views; it has no `security_invoker`, so it runs as owner | Every account's two-factor method, lockout state and backup-code count is readable |
-| B2 | Grants are **table-wide** | Row-Level Security gives **no column protection on any table** |
-| B3 | `app_user_self_update` permits self-writes to `role`, `email_verified_at`, `status`, `password_hash` | A user can promote themselves |
-| B4 | `student_profile_write` is `FOR ALL` | `class_level` — the input to the parental-consent gate — is student-writable |
-| B5 | `subscription_owner` is `FOR ALL` | A user can set their own `status='active'` |
-| B6 | `auth_token_owner` is `FOR ALL` | Revocation is reversible, so logout, password reset and theft response are all undoable |
-| B7 | Five progress/attempt policies are `FOR ALL` | Every number a parent or teacher reads is student-writable |
+| B1 | **Fixed** (Phase 2, `20260816150000`). A view carries no row-level security of its own, and without `security_invoker` it ran as its **owner**, so the owner-scoped policies underneath were skipped; `GRANT … ON ALL TABLES` includes views, and the enablement loop reads `pg_tables`, which does not list them | Was: every account's two-factor method, lockout state and backup-code count readable — measured at **7 of 7** accounts from the application role. Now the caller's own row only |
+| B2 | **Fixed** (Phase 2, `20260816160000`). Grants were table-wide; `pg_attribute.attacl` was NULL for **every column in the schema** | Was: no column protection anywhere. Now four columns carry their own grant |
+| B3 | **Fixed** (Phase 2, `20260816160000`). `UPDATE` on `app_user` narrowed to `full_name` | Was: self-writes to `role`, `status`, `email_verified_at`, `password_hash` — all four measured as ALLOWED before |
+| B4 | **Fixed** (Phase 2, `20260816160000`). `UPDATE` on `student_profile` narrowed to `language_pref` | Was: a Class 9 student could set `class_level` **and** `student_group` together and leave the consent gate. A check constraint made this look mitigated; it only rejects an inconsistent pair |
+| B5 | **Fixed** (Phase 2, `20260816170000`). `FOR SELECT` + `FOR INSERT`, with `INSERT` narrowed to `(user_id, plan_code)` | Was: a user could set their own `status='active'`. `status` can no longer be supplied at all |
+| B6 | **Fixed** (Phase 2, `20260816170000`). `FOR UPDATE … WITH CHECK (revoked = true)` — a one-way door | Was: revocation reversible. A column grant could not have fixed this; only a `WITH CHECK` forbids the inverse transition |
+| B7 | **Fixed** (Phase 2, `20260816170000`). All five are `FOR SELECT` on the owner, with no write policy and no write grant | Was: every number a parent or teacher reads was student-writable |
 | B13 | Six curriculum policies were changed to `USING (true)` | The bound-user requirement was dropped |
 | B15 | `reqlog_insert` is `WITH CHECK (true)` | The operational log the admin panel reads is forgeable |
-| B19 | RLS enablement is a one-shot loop while grants are forward-looking | Every future table is granted automatically and protected only if someone remembers |
+| B19 | **Closed structurally** (Phase 2). The fix is a test, not a migration: `test_rls_coverage.py` | Every future table is granted automatically and protected only if remembered — missed three times. The sweep now fails on any table without RLS forced and a policy, and any view not running as its caller |
 
 B8–B12, B14, B16–B18 concern the classroom, quiz and OAuth tables and are catalogued on the database
 page.

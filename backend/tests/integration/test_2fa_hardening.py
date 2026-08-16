@@ -20,25 +20,28 @@ from app.core.db import set_current_user_id
 from app.models.enums import TokenKind
 
 
-def _make_user(session, email: str, *, verified: bool = True) -> str:
+def _make_user(session, email: str, *, verified: bool = True, status: str = "active") -> str:
+    """
+    `status` is set AT INSERT rather than by a follow-up UPDATE.
+
+    Since 20260816160000 (finding B3), `app_backend` holds UPDATE on exactly one
+    column of `app_user` — `full_name` — so `UPDATE app_user SET status = …`
+    is refused with "permission denied for column status". INSERT is a separate
+    privilege and still covers every column, which is what registration needs.
+
+    The old fixture did the UPDATE, and having to change it is the fix working:
+    the whole point of B3 is that a bound user cannot rewrite their own status.
+    """
     user_id = uuid4()
     set_current_user_id(session, user_id)
-    if verified:
-        session.execute(
-            text(
-                "INSERT INTO app_user (id, email, password_hash, role, full_name, "
-                "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', now())"
-            ),
-            {"id": user_id, "email": email},
-        )
-    else:
-        session.execute(
-            text(
-                "INSERT INTO app_user (id, email, password_hash, role, full_name) "
-                "VALUES (:id, :email, 'x', 'student', 'Test User')"
-            ),
-            {"id": user_id, "email": email},
-        )
+    session.execute(
+        text(
+            "INSERT INTO app_user (id, email, password_hash, role, full_name, status, "
+            "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', "
+            ":status, CASE WHEN :verified THEN now() ELSE NULL END)"
+        ),
+        {"id": user_id, "email": email, "status": status, "verified": verified},
+    )
     session.flush()
     set_current_user_id(session, user_id)
     return str(user_id)
@@ -316,12 +319,9 @@ class TestEnumerationSurface:
 
     def test_a_suspended_account_looks_exactly_like_an_unknown_one(self, client, db, unique_email):
         email = unique_email("suspended")
-        user_id = _make_user(db, email, verified=True)
-        set_current_user_id(db, user_id)
-        db.execute(
-            text("UPDATE app_user SET status = 'suspended' WHERE id = :uid"), {"uid": user_id}
-        )
-        db.flush()
+        # Inserted suspended, not suspended afterwards: `app_backend` no longer
+        # holds UPDATE on `status` (finding B3, migration 20260816160000).
+        user_id = _make_user(db, email, verified=True, status="suspended")
 
         resp = client.post("/api/auth/password/forgot", json={"email": email})
         assert resp.status_code == 204

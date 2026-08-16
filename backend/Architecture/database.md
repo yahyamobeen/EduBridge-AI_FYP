@@ -195,7 +195,7 @@ INSERT policy pins `status = 'pending'` (`:54-60`) and the UPDATE policy's `WITH
 |---|---|---|
 | `two_factor_enrollment` | `20260801120000_initial_schema.sql:193` | One row per user. `method`, `status`, `totp_secret_encrypted bytea` (AES-256 ciphertext; the key lives in application config, so a database dump alone yields nothing usable), `last_used_counter` (Time-based One-Time Password replay guard), `failed_attempts`, `locked_until`. |
 | `two_factor_backup_code` | `:223` | Ten per enrolment, argon2id-hashed, single use via `used_at`. Plaintext exists only in the one response that issues them. |
-| `two_factor_status_v` **(view)** | `:236` | Admin support view: method, status, lockout state and an unused-code count, with **no secret and no code hash**. |
+| `two_factor_status_v` **(view)** | `:236` | **The caller's own** two-factor method, status, lockout state and unused-code count, with **no secret and no code hash**. ⚠️ **Not an administrator view** — it was described as one until `20260816150000` gave it `security_invoker = true` (finding **B1**), and with both underlying policies owner-scoped an administrator now sees only their own row. Cross-account 2FA state belongs to `GET /api/auth/2fa/status`. |
 
 Three CHECK constraints keep the state machine honest: `ck_totp_requires_secret`,
 `ck_email_otp_has_no_secret` and `ck_active_is_confirmed` (`:209-214`) — an `active` enrolment
@@ -452,7 +452,7 @@ path.
 | `question_key` | **Deliberate and permanent.** See the invariants below. |
 | `audit_log_default` | Deliberate. RLS is enabled and forced with no policy, making *direct* access default-deny while parent-routed reads and writes keep using `audit_log`'s own policies. |
 | `api_request_log_default` | As above. |
-| `two_factor_status_v` | **Not deliberate.** A view cannot carry RLS, and this one has no `security_invoker`. This is [B1](#b-known-gaps--the-database-would-not-catch-a-missed-check). |
+| `two_factor_status_v` | **Resolved 2026-08-16.** A view cannot carry row-level security — policies attach to tables. `20260816150000` set `security_invoker = true`, so it executes as its **caller** and the policies underneath apply. Was finding [B1](#b-known-gaps--the-database-would-not-catch-a-missed-check). `tests/integration/test_rls_coverage.py` now fails if any view in `public` lacks the option. |
 
 ---
 
@@ -658,13 +658,13 @@ land.
 
 | # | Finding | Where |
 |---|---|---|
-| **B1** | `two_factor_status_v` is a **view**, so the enable-and-force loop (which reads `pg_tables`) never saw it — and `GRANT … ON ALL TABLES` **does** include views. It has no `security_invoker`, so it runs as its owner and bypasses `two_factor_enrollment_owner` entirely. Exposes every account's two-factor method, lockout state and unused-backup-code count. | view at `20260801120000:236`; loop at `20260801120100:126-137`; grant at `20260801120100:36` |
-| **B2** | **Grants are table-wide, so Row-Level Security gives no column protection on any table.** See invariant 4. | `20260801120100:36-39` |
-| **B3** | `app_user_self_update` permits self-writes to `role`, `email_verified_at`, `status` and `password_hash` — the predicate constrains *which row*, never *which columns*. | `20260801120100:147` |
-| **B4** | `student_profile_write` is `FOR ALL`, so `class_level` — the input to the parental-consent gate — is student-writable. | `20260801120100:168` |
-| **B5** | `subscription_owner` is `FOR ALL`: a user can set their own `status = 'active'`. | `20260802120000:157` |
-| **B6** | `auth_token_owner` is `FOR ALL`: revocation is reversible, so logout, password reset and the token-theft response are all undoable by their subject. | `20260801120100:209` |
-| **B7** | `attempt_student_own`, `attempt_answer_owner`, `mastery_owner`, `coverage_owner` and `readiness_owner` are all `FOR ALL` — **every number a parent or teacher reads is student-writable**. | `:351`, `:367`, `:392`, `:401`, `:414` |
+| **B1** | **FIXED, Phase 2 (`20260816150000`).** `two_factor_status_v` is a **view**, so the enable-and-force loop (which reads `pg_tables`) never saw it — and `GRANT … ON ALL TABLES` **does** include views. Without `security_invoker` it ran as its owner and bypassed `two_factor_enrollment_owner` entirely. **Measured before and after, from the real `app_backend` connection**: a caller bound to a user owning nothing read **7 of 7** accounts through the view while the table itself correctly returned **0**; after the fix, **0**, and a real owner still sees exactly their own row. The generalised guard is `tests/integration/test_rls_coverage.py`, and it was verified to fail by reverting the option before being trusted. | view at `20260801120000:236`; loop at `20260801120100:126-137`; grant at `20260801120100:36` |
+| **B2** | **FIXED, Phase 2 (`20260816160000`).** Grants were table-wide, so Row-Level Security gave no column protection anywhere. Measured from `pg_attribute.attacl`: **zero columns in the whole schema carried their own grant**. ⚠️ `information_schema.column_privileges` reported **622** rows for `app_backend` and looks like the opposite answer — it expands a TABLE grant into one row per column and cannot distinguish the two. Now four columns carry their own ACL. | `20260816160000` |
+| **B3** | **FIXED, Phase 2 (`20260816160000`).** `app_user_self_update` permitted self-writes to `role`, `email_verified_at`, `status` and `password_hash` — the policy says only that the row must be yours, never which parts of it you may change. `UPDATE` on `app_user` is now granted on **`full_name` only**. Measured before: all four ALLOWED; after: `permission denied for column …`. | `20260816160000` |
+| **B4** | **FIXED, Phase 2 (`20260816160000`).** `class_level` — the parental-consent gate input — was student-writable. ⚠️ **It looked already-mitigated and was not**: `SET class_level = 11` alone returns a CHECK violation on `ck_group_matches_class`, because `science` is not a Class 11 group. The constraint rejects an inconsistent PAIR, never the escalation — setting `class_level` and `student_group` together succeeded and moved a Class 9 student out of the gate. **Data validation is not authorization.** `UPDATE` on `student_profile` is now `language_pref` only. | `20260816160000` |
+| **B5** | **FIXED, Phase 2 (`20260816170000`).** `subscription_owner` was `FOR ALL`, so a user could set their own `status = 'active'` with a `current_period_end` satisfying `ck_subscription_active_has_period` — the revenue model. Split into `FOR SELECT` + `FOR INSERT`, and **`INSERT` narrowed to `(user_id, plan_code)`**, so `status` and `current_period_end` cannot be supplied at all and take their defaults. `service.py:173` supplies exactly those two columns and is unaffected. | `20260816170000` |
+| **B6** | **FIXED, Phase 2 (`20260816170000`).** `auth_token_owner` was `FOR ALL`, so revocation was **reversible** — logout, password reset and the response to detected theft were all undoable by the owner. Replaced with `FOR SELECT` plus `FOR UPDATE … WITH CHECK (revoked = true)`: a **one-way door**. ⚠️ A column grant would NOT have worked — `GRANT UPDATE (revoked)` permits `false` as readily as `true`. Only a `WITH CHECK` expresses "this transition and not its inverse", which is the opposite conclusion from B2/B3. | `20260816170000` |
+| **B7** | **FIXED, Phase 2 (`20260816170000`).** `attempt_student_own`, `attempt_answer_owner`, `mastery_owner`, `coverage_owner` and `readiness_owner` were `FOR ALL` — exactly the numbers `coverage_viewers_read`, `readiness_viewers_read`, `mastery_guardian_read` and `attempt_teacher_read` show a parent or teacher, so a student could rewrite the evidence about themselves. All five are now `FOR SELECT` on the owner, with **no write policy and no write grant**: nothing writes them yet, and the phase that builds those endpoints adds a narrow one. | `20260816170000` |
 | **B8** | `quiz_teacher_write` checks only `created_by`. It never checks the space, and never checks the role — any user who created a quiz row owns it. | `20260801120100:342` |
 | **B9** | `enrollment_student_join` self-enrols into **any** space; `enrollment_leave` has no `WITH CHECK`. | `:289`, `:294` |
 | **B10** | `classroom_space` has no role check — any user can create a space with `owner_role = 'teacher'`. | `20260801120100:269` |
@@ -676,7 +676,53 @@ land.
 | **B16** | `admin_profile_self` omits `user_id` from its `WITH CHECK`: `USING (user_id = cuid() OR app.is_admin())` but `WITH CHECK (app.is_admin())`, so any administrator may write **any** administrator's profile row. | `20260801120100:183` |
 | **B17** | `oauth_identity_owner` is `FOR ALL` on a table with **no writer yet** — a user can pre-claim a victim's future social identity by inserting `(provider, provider_user_id)` before the feature ships. `uq_oauth_provider_subject` then makes the real link impossible. | `20260802120000:172`, table at `:96` |
 | **B18** | `quiz_question_read` is safe only by accident: `EXISTS (SELECT 1 FROM public.quiz q WHERE q.id = quiz_id)` is gated purely by `quiz_read` applying to the inner query. Change `quiz_read` and this silently widens. | `20260801120100:347` |
-| **B19** | **Row-Level Security enablement is a one-shot loop while grants are forward-looking.** `ALTER DEFAULT PRIVILEGES` (`:38-41`) grants every *future* table automatically; the `ENABLE`/`FORCE` loop (`:126-137`) ran once. Every table added from now on is granted by default and protected only if someone remembers. | `20260801120100:36-41` vs `:126-137` |
+| **B19** | **CLOSED STRUCTURALLY, Phase 2.** Grants are forward-looking via `ALTER DEFAULT PRIVILEGES` while enablement was a one-shot loop, so a new table is granted automatically and protected only if someone remembers — missed three times already (both default partitions, finding **F1**; and `two_factor_status_v`, which the loop could not see because it reads `pg_tables` and a view is not a table, finding **B1**). **The fix is a test, not a migration**: `tests/integration/test_rls_coverage.py` asserts every table in `public` has RLS enabled, forced, and a policy or a listed exemption, and every view runs as its caller. Both exemption lists are checked in both directions. ⚠️ Verified to FAIL before being trusted, by reverting `security_invoker` and confirming it named the object. | `tests/integration/test_rls_coverage.py` |
+
+### B20–B26 — seven more `FOR ALL` policies, found 2026-08-16 during Phase 2
+
+Phase 2 began by dumping the live catalogue rather than reading the migration files. §2.3 of the
+plan named **7** tables whose `FOR ALL` policies needed splitting; the database has **31** such
+policies. Ten are curriculum `*_admin_write` (predicate `app.is_admin()`, arguably correct), five
+are named elsewhere in the register, and **nine were recorded nowhere**.
+
+Each of the nine was put to the repository owner individually. **Two are now documented decisions**
+rather than findings, and **seven are open**:
+
+| # | Table · policy | Predicate | What the owner may therefore do |
+|---|---|---|---|
+| **B20** | `two_factor_enrollment` · `two_factor_enrollment_owner` | `user_id = app.current_user_id()` | **Clear their own `locked_until`, zero `failed_attempts`, change `method` or `status`** — the brute-force ladder this table exists to enforce is self-clearable at the database layer |
+| **B21** | `two_factor_backup_code` · `two_factor_backup_code_owner` | `user_id = app.current_user_id()` | **Insert their own code hashes, or clear `used_at` on a spent code.** Backup codes are an authentication bypass by design, so this is the severity of a self-writable password |
+| **B22** | `chat_session` · `chat_session_owner` | `student_id = app.current_user_id()` | Create, edit and delete their own tutoring sessions |
+| **B23** | `visual_aid` · `visual_aid_owner` | via the owning session | Write generated-diagram rows into their own session |
+| **B24** | `review_schedule` · `review_owner` | `student_id = app.current_user_id()` | Rewrite their own spaced-repetition schedule |
+| **B25** | `parent_profile` · `parent_profile_self` | `user_id = app.current_user_id() OR app.is_admin()` | Rewrite their own profile row — the same shape as `student_profile_write` (**B4**) |
+| **B26** | `teacher_profile` · `teacher_profile_self` | `user_id = app.current_user_id() OR app.is_admin()` | Same |
+
+**None is reachable through any route today** — every write goes through narrow service code. They
+are the second layer, and the point of a second layer is that it holds when the first has a bug.
+
+⚠️ **B20 and B21 are the load-bearing pair.** They govern authentication itself, and the application
+writes both **exclusively** through `SECURITY DEFINER` functions — so `FOR SELECT` on the owner
+with no direct write path would cost nothing and close them outright.
+
+⚠️ **B25 and B26 leave the three profile tables governed by different reasoning** once §2.2 narrows
+`student_profile`. That inconsistency is deliberate and recorded, not an oversight.
+
+#### Two decisions, not findings
+
+**`message.message_owner` stays `FOR ALL`.** A student owns their own transcript outright. The
+consequence, written down rather than left implicit: **the integrity of assistant turns is not a
+database-level guarantee** — a student with arbitrary SQL as `app_backend` could insert a row into
+their own session attributed to the assistant. Card 1.5's privacy invariant concerns who may *read*
+chat content, and that still holds: `chat_session`, `message` and `visual_aid` remain owner-only
+with no teacher, parent or admin path and no privileged function touching them.
+
+**`join_code.join_code_owner` stays `FOR ALL`.** A space owner minting and editing codes for a
+space they already own is the behaviour the feature exists to provide, and the predicate
+`app.owns_space(...)` scopes it. The classroom weaknesses that do matter — `classroom_space`
+having no role check, `enrollment_student_join` self-enrolling into any space — are separate
+findings and stay in §2.4.
+
 
 ### Related findings recorded elsewhere
 
@@ -688,7 +734,7 @@ catalogued in full in [`architecture.md`](architecture.md):
   (`20260802140000:182`), which will mint a token of **any kind, for any user, with a
   caller-chosen hash** — a complete authentication bypass for anyone who can reach it with
   controlled arguments. **Verified: no current route passes a request-controlled identifier.**
-* **C2** — `app.confirm_guardian_link` does not check `p_parent = app.current_user_id()`
+* **C2** — **FIXED, Phase 2 (`20260816180000`)** — `app.confirm_guardian_link` now requires `p_parent = app.current_user_id()`, and `app.reinvite_guardian_link` requires `p_student = app.current_user_id()`. ⚠️ **The two have different callers** — the parent confirms, the STUDENT invites — so a single shared check would have been wrong in one direction. Verified by reading both call sites and both service signatures
   (`20260802150000:75`).
 * **C5** — five `SECURITY DEFINER` helper functions retain PostgreSQL's default `EXECUTE` grant to
   `PUBLIC`: `is_admin`, `is_verified_guardian_of`, `teaches_student_subject`, `owns_space`,
