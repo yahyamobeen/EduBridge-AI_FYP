@@ -164,7 +164,7 @@ entity-relationship diagrams — one per domain, never one unreadable master —
 
 | Table | Defined at | Notes |
 |---|---|---|
-| `app_user` | `20260801120000_initial_schema.sql:97` | `email citext UNIQUE`, `password_hash` (argon2id), `role user_role`, `status user_status`, `email_verified_at`, **`language_pref language_code NOT NULL DEFAULT 'en'`** (added by `20260816200000`), soft-delete `deleted_at`. Trigger `trg_app_user_updated` at `:109`. |
+| `app_user` | `20260801120000_initial_schema.sql:97` | `email citext UNIQUE`, `password_hash` (argon2id), `role user_role`, `status user_status`, `email_verified_at`, **`language_pref language_code NOT NULL DEFAULT 'en'`** (added by `20260816200000`), **`sessions_invalidated_at`** (added by `20260817120000` — see below), soft-delete `deleted_at`. Trigger `trg_app_user_updated` at `:109`. |
 | `student_profile` | `:114` | `board`, `class_level` (9–12), `student_group`, `medium`, `language_pref` (⚠️ **superseded — read by nothing**, see below). `ck_group_matches_class` at `:124` forbids an FSc group on a Matric class and vice versa. |
 | `teacher_profile` | `:133` | `institution` only. |
 | `parent_profile` | `:140` | Timestamps only. |
@@ -525,6 +525,84 @@ carry `updated_at` columns with **no** trigger attached — finding D14.
 | `app.insert_auth_token(p_user_id uuid, p_kind token_kind, p_token_hash text, p_expires_at timestamptz)` | `VOLATILE` | Yes | `uuid` | `tokens.py:54` (`_insert_token`, `:50`) — every token-issuing path | `app_backend` | `20260802140000:182` |
 | `app.revoke_auth_token(p_id uuid)` | `VOLATILE` | Yes | `void` | `tokens.py:119` (`rotate_refresh_token`, `:98`) | `app_backend` | `20260802140000:152` |
 | `app.revoke_refresh_family(p_user_id uuid)` | `VOLATILE` | Yes | `integer` — how many were revoked, so the caller can audit it | `tokens.py:134` (`revoke_refresh_family`, `:125`) — reuse-detection breach response | `app_backend` | `20260802140000:163` |
+
+### Session policy — Phase 4 (`20260817120000`, `20260817130000`)
+
+**Four columns and three functions that give a session an end.** Before them,
+revoking refresh tokens ended only the ability to obtain a NEW access token — the one already in the
+caller's memory stayed valid for up to `access_token_ttl_minutes`, so a password change left an
+attacker signed in for another quarter of an hour.
+
+| Column | On | Why |
+|---|---|---|
+| `sessions_invalidated_at` | `app_user` | Every access token issued at or before this instant is refused |
+| `family_started_at` | `auth_token` | When a rotating chain BEGAN. Carried forward across every rotation, so it bounds the chain absolutely rather than per token |
+| `revoked_at` | `auth_token` | Tells a two-tab RACE from a token THEFT |
+| `revoked_reason` | `auth_token` | `reuse_detected`, `password_change`, `password_reset`, `family_expired`, `rotated`. **NULL means an ordinary logout**, which is the common case |
+
+| Function | Volatility | Definer? | Returns | Grant |
+|---|---|---|---|---|
+| `app.invalidate_sessions(p_user_id uuid)` | `VOLATILE` | Yes | `timestamptz` — the stamp it wrote | ⚠️ **owner only** |
+| `app.insert_refresh_token(uuid, text, timestamptz)` | `VOLATILE` | Yes | `uuid` | `app_backend` |
+| `app.rotate_refresh_token(text, text, timestamptz, interval, interval)` | `VOLATILE` | Yes | `TABLE(outcome, token_user_id, family_started_at)` | `app_backend` |
+| `app.purge_expired_auth_tokens(interval)` | `VOLATILE` | Yes | `integer` | ⚠️ **owner only** (`20260817140000`) |
+
+⚠️ **`clock_timestamp()`, NEVER `now()`, everywhere in this phase.** `now()` is
+`transaction_timestamp()` and is frozen for the whole transaction — measured on this project at
+**0.00s of movement across 2 real seconds**, against **2.20s** for `clock_timestamp()`. A stamp
+written with `now()` lands at the transaction's START, so a token minted later in the same
+transaction survives the invalidation meant to kill it. The integration suite runs inside one outer
+transaction, so such a test would PASS while asserting nothing.
+
+⚠️ **`app.invalidate_sessions` is not granted to `app_backend`, and neither is the purge.** Both take
+a subject or delete audit-relevant rows; a grant would let any authenticated caller sign another user
+out or erase evidence. Only the owner executes them, which means only the SECURITY DEFINER functions
+that call them can. Same reasoning that made `app.change_password` take no user identifier at all.
+
+⚠️ **UPDATE on `auth_token` is narrowed to `revoked`.** §2.3 split this table's `FOR ALL` policy into
+`FOR SELECT` plus `FOR UPDATE ... WITH CHECK (revoked = true)`, but left the UPDATE grant table-wide
+— so the moment these columns existed a caller could author their own `revoked_reason` or rewrite
+`family_started_at` and defeat the cap. `revoke_user_tokens` (logout) is the only plain UPDATE in the
+application and names `revoked` alone.
+
+⚠️ **THE CLOCKS ARE ON DIFFERENT MACHINES, AND THIS ALMOST SHIPPED BROKEN.** A token's `iat` is minted
+by Python on the application host; `sessions_invalidated_at` is stamped by `clock_timestamp()` on the
+database host. **Measured while building this**: a token created BEFORE a password change carried
+`iat = 20:03:43` while the stamp written afterwards read `20:03:41.88` — the database ran 1.1s behind,
+so the token looked as though it had been issued after its own invalidation and sailed through.
+Nothing failed; the feature was simply inert. A JWT `iat` is an integer besides, so there is no
+sub-second precision to fall back on. `security.session_is_invalidated` therefore compares `<=`
+against a cutoff widened by `session_invalidation_skew_seconds` (default 5), which fails CLOSED: a
+token issued shortly AFTER an invalidation is also refused, costing one extra sign-in. Pinned by
+`tests/integration/test_session_policy.py`.
+
+#### The rotation race — finding D2
+
+`app.rotate_refresh_token` replaces four unlocked round trips (read, check `revoked`, revoke, insert)
+with one statement holding a `FOR UPDATE` lock. Two concurrent refreshes could previously BOTH pass
+the check: one forked the family, defeating any cap, and the other tripped reuse detection on a
+legitimate refresh.
+
+⚠️ **A lock alone does not finish the job.** It stops the fork; the loser still finds `revoked = true`.
+Reuse detection revokes the whole family, so a user with two browser tabs — the client's single-flight
+guard is per TAB — was signed out of every device on a collision they could not avoid. The function
+therefore reports `raced` instead of `reuse` when the revocation is inside `p_race_grace` **and** a
+live sibling of the same family still exists. Both conditions are required, and both directions are
+tested.
+
+⚠️ **The cost, written down rather than glossed:** a thief replaying a stolen token inside that window
+also lands on the race path, so the family is not revoked. They are still refused, and `refresh()`
+writes a `refresh_token_race_detected` audit row so the event is not silent. A replay two seconds
+after a legitimate rotation is genuinely indistinguishable from a second tab.
+
+#### Retention — `20260817140000`
+
+`app.purge_expired_auth_tokens(p_grace interval DEFAULT '30 days')` deletes rows more than the grace
+period **past expiry**. ⚠️ The grace is not tidiness: `rotate_refresh_token` checks `revoked` BEFORE
+`expires_at`, so a stolen token replayed after expiry is still reported as theft — **but only while
+its row exists**. Purging on expiry alone turns that replay into a silent 401. `pg_cron` is available
+on this project but **not installed**, so the migration creates the function and skips scheduling;
+enable the extension and re-apply to register the daily job.
 
 ### Account management — `/auth/password/change` (FR-A8)
 

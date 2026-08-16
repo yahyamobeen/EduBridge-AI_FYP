@@ -32,6 +32,36 @@ class StoredToken:
     expires_at: datetime
 
 
+class RefreshTokenRaceError(Exception):
+    """
+    Two refreshes raced on the same token and this one lost.
+
+    ⚠️ NOT THE SAME AS REUSE, AND CONFLATING THEM SIGNS INNOCENT USERS OUT.
+    The client's single-flight guard is per browser TAB (`client.ts`), so two
+    tabs refreshing together present the same token twice. Read as theft that
+    revokes the whole family and logs the user out of every device, and writes
+    an audit row claiming a security incident that did not happen.
+
+    `app.rotate_refresh_token` reports this only when the old token was revoked
+    moments ago AND a live sibling of the same family still exists — i.e. the
+    winner of a concurrent refresh has already replaced it. A captured token
+    replayed later fails both conditions and is still reuse.
+
+    The caller answers a plain 401 and revokes nothing. That is self-healing:
+    the winner's response already overwrote the httpOnly cookie, so the client's
+    retry carries the new token.
+
+    ⚠️ It carries `user_id` for the same reason `RefreshTokenReuseError` does.
+    A thief replaying inside the grace window lands here rather than in reuse
+    detection, so this is the only record that it happened — and a record with
+    no subject is not one.
+    """
+
+    def __init__(self, user_id: UUID) -> None:
+        self.user_id = user_id
+        super().__init__("refresh token rotation race")
+
+
 class RefreshTokenReuseError(Exception):
     """
     An already-revoked refresh token was presented.
@@ -59,17 +89,30 @@ def _insert_token(
 def issue_refresh_token(
     session: Session, user_id: UUID, *, now: datetime | None = None
 ) -> tuple[str, UUID]:
-    """Returns the plaintext token (given to the client once) and the row id."""
+    """
+    Mint the token that STARTS a rotating family.
+
+    Returns the plaintext token (given to the client once) and the row id.
+
+    ⚠️ `app.insert_refresh_token`, NOT `app.insert_auth_token`. The new function
+    stamps `family_started_at`, which is what bounds a chain absolutely rather
+    than per token. It is a separate NAME rather than an extra argument on the
+    existing function because `CREATE OR REPLACE` with an added defaulted
+    argument creates a SECOND function, and the four-argument call in
+    `_insert_token` would then match both — "function name is not unique", at
+    runtime rather than at migration time.
+    """
     settings = get_settings()
     now = now or datetime.now(UTC)
     plain = generate_opaque_token()
-    row_id = _insert_token(
-        session,
-        user_id,
-        TokenKind.refresh,
-        hash_token(plain),
-        now + timedelta(days=settings.refresh_token_ttl_days),
-    )
+    row_id = session.execute(
+        text("SELECT app.insert_refresh_token(:uid, :hash, :expires)"),
+        {
+            "uid": str(user_id),
+            "hash": hash_token(plain),
+            "expires": now + timedelta(days=settings.refresh_token_ttl_days),
+        },
+    ).scalar_one()
     return plain, row_id
 
 
@@ -99,27 +142,67 @@ def rotate_refresh_token(
     session: Session, plain_old: str, *, now: datetime | None = None
 ) -> tuple[str, UUID] | None:
     """
-    Exchange a refresh token for a new one, revoking the old.
+    Exchange a refresh token for a new one, revoking the old. ONE statement.
 
-    Returns None when the token is unknown, expired or of the wrong kind.
-    Raises `RefreshTokenReuseError` when the token exists but was already revoked —
-    that is a different situation and deserves a different response.
+    Returns `(plaintext, user_id)`, or None when the token is unknown, expired,
+    of the wrong kind, or its family has passed the absolute ceiling.
+    Raises `RefreshTokenReuseError` on a genuine replay and
+    `RefreshTokenRaceError` when two refreshes simply collided.
+
+    ⚠️ THIS WAS FINDING D2 AND IT WAS FOUR ROUND TRIPS WITH NO LOCK: read, check
+    `revoked`, revoke, insert. Two concurrent refreshes presenting the same
+    token could BOTH pass the check — one forked the family (defeating any
+    absolute cap, since the fork restarted the chain) and the other tripped
+    reuse detection on a legitimate refresh. Two browser tabs reproduce it,
+    because the client's single-flight guard is per tab.
+
+    `app.rotate_refresh_token` does all of it under a `FOR UPDATE` lock, so the
+    second caller blocks and then re-reads the row the winner just revoked. It
+    also enforces the family ceiling where the data is, and tells a race from a
+    theft — neither of which is expressible from here without another round trip
+    that would race in turn.
+
+    ⚠️ `now` NO LONGER DRIVES THE COMPARISONS. The function uses
+    `clock_timestamp()`; this argument survives only to set the NEW token's
+    expiry, which is what `test_tokens.py::test_expired_token_is_rejected`
+    relies on. Passing a far-future `now` therefore no longer makes an existing
+    token look expired -- that test asserts the DATABASE's view of expiry now.
     """
+    settings = get_settings()
     now = now or datetime.now(UTC)
-    stored = find_token(session, plain_old)
+    plain_new = generate_opaque_token()
 
-    if stored is None or stored.kind != TokenKind.refresh.value:
-        return None
-    if stored.revoked:
-        raise RefreshTokenReuseError(stored.user_id)
-    if stored.expires_at <= now:
-        return None
-
-    session.execute(
-        text("SELECT app.revoke_auth_token(:id)"),
-        {"id": str(stored.id)},
+    result = (
+        session.execute(
+            text(
+                "SELECT outcome, token_user_id FROM app.rotate_refresh_token("
+                "  :old, :new, :expires,"
+                "  CAST(:cap AS interval), CAST(:grace AS interval))"
+            ),
+            {
+                "old": hash_token(plain_old),
+                "new": hash_token(plain_new),
+                "expires": now + timedelta(days=settings.refresh_token_ttl_days),
+                "cap": f"{settings.session_absolute_ttl_days} days",
+                "grace": f"{settings.refresh_race_grace_seconds} seconds",
+            },
+        )
+        .mappings()
+        .one()
     )
-    return issue_refresh_token(session, stored.user_id, now=now)
+
+    outcome = str(result["outcome"])
+    if outcome == "rotated":
+        return plain_new, result["token_user_id"]
+    if outcome == "raced":
+        raise RefreshTokenRaceError(result["token_user_id"])
+    if outcome == "reuse":
+        raise RefreshTokenReuseError(result["token_user_id"])
+    # not_found, expired, family_expired -- all "sign in again", and deliberately
+    # indistinguishable to the caller. Which of the three it was is not the
+    # client's business, and `family_expired` in particular must not tell an
+    # attacker they found a live account whose session merely aged out.
+    return None
 
 
 def revoke_refresh_family(session: Session, user_id: UUID) -> int:

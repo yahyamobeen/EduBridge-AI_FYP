@@ -40,8 +40,8 @@ from app.auth.schemas import (
 )
 from app.auth.security import create_access_token, hash_password, hash_token, verify_password
 from app.auth.tokens import (
+    RefreshTokenRaceError,
     RefreshTokenReuseError,
-    find_token,
     issue_challenge_token,
     issue_guardian_invite_token,
     issue_preauth_token,
@@ -422,6 +422,36 @@ def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> 
 def refresh(db: Session, refresh_token: str) -> dict:
     try:
         rotated = rotate_refresh_token(db, refresh_token)
+    except RefreshTokenRaceError as raced:
+        # ⚠️ A RACE IS NOT A THEFT, AND MUST NOT REVOKE ANYTHING. Two browser
+        # tabs refreshing together present the same token twice — the client's
+        # single-flight guard is per tab. Treating that as reuse signs the user
+        # out of every device and writes an audit row claiming an incident that
+        # did not happen.
+        #
+        # No revocation: a plain 401. It is self-healing, because the winner's
+        # response already replaced the httpOnly cookie, so the client's next
+        # attempt carries the new token.
+        #
+        # ⚠️ BUT IT IS AUDITED, BECAUSE THE COST OF THE GRACE WINDOW IS REAL.
+        # A thief replaying a stolen token within `refresh_race_grace_seconds`
+        # of the legitimate rotation lands here rather than in reuse detection.
+        # They are still refused — the token buys them nothing — but the family
+        # is not revoked and, without this row, nothing anywhere would record
+        # that it happened. A genuine two-tab race is rare enough that these
+        # rows are a signal rather than noise, and a burst of them for one user
+        # is exactly what a stolen token looks like.
+        db.execute(
+            text(
+                "INSERT INTO audit_log (actor_id, action, target) "
+                "VALUES (:uid, 'refresh_token_race_detected', 'auth_token')"
+            ),
+            {"uid": str(raced.user_id)},
+        )
+        # COMMIT BEFORE RAISING, for the same reason the reuse path does: the
+        # 401 unwinds through `get_db`, which rolls back on any exception.
+        db.commit()
+        raise unauthenticated("Invalid or expired refresh token.") from None
     except RefreshTokenReuseError as reuse:
         # Rotation means a token is valid exactly once, so a second use means
         # two parties hold it. Kill the whole family rather than answering 401
@@ -434,15 +464,18 @@ def refresh(db: Session, refresh_token: str) -> dict:
         db.commit()
         raise unauthenticated("Invalid or expired refresh token.") from None
 
+    # Unknown, expired, or a family past the absolute ceiling — all "sign in
+    # again", deliberately indistinguishable.
     if rotated is None:
         raise unauthenticated("Invalid or expired refresh token.")
 
-    new_plain, _ = rotated
-    stored = find_token(db, new_plain)
-    if stored is None:
-        raise unauthenticated("Invalid or expired refresh token.")
+    # The read-back this used to do is gone: `app.rotate_refresh_token` returns
+    # the user id from inside the same locked statement, so re-reading the row
+    # we just wrote in order to learn what we wrote bought nothing and was one
+    # more round trip on the refresh path.
+    new_plain, user_id = rotated
 
-    access_token, expires_in = create_access_token(stored.user_id)
+    access_token, expires_in = create_access_token(user_id)
     return {
         "access_token": access_token,
         "token_type": "bearer",

@@ -1079,6 +1079,33 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 
 Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
 
+**Session lifetime (v0.3.8).** A refresh chain has an **absolute ceiling** of
+`SESSION_ABSOLUTE_TTL_DAYS` (default 14) measured from when the chain BEGAN, carried forward across
+every rotation — without it, rotation extends a session for ever, seven days at a time, and no
+session anybody keeps using ever expires. ⚠️ The real ceiling is that **plus up to one
+`JWT_ACCESS_TTL_MINUTES`**, because a refused rotation stamps nothing and the access token already
+issued lives out its own TTL; the setting is not a hard 14 days and must not be described as one. A
+ceiling that does not exceed `JWT_REFRESH_TTL_DAYS` is refused at boot, since the individual token
+would expire first on every chain and the cap could never fire.
+
+**Ending live sessions.** Password change, password reset and detected token reuse stamp
+`app_user.sessions_invalidated_at`, and every access token issued at or before it is refused.
+Revoking refresh tokens alone does not do this — it ends only the ability to obtain a NEW access
+token, leaving the one already held valid for up to its TTL.
+
+**Refresh rotation is atomic, and a race is not a theft.** Two concurrent refreshes presenting the
+same token cannot both succeed. The loser receives a plain `401 UNAUTHENTICATED` and **the family is
+not revoked**, provided the token was revoked moments earlier and a live sibling of the same chain
+still exists; a replay outside that window, or with no live sibling, is reuse and revokes the family.
+⚠️ A client's single-flight guard is typically per browser TAB, so two tabs are enough to collide —
+treating that as theft signs the user out of every device. The loser's 401 is self-healing, because
+the winner's `Set-Cookie` has already replaced the token. Race events are audited as
+`refresh_token_race_detected`.
+
+**Retention (§5.9).** `auth_token` rows are deleted **30 days after expiry**, not on expiry: reuse
+detection reads the revoked row, so deleting it early turns a replayed stolen token into a silent 401
+instead of a family revocation.
+
 **Clients branch on `code`, never on `message`** — messages are localized and will change. An unrecognised
 code must still render a usable state rather than a blank screen (`prd.md` §20).
 

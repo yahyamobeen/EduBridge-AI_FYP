@@ -5,6 +5,7 @@ from sqlalchemy import text
 
 from app.auth import tokens
 from app.auth.security import hash_token
+from app.core.config import get_settings
 from app.core.db import set_current_user_id
 from app.models.enums import TokenKind
 
@@ -99,10 +100,73 @@ class TestRotation:
         assert tokens.rotate_refresh_token(db, "does-not-exist") is None
 
     def test_expired_token_is_rejected(self, db, user_id):
+        """
+        ⚠️ REWRITTEN IN PHASE 4, AND THE OLD VERSION WOULD NOW PASS VACUOUSLY.
+
+        It used to call `rotate_refresh_token(db, plain, now=far_future)` and
+        assert None — i.e. it faked the clock in PYTHON. Rotation is now one
+        locked statement inside `app.rotate_refresh_token`, which compares
+        against `clock_timestamp()`, so `now` only sets the NEW token's expiry
+        and a live token would happily rotate. The test has to expire the row.
+
+        That is a strict improvement: the database is what actually decides, and
+        this now asserts the thing production relies on.
+
+        ⚠️ The token is minted WITH A PAST `now` rather than by updating
+        `expires_at`, because `20260817120000` narrowed UPDATE on `auth_token` to
+        `revoked` — a direct write is `permission denied for table auth_token`,
+        which is that migration working. Every setup below reaches its state
+        through a path production also uses.
+        """
+        long_ago = datetime.now(UTC) - timedelta(days=999)
+        plain, _ = tokens.issue_refresh_token(db, user_id, now=long_ago)
+        db.flush()
+
+        assert tokens.rotate_refresh_token(db, plain) is None
+
+    def test_a_family_past_the_absolute_ceiling_cannot_rotate(self, db, user_id, monkeypatch):
+        """
+        The absolute session cap (finding E2).
+
+        Rotation without one means a chain is extendable for ever, seven days at
+        a time, so no session anybody keeps using ever expires. The token itself
+        is still live here — only the FAMILY has aged out, which is the whole
+        distinction, and it is why the cap cannot be expressed as a token expiry.
+
+        The ceiling is driven to zero through the SETTING rather than by ageing
+        `family_started_at`, which is not writable by the application role. Same
+        branch, reached the way production reaches it.
+        """
+        monkeypatch.setattr(get_settings(), "session_absolute_ttl_days", 0)
+
         plain, _ = tokens.issue_refresh_token(db, user_id)
         db.flush()
-        future = datetime.now(UTC) + timedelta(days=999)
-        assert tokens.rotate_refresh_token(db, plain, now=future) is None
+
+        assert tokens.rotate_refresh_token(db, plain) is None
+        # Refused AND closed out, so a second attempt cannot keep probing.
+        assert tokens.find_token(db, plain).revoked is True
+
+    def test_the_family_start_is_carried_forward_not_restarted(self, db, user_id):
+        """
+        ⚠️ THE ASSERTION THAT MAKES THE CAP MEAN ANYTHING. If rotation stamped a
+        fresh `family_started_at`, every refresh would reset the ceiling and the
+        cap would be unreachable — the code would look right and bound nothing.
+        """
+        plain_old, _ = tokens.issue_refresh_token(db, user_id)
+        db.flush()
+        started = db.execute(
+            text("SELECT family_started_at FROM auth_token WHERE id = :i"),
+            {"i": tokens.find_token(db, plain_old).id},
+        ).scalar()
+
+        plain_new, _ = tokens.rotate_refresh_token(db, plain_old)
+        db.flush()
+
+        carried = db.execute(
+            text("SELECT family_started_at FROM auth_token WHERE id = :i"),
+            {"i": tokens.find_token(db, plain_new).id},
+        ).scalar()
+        assert carried == started
 
 
 class TestReuseDetection:
@@ -113,11 +177,75 @@ class TestReuseDetection:
     and would record nothing.
     """
 
-    def test_replaying_a_rotated_token_raises_rather_than_returning_none(self, db, user_id):
+    def test_an_immediate_replay_is_a_race_and_does_not_revoke_the_family(self, db, user_id):
+        """
+        ⚠️ THIS TEST ASSERTED THE OPPOSITE UNTIL PHASE 4, AND THE CHANGE IS
+           DELIBERATE, NOT A LOOSENED ASSERTION.
+
+        The client's single-flight guard is per browser TAB, so two tabs
+        refreshing together present the same token twice. Reading that as theft
+        revoked the whole family and signed the user out of every device, on a
+        collision they could not avoid.
+
+        `app.rotate_refresh_token` forgives a replay only when BOTH hold: the
+        revocation is inside `refresh_race_grace_seconds`, and a live sibling of
+        the same family still exists. Both are asserted separately below.
+
+        ⚠️ THE COST, WRITTEN DOWN RATHER THAN GLOSSED: a thief replaying a stolen
+        token inside that window also lands here, so the family is not revoked.
+        They are still refused — the token buys them nothing — and `refresh()`
+        writes a `refresh_token_race_detected` audit row so the event is not
+        silent. A replay 2 seconds after a legitimate rotation is genuinely
+        indistinguishable from a second tab.
+        """
+        plain_old, _ = tokens.issue_refresh_token(db, user_id)
+        db.flush()
+        plain_new, _ = tokens.rotate_refresh_token(db, plain_old)
+        db.flush()
+
+        with pytest.raises(tokens.RefreshTokenRaceError) as caught:
+            tokens.rotate_refresh_token(db, plain_old)
+
+        assert str(caught.value.user_id) == str(user_id)
+        # The whole point: the winner's token is untouched.
+        assert tokens.find_token(db, plain_new).revoked is False
+
+    def test_a_replay_with_no_live_sibling_is_reuse(self, db, user_id):
+        """
+        Half of what separates a race from a theft. With the replacement already
+        dead there is no concurrent refresh to have lost — so this is a replay of
+        a token that should not exist any more, inside the grace window or not.
+        """
+        plain_old, _ = tokens.issue_refresh_token(db, user_id)
+        db.flush()
+        plain_new, _ = tokens.rotate_refresh_token(db, plain_old)
+        db.flush()
+        db.execute(
+            text("UPDATE auth_token SET revoked = true WHERE id = :i"),
+            {"i": tokens.find_token(db, plain_new).id},
+        )
+        db.flush()
+
+        with pytest.raises(tokens.RefreshTokenReuseError) as caught:
+            tokens.rotate_refresh_token(db, plain_old)
+
+        assert str(caught.value.user_id) == str(user_id)
+
+    def test_a_replay_outside_the_grace_window_is_reuse(self, db, user_id, monkeypatch):
+        """
+        The other half. A captured token replayed later is exactly the case
+        reuse detection exists for, and the grace window must not swallow it.
+
+        The window is closed to zero through the SETTING rather than by sleeping
+        ten real seconds or ageing `revoked_at` (which the application role may
+        not write). A test that waits ten seconds is a test people delete.
+        """
         plain_old, _ = tokens.issue_refresh_token(db, user_id)
         db.flush()
         tokens.rotate_refresh_token(db, plain_old)
         db.flush()
+
+        monkeypatch.setattr(get_settings(), "refresh_race_grace_seconds", 0)
 
         with pytest.raises(tokens.RefreshTokenReuseError) as caught:
             tokens.rotate_refresh_token(db, plain_old)

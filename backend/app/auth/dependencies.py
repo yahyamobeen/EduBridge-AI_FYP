@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth.gate import is_guardian_gate_pending
-from app.auth.security import decode_access_token
+from app.auth.security import decode_access_claims, session_is_invalidated
 from app.core.config import get_settings
 from app.core.db import SessionLocal, set_current_user_id
 from app.core.errors import forbidden_scope, gate_pending, unauthenticated
@@ -56,9 +56,10 @@ def authenticated(
         raise unauthenticated("Missing bearer token.")
 
     try:
-        user_id = decode_access_token(credentials.credentials)
+        claims = decode_access_claims(credentials.credentials)
     except ValueError:
         raise unauthenticated("Invalid or expired access token.") from None
+    user_id = claims.user_id
 
     session = SessionLocal()
     try:
@@ -68,7 +69,20 @@ def authenticated(
 
         row = (
             session.execute(
-                text("SELECT status, role FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+                # `sessions_invalidated_at` joins a SELECT this dependency was
+                # already making, so the absolute-invalidation check costs no
+                # extra round trip on the hot path.
+                #
+                # ⚠️ IT IS SELECTED, NEVER COMPARED IN THE `WHERE` CLAUSE. The
+                #    column is NULL until a user's first invalidation event, and
+                #    `issued_at > NULL` is NULL — so a WHERE-clause comparison
+                #    filters out every row, `row is None`, and EVERY REQUEST
+                #    401s FOR EVERYONE. With the same message as a bad token,
+                #    which makes it look like a client bug.
+                text(
+                    "SELECT status, role, sessions_invalidated_at "
+                    "  FROM app_user WHERE id = :uid AND deleted_at IS NULL"
+                ),
                 {"uid": user_id},
             )
             .mappings()
@@ -78,6 +92,16 @@ def authenticated(
         # Deliberately the same message as a malformed token: which of the two
         # it was is not the caller's business.
         if row is None or row["status"] != "active":
+            raise unauthenticated("Invalid or expired access token.")
+
+        # Phase 4. Revoking refresh tokens ends the ability to obtain a NEW
+        # access token and does nothing about the one already in the caller's
+        # memory — so before this, a password change left an attacker signed in
+        # for up to `access_token_ttl_minutes`. The comparison lives in
+        # `security.session_is_invalidated` and is deliberately shared: the
+        # onboarding token carries an issue time too, and a second copy of this
+        # rule is how one of them gets forgotten.
+        if session_is_invalidated(claims.issued_at, row["sessions_invalidated_at"]):
             raise unauthenticated("Invalid or expired access token.")
 
         yield AuthContext(session=session, user_id=user_id, role=str(row["role"]))

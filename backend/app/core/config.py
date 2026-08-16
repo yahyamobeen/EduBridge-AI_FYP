@@ -60,6 +60,54 @@ class Settings(BaseSettings):
     enrollment_token_ttl_seconds: int = 900
     pending_token_ttl_seconds: int = 300
 
+    # ---- Session policy (Phase 4) -------------------------------------------
+    # The ABSOLUTE ceiling on a rotating refresh chain. Rotation without one
+    # means a chain can be extended for ever, seven days at a time, so "the
+    # session expires" is not true of any session anybody keeps using.
+    #
+    # ⚠️ DEFAULTED, NOT REQUIRED — unlike `totp_encryption_key` above, and for a
+    #    specific reason: `tests/unit/conftest.py` sets environment variables at
+    #    IMPORT time, so a new required setting breaks collection rather than
+    #    failing a test. A defaulted ceiling is also safe in a way a defaulted
+    #    encryption key is not; the worst case is every deployment sharing the
+    #    same session length, which is a policy, not a secret.
+    #
+    # ⚠️ THE REAL CEILING IS THIS PLUS UP TO `access_token_ttl_minutes`, because
+    #    a refused rotation stamps nothing and the access token already issued
+    #    lives out its own TTL. Stated here and in the contract rather than
+    #    claiming a hard 14 days.
+    session_absolute_ttl_days: int = Field(default=14, validation_alias="SESSION_ABSOLUTE_TTL_DAYS")
+    # How long after a rotation a replay of the old token is read as a two-tab
+    # RACE rather than as theft — and then only while a live sibling of the same
+    # family still exists (`app.rotate_refresh_token`). Seconds, deliberately
+    # small: this is the width of a network round trip, not a grace period for
+    # an attacker.
+    refresh_race_grace_seconds: int = Field(
+        default=10, validation_alias="REFRESH_RACE_GRACE_SECONDS"
+    )
+    # ⚠️ CLOCK SKEW ALLOWANCE, AND IT IS NOT DEFENSIVE PADDING — WITHOUT IT
+    #    SESSION INVALIDATION SILENTLY DOES NOT WORK.
+    #
+    #    A token's `iat` is minted by PYTHON on the application host;
+    #    `sessions_invalidated_at` is stamped by `clock_timestamp()` on the
+    #    DATABASE host. Those are two machines. Measured against the live
+    #    Supabase project while building this: a token created BEFORE a password
+    #    change carried `iat = 20:03:43` while the stamp written afterwards read
+    #    `20:03:41.88` — the database was 1.1s behind, so the token looked as
+    #    though it had been issued after its own invalidation and survived.
+    #
+    #    A JWT `iat` is also an integer, so the token side is floored to whole
+    #    seconds and there is no sub-second precision left to compare with.
+    #
+    #    The allowance widens the cutoff so realistic skew cannot defeat the
+    #    check. It fails CLOSED: a token genuinely issued within this many
+    #    seconds AFTER an invalidation is also refused. That costs one extra
+    #    sign-in on a flow no human completes that fast (reset requires reading
+    #    an email), and buys an invalidation that actually invalidates.
+    session_invalidation_skew_seconds: int = Field(
+        default=5, validation_alias="SESSION_INVALIDATION_SKEW_SECONDS"
+    )
+
     # TOTP secret encryption key for two_factor_enrollment.totp_secret_encrypted.
     # The key lives in application config, NOT in the database, so a database
     # dump alone does not yield usable secrets (tdd.md §6.9).
@@ -189,6 +237,26 @@ class Settings(BaseSettings):
                 "key into backend/.env, and never commit it."
             )
         return value
+
+    @model_validator(mode="after")
+    def _absolute_session_ceiling_actually_binds(self) -> "Settings":
+        """
+        A ceiling shorter than one refresh token's life never fires.
+
+        `app.rotate_refresh_token` refuses a rotation once the FAMILY is older
+        than `session_absolute_ttl_days`. If that is 7 and `refresh_token_ttl_days`
+        is also 7, the individual token expires first on every single chain and
+        the family cap is unreachable — a setting that appears to bound sessions
+        and does nothing. Caught here rather than discovered by nobody.
+        """
+        if self.session_absolute_ttl_days <= self.refresh_token_ttl_days:
+            raise ValueError(
+                f"SESSION_ABSOLUTE_TTL_DAYS ({self.session_absolute_ttl_days}) must exceed "
+                f"JWT_REFRESH_TTL_DAYS ({self.refresh_token_ttl_days}); otherwise a single "
+                "refresh token always expires before the family cap can ever apply, and the "
+                "absolute session limit is inert."
+            )
+        return self
 
     @model_validator(mode="after")
     def _production_is_actually_hardened(self) -> "Settings":

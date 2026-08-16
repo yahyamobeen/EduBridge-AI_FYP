@@ -382,12 +382,23 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
         # (table, column, privilege) — 'w' = UPDATE, 'a' = INSERT.
         actual = [(r[0], r[1], "UPDATE" if "=w/" in r[2] else "INSERT") for r in rows]
 
+        # ⚠️ ORDERED BY (table, column) — the query says so, and the first
+        #    attempt at this list put `auth_token` before `app_user` and failed
+        #    on the ordering rather than on the contents. Keep it sorted.
         assert actual == [
             # 20260816160000 (B2, B3, B4) — the only self-editable fields.
             ("app_user", "full_name", "UPDATE"),
             # 20260816200000 (FR-A8) — the stored preference that governs
             # outgoing email, for every role rather than students only.
             ("app_user", "language_pref", "UPDATE"),
+            # 20260817120000 (Phase 4) — `revoke_user_tokens` (logout) is the
+            # only plain UPDATE against `auth_token` in the application, and it
+            # names this column alone. Narrowed when `family_started_at`,
+            # `revoked_at` and `revoked_reason` arrived: table-wide UPDATE plus
+            # the `WITH CHECK (revoked = true)` policy would have let a caller
+            # author their own revocation reason and rewrite the family start,
+            # defeating the absolute session cap that migration exists to create.
+            ("auth_token", "revoked", "UPDATE"),
             # Kept deliberately: dropping it would leave `student_profile` with
             # no updatable column at all. Nothing READS it any more —
             # `app_user.language_pref` is the source of truth as of

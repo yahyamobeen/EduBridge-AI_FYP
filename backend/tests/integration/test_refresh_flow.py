@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import text
 
 from app.auth.tokens import issue_refresh_token
+from app.core.config import get_settings
 from app.core.db import set_current_user_id
 
 
@@ -58,11 +59,24 @@ def test_refresh_rotates_and_replay_fails(client, db):
     assert replay.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
-def test_replay_revokes_the_whole_family(client, db):
+def test_replay_revokes_the_whole_family(client, db, monkeypatch):
     """
     Reuse means two parties hold the token. Answering 401 and stopping there
     would leave a thief who redeemed first with a working rotating chain, so the
     token issued a moment ago has to die as well.
+
+    ⚠️ THE REPLAY IS AGED PAST THE GRACE WINDOW IN PHASE 4, AND WITHOUT THAT LINE
+       THIS TEST NOW ASSERTS THE WRONG THING.
+
+    An IMMEDIATE replay is no longer read as theft: two browser tabs refreshing
+    together present the same token twice, because the client's single-flight
+    guard is per tab, and revoking the family there signed honest users out of
+    every device. `app.rotate_refresh_token` forgives a replay only while the
+    revocation is fresh AND a live sibling of the same family exists.
+
+    A stolen token replayed LATER is exactly what reuse detection is for, and
+    that is what this test must exercise. Closing the window to zero reaches it
+    without sleeping ten real seconds. The test below covers the race side.
     """
     _, plain = _user_with_refresh_token(client, db)
     client.cookies.clear()
@@ -71,11 +85,35 @@ def test_replay_revokes_the_whole_family(client, db):
     assert first.status_code == 200
     rotated = first.cookies.get("refresh_token")
 
+    monkeypatch.setattr(get_settings(), "refresh_race_grace_seconds", 0)
+
     # Replay the spent one: detected as reuse.
     assert client.post("/api/auth/refresh", cookies={"refresh_token": plain}).status_code == 401
 
     after = client.post("/api/auth/refresh", cookies={"refresh_token": rotated})
     assert after.status_code == 401, "the rotated token survived a detected reuse"
+
+
+def test_two_tabs_racing_does_not_sign_the_user_out_of_everything(client, db):
+    """
+    ⚠️ THE BEHAVIOUR THE TEST ABOVE USED TO PREVENT, now asserted directly.
+
+    Two tabs refresh with the same token. One wins. The loser must get a plain
+    401 and the winner's session must survive — before Phase 4 the loser tripped
+    reuse detection and killed both.
+    """
+    _, plain = _user_with_refresh_token(client, db)
+    client.cookies.clear()
+
+    winner = client.post("/api/auth/refresh", cookies={"refresh_token": plain})
+    assert winner.status_code == 200
+    rotated = winner.cookies.get("refresh_token")
+
+    loser = client.post("/api/auth/refresh", cookies={"refresh_token": plain})
+    assert loser.status_code == 401
+
+    still_alive = client.post("/api/auth/refresh", cookies={"refresh_token": rotated})
+    assert still_alive.status_code == 200, "a two-tab race revoked the winner's session"
 
 
 def test_refresh_then_me(client, db):
