@@ -42,7 +42,7 @@ def _student(db, email: str) -> str:
     return str(user_id)
 
 
-def _provisioned_admin_email(db) -> str:
+def _provisioned_admin_email(service_conn) -> str:
     """
     The address of an administrator that ALREADY EXISTS, or skip.
 
@@ -50,8 +50,18 @@ def _provisioned_admin_email(db) -> str:
     20260816120000, so a test cannot create one — which is the point. An
     administrator is provisioned by the repository owner running SQL as the table
     owner (§1.6.6), and this helper reflects that rather than working around it.
+
+    ⚠️ THE DISCOVERY QUERY MUST BYPASS ROW-LEVEL SECURITY. `app_user_self_read`
+    is `id = app.current_user_id() OR app.is_admin()`, and both operands need a
+    bound user — so reading through `db` here returns zero rows even with an
+    administrator sitting in the table, and the first version of this helper
+    therefore skipped unconditionally. It reported green while asserting nothing,
+    which is worse than having no test at all.
+
+    Only the DISCOVERY bypasses. The refusal below is asserted through `db`, on
+    the real code path, exactly as production runs it.
     """
-    email = db.execute(
+    email = service_conn.execute(
         text("SELECT email FROM app_user WHERE role = 'admin' AND deleted_at IS NULL LIMIT 1")
     ).scalar()
     if email is None:
@@ -137,16 +147,40 @@ class TestNonAdministratorsCannotUseTheAdministratorEndpoint:
 
 
 class TestAdministratorsCannotUseThePublicEndpoint:
-    def test_refused_at_the_public_endpoint(self, db):
+    def test_refused_at_the_public_endpoint(self, db, service_conn):
         """
         Skips until §1.6.6 provisions an administrator. The password is not known
         here, so this asserts the refusal a WRONG password would also produce —
         which is the whole invariant: the two are indistinguishable, and that is
         exactly why one test can stand for both.
         """
-        email = _provisioned_admin_email(db)
+        email = _provisioned_admin_email(service_conn)
 
         with pytest.raises(AppError) as refused:
             _attempt(db, email, admin_portal=False, password=WRONG_PASSWORD)
 
         assert _envelope(refused) == ("UNAUTHENTICATED", "Incorrect email or password.", 401)
+
+    def test_the_lookup_reports_the_administrator_as_an_administrator(self, db, service_conn):
+        """
+        The narrow fact everything else rests on, asserted through the REAL
+        pre-authentication path rather than through a bypassing connection.
+
+        `app.lookup_user_for_login` is SECURITY DEFINER, so it sees the row that
+        `app_user_self_read` hides from an unbound session — which is exactly why
+        login works at all before a user is bound, and why the role gate can be
+        trusted to read a real value rather than a NULL that compares false.
+        """
+        email = _provisioned_admin_email(service_conn)
+
+        row = (
+            db.execute(
+                text("SELECT role, status FROM app.lookup_user_for_login(:e)"),
+                {"e": email},
+            )
+            .mappings()
+            .one()
+        )
+
+        assert str(row["role"]) == "admin"
+        assert str(row["status"]) == "active"
