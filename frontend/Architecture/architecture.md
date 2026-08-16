@@ -17,7 +17,7 @@ Every count here has the command that produced it beside it. Run from `frontend/
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
 | Test files | **24** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **426**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **429**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -425,7 +425,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **426 leaf keys each, identical across all three**, and in the same order — phase 1 added `downloadFailed` (A7) and phase 1b added 27 administrator keys.
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **429 leaf keys each, identical across all three**, and in the same order — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -689,6 +689,34 @@ mock — seeded accounts and all — as the production backend, with nothing in 
 because an explicitly set flag was exactly the condition the client treated as intentional.
 
 `NEXT_PUBLIC_API_BASE_URL` is required in its place. See *Live data always* above.
+
+### D18 — `login` never sends the email code (found 2026-08-16, deferred to Phase 5)
+
+`_issue_and_send_email_otp` (`service.py:593`) has exactly two callers —
+`two_factor_enroll` (`:823`) and `two_factor_resend` (`:1136`). **Neither `login` nor
+`admin_login` is one of them.** So an account enrolled in `email_otp` reaches this screen with no
+code sent, while `methodEmailBody` tells it *"Use the 6-digit code sent to {email}"*.
+
+Measured against a running backend: `POST /auth/admin/login` returned `two_factor_required` with
+`method: "email_otp"` and the mail log stayed empty until `/auth/2fa/resend` was called explicitly.
+
+**Fixed in phase 1b, partially.** The control that sends the code called `t('resend')`,
+`t('resending')` and `t('resent')`, and **none of the three existed in any locale** — the button
+rendered the literal string `auth.twoFactor.resend`. The keys are now present in all three, and
+`TwoFactorChallenge.test.tsx` gained the `onError` sweep that would have caught it. Two things had
+to be true for it to survive: next-intl reports a missing key through `onError` rather than
+throwing, so the render "succeeds"; and the control only appears while `type === 'email_otp'`, a
+branch no test reached.
+
+**Still open:** the auto-send itself. It is deferred rather than fixed here because it makes
+`login` dispatch mail, which is the same path as **D1** (emails dispatched before the transaction
+commits) and needs a decision on whether it shares `two_factor_resend`'s per-account limit of 3 per
+5 minutes. Until it lands, `methodEmailBody` is inaccurate for a fresh challenge — recorded here
+rather than reworded, so the copy and the code are fixed together.
+
+⚠️ **This is the administrator's normal path, not an edge case.** A seeded administrator must use
+`email_otp`: `totp` requires `totp_secret_encrypted`, AES ciphertext under the application key,
+which cannot be produced in SQL.
 
 ### D5 — `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing
 

@@ -11,7 +11,7 @@ Snapshot: **2026-08-15**.
 
 Next.js App Router, React, TypeScript, Tailwind. **22 pages** across three route groups —
 `(site)`, `(auth)`, `(app)` — and **24 test files** (Vitest). Three locales: `en`, `ur`,
-`ur-Latn`, each exactly 426 leaf keys, in identical order.
+`ur-Latn`, each exactly 429 leaf keys, in identical order.
 
 This application is the interface and nothing else. The data model, the endpoint catalogue and the
 authorization rules live in the backend documentation:
@@ -155,7 +155,10 @@ Recorded rather than hidden — see
 [`Architecture/architecture.md`](Architecture/architecture.md) for detail. `VerifyEmail` reproduces
 the React StrictMode deadlock `SessionGuard` documents having fixed. An unvalidated
 `onboarding_state` reaches `router.replace(undefined)`. `error.tsx` logs the error object it refuses
-to render.
+to render. **`login` never sends the email code** (D18), so an `email_otp` account — which every
+seeded administrator is — reaches the challenge screen with nothing sent and must press the send
+button; the copy still says a code was sent, and is left inaccurate deliberately so the wording and
+the backend change land together in Phase 5.
 
 **Fixed and recorded so nobody re-audits:** the `admin` role routing to a page that did not exist
 (phase 1b built it), the backup-code download silently producing no file, and sign-out no-opping on

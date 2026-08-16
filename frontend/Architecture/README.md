@@ -27,7 +27,7 @@ The single most load-bearing sentence in this whole folder follows from that spl
 
 - **Next.js 16 + React 19**, App Router, TypeScript, Tailwind CSS v3.
 - **22 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
-- **3 locales**: `en`, `ur`, `ur-Latn`, each with **426** leaf message keys, in identical order. `ur` is the only right-to-left locale.
+- **3 locales**: `en`, `ur`, `ur-Latn`, each with **429** leaf message keys, in identical order. `ur` is the only right-to-left locale.
 - **24 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
 - Access token in **memory only**; refresh token in an `httpOnly` cookie JavaScript cannot read.
 - One transport client with proactive refresh, single-flight refresh, and an error-code allow-list for retry.
@@ -44,7 +44,7 @@ find . -path ./node_modules -prune -o -path ./.next -prune -o \
      \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 24
 ls messages/                                                        # en.json  ur-Latn.json  ur.json
 node -e "const f=require('fs');const c=o=>Object.values(o).reduce((n,v)=>n+(v&&typeof v==='object'?c(v):1),0);for(const l of ['en','ur','ur-Latn'])console.log(l,c(JSON.parse(f.readFileSync('messages/'+l+'.json','utf8'))))"
-                                                                    # en 426 / ur 426 / ur-Latn 426
+                                                                    # en 429 / ur 429 / ur-Latn 429
 ```
 
 The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  24 passed (24)` · `Tests  283 passed (283)`** at this snapshot.
@@ -59,6 +59,7 @@ Seven findings from the Epic 1 review land in this application. They are documen
 | A7 | Backup-code download can silently produce no file | **Fixed** (Phase 1) — the anchor is appended before the click and removed after, `revokeObjectURL` is deferred rather than run on the same tick, and a failure now renders `downloadFailed` in all three locales. Two bugs in four lines, on codes shown exactly once with no way back and no regenerate endpoint |
 | A8 | Sign-out no-ops on a network failure | **Fixed** (Phase 1) — `signOut` wraps `logout()` in `try`/`catch` with the redirect in `finally`. `logout()` clears the session and then **re-throws by design**, so the redirect must not depend on it resolving |
 | C4 | `.env.example` ships `NEXT_PUBLIC_API_MODE=mock` as the documented default | **Closed permanently** (Phase 1b) — Phase 1 flipped the template to `live`; Phase 1b then deleted the entire mock layer, ~950 lines, along with the flag. The hazard is now structural rather than a matter of configuration: there is no mock to select. `NEXT_PUBLIC_API_BASE_URL` is required in its place |
+| D18 | `login` never sends the email code, so an `email_otp` account lands on a screen that claims one was sent — and the control that sends it had **no message keys in any locale**, rendering as `auth.twoFactor.resend` | **Half fixed** (Phase 1b) — the three keys now exist in all three locales and `TwoFactorChallenge.test.tsx` gained the `onError` sweep that would have caught it. The auto-send is deferred to Phase 5, where it belongs beside D1 |
 | D5 | `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing |
 | D6 | An unvalidated `onboarding_state` reaches `router.replace(undefined)` |
 | D17 | `error.tsx` logs the error object it refuses to render |

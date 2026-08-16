@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
+import urLatn from '@/messages/ur-Latn.json'
+import ur from '@/messages/ur.json'
 import { ApiError } from '@/lib/api/errors'
 import type { TwoFactorMethod } from '@/lib/api/types'
 import { __resetChallengesForTests, setPendingChallenge } from '@/lib/auth/challenge'
@@ -12,6 +14,7 @@ const replace = vi.fn()
 const verify = vi.fn()
 const me = vi.fn()
 const startSession = vi.fn()
+const resend = vi.fn()
 
 vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ replace }),
@@ -24,6 +27,10 @@ vi.mock('@/lib/api/endpoints', () => ({
   twoFactorVerify: (...a: unknown[]) => verify(...a),
   getMe: (...a: unknown[]) => me(...a),
   startSession: (...a: unknown[]) => startSession(...a),
+  // `twoFactorResend` was MISSING from this mock, which is a symptom of the
+  // gap the translations suite below closes: the resend control was never
+  // rendered by any test, so nothing here could have touched it.
+  twoFactorResend: (...a: unknown[]) => resend(...a),
 }))
 
 function seed(method: TwoFactorMethod = 'totp') {
@@ -52,7 +59,71 @@ beforeEach(() => {
   verify.mockReset()
   me.mockReset()
   startSession.mockReset()
+  resend.mockReset()
   __resetChallengesForTests()
+})
+
+describe('translations', () => {
+  /**
+   * THE TEST THAT WAS MISSING, AND WHAT IT COST.
+   *
+   * `t('resend')`, `t('resending')` and `t('resent')` existed in the component
+   * and in NONE of the three locale files. Measured before this suite was
+   * added: the control rendered the literal string `auth.twoFactor.resend`.
+   *
+   * Nothing failed, for two compounding reasons. next-intl reports a missing
+   * key through `onError` rather than throwing, so a missing string renders as
+   * its own key path and the render "succeeds" — which is exactly why the house
+   * pattern (`Landing.test.tsx`) asserts on `onError` and why this screen needed
+   * the same. And the resend control only renders while `type === 'email_otp'`,
+   * a branch no existing test reached, so the keys were never even looked up.
+   *
+   * ⚠️ For an `email_otp` account that button is currently the ONLY way to get a
+   * code, because `login` does not send one — `_issue_and_send_email_otp` is
+   * called from `two_factor_enroll` and `two_factor_resend` and nowhere else.
+   * That defect is deferred to Phase 5; this suite makes sure the remedy at
+   * least has a label. Until then `methodEmailBody` ("the code sent to …") is
+   * inaccurate for a fresh challenge, and that is recorded rather than papered
+   * over.
+   */
+  it.each([
+    ['en', en],
+    ['ur', ur],
+    ['ur-Latn', urLatn],
+  ])('renders the email-code challenge fully in %s', (locale, messages) => {
+    seed('email_otp')
+    const onError = vi.fn()
+
+    render(
+      <NextIntlClientProvider locale={locale} messages={messages} onError={onError}>
+        <TwoFactorChallenge />
+      </NextIntlClientProvider>,
+    )
+
+    expect(onError).not.toHaveBeenCalled()
+    // Named explicitly, not just "no errors": a future edit that deletes the
+    // control entirely would satisfy `onError` and lose the only way in.
+    expect(
+      screen.getByRole('button', { name: messages.auth.twoFactor.resend }),
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    ['en', en],
+    ['ur', ur],
+    ['ur-Latn', urLatn],
+  ])('renders the authenticator challenge fully in %s', (locale, messages) => {
+    seed('totp')
+    const onError = vi.fn()
+
+    render(
+      <NextIntlClientProvider locale={locale} messages={messages} onError={onError}>
+        <TwoFactorChallenge />
+      </NextIntlClientProvider>,
+    )
+
+    expect(onError).not.toHaveBeenCalled()
+  })
 })
 
 describe('opening state', () => {
