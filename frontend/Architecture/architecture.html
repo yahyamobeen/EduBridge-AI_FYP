@@ -462,21 +462,50 @@ flowchart TB
         guarantee from a configuration invariant into a structural one.</p>
       <h3>The configuration hole it was hiding, now named instead of hidden</h3>
       <pre>const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
+const SERVER_ORIGIN = process.env.BACKEND_INTERNAL_URL?.trim().replace(/\/+$/, '') ?? ''
 
 function resolve(path: string): string {
-  if (BASE_URL) return `${BASE_URL}${path}`
-  if (typeof window === 'undefined') {
-    throw new Error('NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be…')
+  const onServer = typeof window === 'undefined'
+  if (BASE_URL) {
+    if (!onServer || isAbsolute(BASE_URL)) return `${BASE_URL}${path}`
+    if (SERVER_ORIGIN) return `${SERVER_ORIGIN}${BASE_URL}${path}`  // + validity check
+    throw new Error('Cannot resolve a relative API base on the server: BACKEND_INTERNAL_URL…')
   }
+  if (onServer) throw new Error('NEXT_PUBLIC_API_BASE_URL is not set…')
   return path
 }</pre>
       <p>The mock default existed <em>because</em> an unset base URL produces a relative path Node cannot
         parse on the server. <strong>The empty string is still load-bearing in the browser</strong>: relative
         <code>/api/...</code> goes through the <code>next.config.mjs</code> rewrite, and that rewrite is what
         keeps the refresh cookie same-site. Pointing <code>NEXT_PUBLIC_API_BASE_URL</code> at the backend's
-        public address re-breaks it silently, in production only. So the fix is <strong>server-side
-        only</strong>: a named error saying which variable to set, rather than a URL parse failure three
-        frames deep inside <code>fetch</code>.</p>
+        public address re-breaks it silently, in production only.</p>
+
+      <div class="callout danger">
+        <span class="t">A base that is SET but RELATIVE was the same hole, and the guard missed it</span>
+        The check asked <em>"is it set?"</em>, not <em>"can Node use it?"</em> — so production, where the
+        value is <code>/api</code> <strong>by design</strong>, walked straight past it.
+        <code>app/[locale]/(site)/signup/student/page.tsx</code> is the only <strong>server</strong>
+        component that calls the API, and there <code>fetch('/api/reference/enums')</code> threw
+        <code>TypeError: Failed to parse URL</code>. The page catches its own enum load and degrades, so
+        the real error surfaced <strong>nowhere</strong>: no log line, no console entry, no network request.
+        <br><br>
+        It could not reproduce locally — development sets an <strong>absolute</strong>
+        <code>http://localhost:8000/api</code>, so the failing branch never ran. In production
+        <strong>student</strong> signup showed "Could not load the class and subject options" while
+        <strong>teacher and parent</strong> signup worked perfectly, because neither fetches on the server.
+        That asymmetry is the diagnostic.
+        <br><br>
+        A relative base is now resolved against <code>BACKEND_INTERNAL_URL</code> <strong>on the server
+        only</strong>. The browser path is untouched, and <code>resolveBaseUrl.test.ts</code> asserts that
+        explicitly — prefixing the browser's URL would reintroduce the cross-site cookie bug the rewrite
+        exists to prevent.
+        <br><br>
+        ⚠️ The origin is validated with <code>new URL()</code> <em>plus a hostname check</em>, not
+        <code>startsWith('https://')</code>. <code>https://https://host</code> passes both a prefix test and
+        the WHATWG parser — it yields hostname <code>"https"</code> rather than an error. That exact value
+        was live on Render and 500'd every API call, because <code>next.config.mjs</code> validates the
+        rewrite destination with the naive prefix test.
+      </div>
 
       <h3>Proactive refresh at 80% of token lifetime</h3>
       <p><code>apiFetch</code> refreshes <strong>ahead of use</strong> rather than waiting to be told
