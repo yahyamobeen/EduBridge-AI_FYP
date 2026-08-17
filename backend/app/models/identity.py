@@ -16,7 +16,7 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.dialects.postgresql import CITEXT, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -59,13 +59,29 @@ class AppUser(Base):
     __tablename__ = "app_user"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
-    email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # ⚠️ FINDING D14. Declared `Text` while the applied column is `citext`, so
+    #    the model said addresses are case-SENSITIVE and the database treats them
+    #    as case-insensitive. The unique constraint therefore rejects
+    #    `A@b.com` when `a@b.com` exists — correct behaviour that this
+    #    declaration did not describe, and the reason `register()` lowercases
+    #    defensively (`service.py`) while `lookup_user_for_login` does not need
+    #    to. Not exercised today: nothing queries this model, and every live
+    #    statement is hand-written `text()`.
+    email: Mapped[str] = mapped_column(CITEXT, nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[UserRole] = mapped_column(_pg_enum(UserRole), nullable=False)
     status: Mapped[UserStatus] = mapped_column(
         _pg_enum(UserStatus), nullable=False, default=UserStatus.active
     )
     full_name: Mapped[str | None] = mapped_column(Text)
+    # 20260816200000. Moved here from `student_profile`, which teachers, parents
+    # and administrators have no row in — so FR-A8's "the stored preference
+    # governs outgoing email" could not be met for three roles out of four.
+    # `StudentProfile.language_pref` below still exists and is read by nothing;
+    # this is the source of truth.
+    language_pref: Mapped[LanguageCode] = mapped_column(
+        _pg_enum(LanguageCode), nullable=False, default=LanguageCode.en
+    )
     email_verified_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")

@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Database · EduBridge AI Architecture</title>
+<script src="assets/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      darkMode: true,
+      background: '#0d1117',
+      primaryColor: '#15323b',
+      primaryBorderColor: '#2596be',
+      primaryTextColor: '#e6edf3',
+      // ER attribute rows: Mermaid's base theme leaves these light, which put
+      // near-white text on a near-white row and made every column unreadable.
+      attributeBackgroundColorOdd: '#161b22',
+      attributeBackgroundColorEven: '#1c2230',
+      lineColor: '#5b93a3',
+      secondaryColor: '#21262d',
+      tertiaryColor: '#161b22',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true, nodeSpacing: 45, rankSpacing: 55 },
+    er: { layoutDirection: 'TB', entityPadding: 10 }
+  });
+</script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --border:#30363d;
+    --text:#c9d1d9; --head:#e6edf3; --muted:#8b949e; --teal:#2596be; --teal-dim:#15323b;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --purple:#a371f7; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(13,17,23,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--head);font-size:16px;white-space:nowrap}
+  .topbar .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .nav{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  .nav a{padding:5px 11px;border-radius:7px;font-size:13px;color:var(--muted);border:1px solid transparent}
+  .nav a:hover{background:var(--panel);color:var(--head);text-decoration:none}
+  .nav a.active{background:var(--teal-dim);color:#9fdcef;border-color:var(--teal)}
+  .container{max-width:1180px;margin:0 auto;padding:34px 28px 90px}
+  h1{color:var(--head);font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  h2{color:var(--head);font-size:22px;margin:42px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{color:var(--head);font-size:17px;margin:28px 0 8px}
+  .subtitle{color:var(--muted);font-size:16px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono);margin-bottom:26px}
+  .prose p{margin:10px 0}
+  section{margin-bottom:10px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin:18px 0}
+  .diagram{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;margin:20px 0;overflow-x:auto}
+  .mermaid{display:flex;justify-content:center}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:10px 2px 0}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:13px;height:13px;border-radius:4px;display:inline-block;border:1px solid var(--border)}
+  .ln{color:var(--amber);font-family:var(--mono);font-size:.84em}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--head);background:var(--panel-2);font-weight:600;position:sticky;top:0}
+  tr:hover td{background:rgba(37,150,190,.05)}
+  td code{color:#9fdcef}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-family:var(--mono);
+    background:var(--teal-dim);color:#9fdcef;border:1px solid var(--teal)}
+  .pill.all{background:#2d1314;color:#ffb3ae;border-color:var(--red)}
+  .pill.sel{background:#15323b;color:#9fdcef;border-color:var(--teal)}
+  .pill.ins{background:#1d2e1f;color:#7ee787;border-color:var(--green)}
+  .pill.upd{background:#2b220c;color:#f0c674;border-color:var(--amber)}
+  .callout{border-left:3px solid var(--teal);background:var(--teal-dim);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
+  .callout.warn{border-color:var(--amber);background:#2b220c}
+  .callout.warn strong{color:var(--amber)}
+  .callout.danger{border-color:var(--red);background:#2d1314}
+  .callout .t{font-weight:700;color:var(--head);display:block;margin-bottom:3px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:18px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .stat .n{font-size:26px;font-weight:700;color:var(--teal);font-family:var(--mono)}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:4px 16px;margin:10px 0}
+  summary{cursor:pointer;padding:10px 0;color:var(--head);font-weight:600}
+  pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:12.5px;color:#b9c2cc}
+  blockquote{margin:14px 0;padding:2px 16px;border-left:3px solid var(--muted);color:var(--muted);font-style:italic}
+  footer{border-top:1px solid var(--border);color:var(--muted);font-size:12.5px;padding:22px 28px;text-align:center}
+  .offline-note{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> EduBridge AI Architecture</div>
+    <nav class="nav">
+      <a href="README.md">Index</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="database.html" class="active">Database</a>
+      <a href="api-endpoints.md">API endpoints</a>
+    </nav>
+  </div>
+  <div class="container">
+    <h1>Database</h1>
+    <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
+    <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql</p>
+
+    <div class="grid">
+      <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
+      <div class="stat"><div class="n">46</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
+      <div class="stat"><div class="n">73</div><div class="l">live Row-Level Security policy objects</div></div>
+      <div class="stat"><div class="n">33</div><div class="l">live <code>app.*</code> functions · 35 are SECURITY DEFINER</div></div>
+    </div>
+
+    <section class="prose">
+      <p>Authentication is <strong>application-managed</strong> — FastAPI issues its own JSON Web Tokens (JWTs) and hashes
+      passwords with argon2id. Supabase Auth (<code>auth.users</code>) is deliberately unused, so <code>auth.uid()</code>
+      does not exist here. Every policy instead reads a transaction-scoped session setting through
+      <code>app.current_user_id()</code>, bound by <code>SELECT set_config('app.current_user_id', :uid, true)</code> at
+      <span class="ln">backend/app/core/db.py:33-59</span>.</p>
+      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 46 tables cannot render
+      legibly in a single diagram, and the point of a diagram is to be read. The complete field lists, the full policy
+      catalogue with every <code>USING</code> and <code>WITH CHECK</code> predicate, the invariants and the known gaps live in
+      <a href="database.md">database.md</a>, which is the authoritative page; this one is its visual companion.</p>
+    </section>
+
+    <div class="callout warn">
+      <span class="t">The second authorization layer does not currently hold</span>
+      User-story card 1.5 promises that each request is <em>"checked by the application and again by the database, so that
+      a single missed check can never expose another student's data."</em> That is false today. Most write policies are
+      <code>FOR ALL</code> with ownership as the only predicate, grants are table-wide so Row-Level Security gives no column
+      protection, and one view bypasses Row-Level Security entirely. <strong>The application layer is holding alone.</strong>
+      All nineteen findings are catalogued in <a href="database.md#known-gaps">Known gaps</a> — they are
+      defence-in-depth failures, not remote exploits, because reaching them requires arbitrary SQL as
+      <code>app_backend</code> and every implemented route is narrow.
+    </div>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:#15323b"></span> PK = primary key · FK = foreign key</span>
+      <span><code>||--o{</code> one-to-many</span>
+      <span><code>||--||</code> one-to-one</span>
+      <span><code>}o--||</code> many-to-one</span>
+      <span>edge label = the relationship's meaning</span>
+    </div>
+
+    <!-- ════════════════════════ IDENTITY ════════════════════════ -->
+    <h2>Identity and role-based access control</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:97-151</span> — one <code>app_user</code> row per account, plus
+    exactly one profile table per role. The role lives on <code>app_user</code>; the profile carries whatever that role needs.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    app_user ||--o| student_profile : "role = student"
+    app_user ||--o| teacher_profile : "role = teacher"
+    app_user ||--o| parent_profile  : "role = parent"
+    app_user ||--o| admin_profile   : "role = admin"
+    app_user ||--o{ subscription    : subscriber
+    app_user ||--o{ oauth_identity  : "deferred; no writer yet"
+
+    app_user {
+        uuid id PK
+        citext email UK "case-insensitive"
+        text password_hash "argon2id"
+        user_role role "student|teacher|parent|admin"
+        user_status status "active|suspended|deleted"
+        text full_name
+        timestamptz email_verified_at
+        timestamptz deleted_at "soft delete"
+    }
+    student_profile {
+        uuid user_id PK "FK app_user CASCADE"
+        board_code board
+        smallint class_level "9-12; gate input"
+        student_group student_group
+        medium_code medium
+        language_code language_pref
+    }
+    teacher_profile {
+        uuid user_id PK
+        text institution
+    }
+    parent_profile {
+        uuid user_id PK
+    }
+    admin_profile {
+        uuid user_id PK
+        text scope
+    }
+    subscription {
+        uuid id PK
+        uuid user_id FK "UNIQUE"
+        text plan_code FK
+        subscription_status status
+        timestamptz trial_ends_at "DEFAULT now() + 14 days"
+    }
+    oauth_identity {
+        uuid id PK
+        uuid user_id FK
+        oauth_provider provider
+        text provider_user_id "provider sub claim"
+    }
+    </div></div>
+    <p><code>ck_group_matches_class</code> <span class="ln">:124</span> forbids an FSc elective group on a Matric class and
+    vice versa — the two group sets are not interchangeable.</p>
+
+    <!-- ════════════════════════ GUARDIAN ════════════════════════ -->
+    <h2>Guardian gate — the parental-consent path</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:156-174</span>. Classes 9–10 require a
+    <strong>verified</strong> guardian link before full access.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    app_user ||--o{ guardian_link : "as parent_id"
+    app_user ||--o{ guardian_link : "as student_id"
+    app_user ||--o{ auth_token    : "kind = guardian_invite"
+
+    guardian_link {
+        uuid id PK
+        uuid parent_id FK
+        uuid student_id FK
+        guardian_status status "pending|verified|revoked"
+        text verification_method "oob_email|manual_review|phone"
+        timestamptz verified_at
+    }
+    auth_token {
+        uuid id PK
+        uuid user_id FK
+        token_kind kind "7 kinds"
+        text token_hash UK "hash, never the token"
+        boolean revoked
+        timestamptz expires_at
+    }
+    </div></div>
+    <div class="callout">
+      <span class="t">Exactly one path to 'verified'</span>
+      After <span class="ln">20260803090000_guardian_link_write_boundary.sql</span>, a link can reach
+      <code>status = 'verified'</code> only through <code>app.confirm_guardian_link</code>, which requires an unexpired,
+      unrevoked, one-time <code>guardian_invite</code> token. The INSERT policy pins <code>status = 'pending'</code>
+      <span class="ln">:54-60</span>; the UPDATE policy's <code>WITH CHECK</code> forbids <code>'verified'</code>
+      <span class="ln">:69-72</span>. A parent can therefore <em>withdraw</em> consent but never grant it directly —
+      the asymmetry the gate needs. Three constraints back it: <code>ck_guardian_not_self</code>,
+      <code>ck_guardian_verified_has_ts</code>, <code>uq_guardian_pair</code> <span class="ln">:165-168</span>.
+    </div>
+
+    <!-- ════════════════════════ TWO-FACTOR ════════════════════════ -->
+    <h2>Two-factor authentication (SEC-14)</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:193-242</span>. Mandatory for every role. A password alone never
+    yields a session: it yields a short-lived challenge token that must be exchanged at <code>/2fa/verify</code>.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    app_user ||--o| two_factor_enrollment  : enrolment
+    app_user ||--o{ two_factor_backup_code : "10 per enrolment"
+    two_factor_enrollment ||--o| two_factor_status_v : "admin view, no secrets"
+
+    two_factor_enrollment {
+        uuid user_id PK
+        two_factor_method method "totp|email_otp"
+        two_factor_status status "pending|active|disabled"
+        bytea totp_secret_encrypted "AES-256; key in app config"
+        bigint last_used_counter "TOTP replay guard"
+        smallint failed_attempts
+        timestamptz locked_until "always temporary"
+    }
+    two_factor_backup_code {
+        uuid id PK
+        uuid user_id FK
+        text code_hash "argon2id, single use"
+        timestamptz used_at
+    }
+    two_factor_status_v {
+        uuid user_id
+        two_factor_method method
+        two_factor_status status
+        smallint failed_attempts
+        timestamptz locked_until
+        bigint unused_backup_codes
+    }
+    </div></div>
+    <div class="callout danger">
+      <span class="t">Finding B1 — the view is not protected</span>
+      The base tables carry <strong>no admin policy on purpose</strong> <span class="ln">20260801120100:214-218</span>:
+      Row-Level Security is row-level, not column-level, so an admin row policy would have handed administrators the
+      encrypted secret column too. <code>two_factor_status_v</code> exists so they never need it — but a
+      <strong>view</strong> is invisible to the enable-and-force loop, which reads <code>pg_tables</code>, while
+      <code>GRANT … ON ALL TABLES</code> <em>does</em> include views. With no <code>security_invoker</code> it runs as its
+      owner and reads straight past <code>two_factor_enrollment_owner</code>, exposing every account's method, lockout
+      state and unused-code count.
+    </div>
+
+    <!-- ════════════════════════ CURRICULUM ════════════════════════ -->
+    <h2>Curriculum taxonomy</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:250-317</span>, seeded by
+    <span class="ln">20260801120200_seed_reference_data.sql</span>. A subject is defined <strong>once per (board, class)</strong>,
+    never per elective group, so the content for "English, Class 9" is not duplicated across the science and computer groups.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    board       ||--o{ class_level : "levels 9-12"
+    class_level ||--o{ subject     : subjects
+    subject     ||--o{ subject_group : "which groups take it"
+    subject     ||--o{ chapter      : chapters
+    chapter     ||--o{ slo          : "learning outcomes"
+    subject     ||--o{ teacher_subject_scope : "least-privilege scope"
+    app_user    ||--o{ teacher_subject_scope : "as teacher_id"
+
+    board {
+        uuid id PK
+        board_code code UK "PCTB|STBB"
+        text name
+    }
+    class_level {
+        uuid id PK
+        uuid board_id FK
+        smallint level "9-12"
+    }
+    subject {
+        uuid id PK
+        uuid class_level_id FK
+        text name
+        content_strategy content_strategy "drives agent routing"
+    }
+    subject_group {
+        uuid subject_id PK
+        student_group student_group PK
+    }
+    chapter {
+        uuid id PK
+        uuid subject_id FK
+        smallint number
+        text title
+    }
+    slo {
+        uuid id PK
+        uuid chapter_id FK
+        text code
+        text description
+        timestamptz retired_at "soft-retire, never delete"
+    }
+    teacher_subject_scope {
+        uuid teacher_id PK
+        uuid subject_id PK
+    }
+    </div></div>
+    <p><strong>Student Learning Outcomes are soft-retired, never deleted</strong>, so historical mastery keeps its meaning
+    across a syllabus change. <code>content_strategy</code> decides how the agent is permitted to answer for a subject —
+    English-source with cross-lingual retrieval, native-Urdu retrieval-first, religious verbatim (returned word for word,
+    never composed), or English-language templates <span class="ln">:56-61</span>.</p>
+
+    <!-- ════════════════════════ CLASSROOM ════════════════════════ -->
+    <h2>Classroom and spaces</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:324-371</span>. <strong>Joining a space is the consent record.</strong></p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    app_user        ||--o{ classroom_space : "as owner_id"
+    classroom_space ||--o{ join_code       : "codes, never student-readable"
+    classroom_space ||--o{ enrollment      : roster
+    classroom_space ||--o{ announcement    : posts
+    app_user        ||--o{ enrollment      : "as student_id"
+    subject         ||--o{ classroom_space : "NULL for parent spaces"
+
+    classroom_space {
+        uuid id PK
+        uuid owner_id FK
+        space_owner_role owner_role "teacher|parent"
+        uuid subject_id FK "required when teacher"
+        text title
+        space_status status "active|archived"
+    }
+    join_code {
+        uuid id PK
+        uuid space_id FK
+        text code UK
+        boolean revoked
+        timestamptz expires_at
+    }
+    enrollment {
+        uuid id PK
+        uuid space_id FK
+        uuid student_id FK
+        timestamptz joined_at
+        timestamptz left_at "soft leave"
+    }
+    announcement {
+        uuid id PK
+        uuid space_id FK
+        uuid author_id FK
+        text body
+    }
+    </div></div>
+    <p><code>ck_teacher_space_has_subject</code> <span class="ln">:334</span> forces a teacher space to declare its subject,
+    because subject-scoping depends on it. Join codes are never readable by students — they receive the code out of band.</p>
+
+    <!-- ════════════════════════ ASSESSMENT ════════════════════════ -->
+    <h2>Assessment</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:379-494</span>. Answer keys live in a
+    <strong>separate table</strong> so that no client-facing serialization can ever leak them.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    past_paper   ||--o{ question        : "SET NULL"
+    subject      ||--o{ question        : subject
+    question     ||--o| question_key    : "NO POLICY, EVER"
+    question     ||--o{ question_slo    : "fractional weights"
+    question     ||--o| item_difficulty : "IRT a, b, c"
+    slo          ||--o{ question_slo    : outcome
+    slo          ||--o{ slo_frequency_cluster : "past-paper frequency"
+    quiz         ||--o{ quiz_question   : ordering
+    question     ||--o{ quiz_question   : ordering
+    quiz         ||--o{ quiz_attempt    : attempts
+    quiz_attempt ||--o{ attempt_answer  : answers
+    classroom_space ||--o{ quiz         : "NULL for personal quizzes"
+
+    question {
+        uuid id PK
+        uuid past_paper_id FK
+        uuid subject_id FK
+        uuid primary_slo_id FK
+        text stem
+        jsonb choices "NULL for free response"
+        smallint marks
+    }
+    question_key {
+        uuid question_id PK
+        text answer_key "SERVER ONLY"
+        text rationale
+    }
+    question_slo {
+        uuid question_id PK
+        uuid slo_id PK
+        numeric weight "0 < w <= 1"
+        boolean is_primary
+    }
+    item_difficulty {
+        uuid question_id PK
+        real irt_a "discrimination"
+        real irt_b "difficulty"
+        real irt_c "guessing"
+    }
+    quiz {
+        uuid id PK
+        uuid space_id FK
+        uuid subject_id FK
+        uuid created_by FK
+        quiz_source source "teacher|agent_draft"
+        timestamptz time_open
+        timestamptz time_close
+        boolean one_attempt
+    }
+    quiz_attempt {
+        uuid id PK
+        uuid quiz_id FK
+        uuid student_id FK
+        quiz_attempt_state state
+        numeric score
+        integer version "optimistic lock"
+    }
+    attempt_answer {
+        uuid id PK
+        uuid attempt_id FK
+        uuid question_id FK
+        text response
+        boolean correct "graded server-side only"
+    }
+    </div></div>
+    <div class="callout">
+      <span class="t"><code>question_key</code> has no policy on purpose, and must never gain one</span>
+      Row-Level Security is <strong>enabled and forced</strong> on it by the blanket loop, and no policy was ever written.
+      Under forced Row-Level Security a table with no matching policy is deny-all, so <code>app_backend</code> cannot read
+      a single row — no route, no serializer, no accidental <code>SELECT *</code> can leak an answer key, because the
+      database refuses before the application is consulted. Grading runs under the service role. This is the database-level
+      backstop for non-functional requirement NFR-8, <em>"answer keys never leave the server"</em>
+      <span class="ln">20260801120100:327-332</span>. <span class="ln">20260802140000:16-18</span> repeats the warning
+      while fixing six <em>other</em> policy-less tables: <strong>"Do not 'fix' it here."</strong>
+    </div>
+
+    <!-- ════════════════════════ ANALYTICS + TUTOR ════════════════════════ -->
+    <h2>Learner analytics and tutor sessions</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:501-575</span>. Analytics is read by three different roles on three
+    different terms. Chat is read by one.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    app_user ||--o{ mastery_estimate     : "as student_id"
+    app_user ||--o{ coverage_record      : "as student_id"
+    app_user ||--o{ exam_readiness_score : "as student_id"
+    app_user ||--o{ review_schedule      : "as student_id"
+    app_user ||--o{ chat_session         : "as student_id"
+    slo      ||--o{ mastery_estimate     : outcome
+    subject  ||--o{ coverage_record      : subject
+    subject  ||--o{ exam_readiness_score : subject
+    chat_session ||--o{ message          : turns
+    message      ||--o{ visual_aid       : "typed spec, sandboxed"
+
+    mastery_estimate {
+        uuid student_id PK
+        uuid slo_id PK
+        real p_mastery "Bayesian Knowledge Tracing"
+        real p_transit
+        real p_guess
+        real p_slip
+        integer observations
+    }
+    coverage_record {
+        uuid id PK
+        uuid student_id FK
+        uuid subject_id FK
+        numeric coverage_pct "0-100"
+        date as_of
+    }
+    exam_readiness_score {
+        uuid id PK
+        uuid student_id FK
+        uuid subject_id FK
+        numeric score "0-100"
+        numeric expected_marks
+    }
+    review_schedule {
+        uuid id PK
+        uuid student_id FK
+        uuid slo_id FK
+        timestamptz due_at
+        smallint interval_days
+    }
+    chat_session {
+        uuid id PK
+        uuid student_id FK
+        timestamptz started_at
+        timestamptz ended_at
+    }
+    message {
+        uuid id PK
+        uuid session_id FK
+        message_role role
+        text content
+        uuid_array slo_refs "grounding citations"
+    }
+    visual_aid {
+        uuid id PK
+        uuid message_id FK
+        visual_kind kind
+        jsonb payload "typed spec only"
+    }
+    </div></div>
+    <div class="callout">
+      <span class="t">Chat is owner-only, and that invariant holds</span>
+      <code>chat_session</code>, <code>message</code> and <code>visual_aid</code> have exactly one policy each, all
+      owner-scoped, with <strong>no teacher, parent or admin read path</strong> and no privileged function touching them —
+      a minor's chat is private (product requirements §4.2, §21 TEL-3). Re-verified in the Epic 1 review.
+      Analytics is different: a <em>verified</em> guardian reads every subject, while a teacher reads only through
+      <code>app.teaches_student_subject</code>, which requires both an active enrolment in a space they own and a matching
+      <code>teacher_subject_scope</code> row.
+    </div>
+
+    <!-- ════════════════════════ SECURITY / OPS ════════════════════════ -->
+    <h2>Security and operations</h2>
+    <p><span class="ln">20260801120000_initial_schema.sql:583-660</span>. Skills and Model Context Protocol servers are
+    unified into one <code>agent_component</code> table so <code>permission_manifest</code> can hold a single valid foreign
+    key rather than a polymorphic reference.</p>
+    <div class="diagram"><div class="mermaid">
+erDiagram
+    agent_component ||--|| permission_manifest : "1:1 manifest"
+    agent_component ||--|| agent_sbom_entry    : "1:1 bill of materials"
+    agent_component ||--o{ vetting_result      : verdicts
+    app_user        ||--o{ audit_log           : "as actor_id, SET NULL"
+    app_user        ||--o{ api_request_log     : "as actor_id, SET NULL"
+    audit_log       ||--o{ audit_log_default   : "DEFAULT partition"
+    api_request_log ||--o{ api_request_log_default : "DEFAULT partition"
+
+    agent_component {
+        uuid id PK
+        component_kind kind "skill|mcp_server"
+        text name
+        text version
+        component_status status
+    }
+    permission_manifest {
+        uuid id PK
+        uuid component_id FK "UNIQUE"
+        text_array granted_scopes
+        text_array db_scopes
+        jsonb network "default deny"
+        jsonb resource_limits
+    }
+    agent_sbom_entry {
+        uuid id PK
+        uuid component_id FK "UNIQUE"
+        text provenance
+        text content_hash
+        text signature
+    }
+    vetting_result {
+        uuid id PK
+        uuid component_id FK
+        jsonb findings
+        jsonb claim_vs_actual
+        vetting_verdict verdict
+    }
+    audit_log {
+        uuid id PK "PK is (id, created_at)"
+        uuid actor_id FK
+        text action
+        text target
+        jsonb tool_call
+        timestamptz created_at PK "partition key"
+    }
+    api_request_log {
+        bigint id PK "PK is (id, created_at)"
+        uuid request_id
+        uuid actor_id FK
+        user_role role
+        text endpoint "route template"
+        smallint status_code
+        integer latency_ms
+        inet ip
+        timestamptz created_at PK "partition key"
+    }
+    </div></div>
+    <div class="callout warn">
+      <span class="t">The default-partition trap</span>
+      A partitioned table's primary key must include the partition key, which is why both are
+      <code>(id, created_at)</code>. More importantly: the blanket enable-and-force loop at
+      <span class="ln">20260801120100:126-137</span> filters <code>tablename NOT LIKE '%_default'</code>, which left both
+      DEFAULT partitions with Row-Level Security <strong>disabled entirely</strong>.
+      <code>ENABLE ROW LEVEL SECURITY</code> does not cascade to partitions and policies are per-table, so an
+      <code>app_backend</code> connection could run <code>SELECT * FROM public.audit_log_default</code> and read the whole
+      audit trail straight past <code>audit_admin_read</code>. Fixed by <span class="ln">20260802150000:35-38</span>.
+      <strong>Every future partition needs the same two <code>ALTER TABLE</code> statements.</strong>
+    </div>
+    <p><code>audit_log</code> is <strong>append-only from the application</strong>: <code>audit_insert</code> plus
+    <code>audit_admin_read</code>, and no UPDATE or DELETE policy at all, so under forced Row-Level Security the trail
+    cannot be edited or erased through <code>app_backend</code>. The tamper-resistance is the <em>absence</em> of policies,
+    which means it is silently destroyed by anyone who adds a <code>FOR ALL</code> policy to tidy up.</p>
+
+    <!-- ════════════════════════ POLICY CATALOGUE ════════════════════════ -->
+    <h2>The Row-Level Security policy catalogue — all 73</h2>
+    <p>Every policy is <code>TO app_backend</code>; no other role has one. Read <code>cuid()</code> as
+    <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
+    <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
+    superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.</p>
+
+    <div class="callout">
+      <span class="t">Why 73, 73 and 72 are all correct</span>
+      <code>grep -o 'CREATE POLICY' supabase/migrations/*.sql | wc -l</code> returns <strong>73</strong> — but one of those
+      is prose, at <span class="ln">20260802140000:27</span>. There are <strong>72</strong> real
+      <code>CREATE POLICY</code> statements. Two of them sit inside the <code>FOREACH</code> loop at
+      <span class="ln">20260801120100:232-247</span> and expand into 12 objects across the six curriculum tables, and nine
+      statements are drop-and-recreate restatements of names that already exist. So
+      <code>72 − 2 + 12 − 9 = <strong>73 live policy objects</strong></code>, which is what this catalogue lists.
+    </div>
+
+    <details open>
+      <summary>Identity, guardian, tokens, two-factor, subscription — 19 policies</summary>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>app_user</code></td><td><code>app_user_self_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>id = cuid() OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:143</span></td></tr>
+        <tr><td><code>app_user</code></td><td><code>app_user_self_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>id = cuid()</code></td><td><code>id = cuid()</code></td><td><span class="ln">20260801120100:147</span></td></tr>
+        <tr><td><code>app_user</code></td><td><code>app_user_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>id = cuid()</code></td><td><span class="ln">20260802150000:51</span></td></tr>
+        <tr><td><code>student_profile</code></td><td><code>student_profile_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>user_id = cuid() OR app.is_verified_guardian_of(user_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:160</span></td></tr>
+        <tr><td><code>student_profile</code></td><td><code>student_profile_write</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:168</span></td></tr>
+        <tr><td><code>teacher_profile</code></td><td><code>teacher_profile_self</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid() OR app.is_admin()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:173</span></td></tr>
+        <tr><td><code>parent_profile</code></td><td><code>parent_profile_self</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid() OR app.is_admin()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:178</span></td></tr>
+        <tr><td><code>admin_profile</code></td><td><code>admin_profile_self</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid() OR app.is_admin()</code></td><td><code>app.is_admin()</code> <em>(B16 — no <code>user_id</code>)</em></td><td><span class="ln">20260801120100:183</span></td></tr>
+        <tr><td><code>guardian_link</code></td><td><code>guardian_link_participants</code></td><td><span class="pill sel">SELECT</span></td><td><code>parent_id = cuid() OR student_id = cuid() OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:190</span></td></tr>
+        <tr><td><code>guardian_link</code></td><td><code>guardian_link_create</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>(student_id = cuid() OR parent_id = cuid()) AND parent_id &lt;&gt; student_id AND status = 'pending'</code></td><td><span class="ln">20260803090000:54</span></td></tr>
+        <tr><td><code>guardian_link</code></td><td><code>guardian_link_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>parent_id = cuid()</code></td><td><code>parent_id = cuid() AND status &lt;&gt; 'verified'</code></td><td><span class="ln">20260803090000:69</span></td></tr>
+        <tr><td><code>auth_token</code></td><td><code>auth_token_owner</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:209</span></td></tr>
+        <tr><td><code>two_factor_enrollment</code></td><td><code>two_factor_enrollment_owner</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:219</span></td></tr>
+        <tr><td><code>two_factor_backup_code</code></td><td><code>two_factor_backup_code_owner</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260801120100:224</span></td></tr>
+        <tr><td><code>subscription_plan</code></td><td><code>subscription_plan_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260802120000:144</span></td></tr>
+        <tr><td><code>subscription_plan</code></td><td><code>subscription_plan_admin_write</code></td><td><span class="pill all">ALL</span></td><td><code>app.is_admin()</code></td><td><code>app.is_admin()</code></td><td><span class="ln">20260802120000:148</span></td></tr>
+        <tr><td><code>subscription</code></td><td><code>subscription_owner</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260802120000:157</span></td></tr>
+        <tr><td><code>subscription</code></td><td><code>subscription_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260802120000:165</span></td></tr>
+        <tr><td><code>oauth_identity</code></td><td><code>oauth_identity_owner</code></td><td><span class="pill all">ALL</span></td><td><code>user_id = cuid()</code></td><td><code>user_id = cuid()</code></td><td><span class="ln">20260802120000:172</span></td></tr>
+      </table>
+      <p class="offline-note">19 = identity 8 · guardian 3 · tokens and two-factor 3 · subscription and social identity 5. Running total 19 of 73.</p>
+    </details>
+
+    <details>
+      <summary>Curriculum taxonomy — 14 policies</summary>
+      <p>The six <code>*_read</code> policies were created by the loop at <span class="ln">20260801120100:232-247</span>
+      with <code>USING (app.current_user_id() IS NOT NULL)</code>, then <strong>dropped and recreated with
+      <code>USING (true)</code></strong> at <span class="ln">20260802140000:48-71</span> — finding B13, which dropped the
+      bound-user requirement. The six <code>*_admin_write</code> policies still come from the loop.</p>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>board</code></td><td><code>board_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:55</span></td></tr>
+        <tr><td><code>class_level</code></td><td><code>class_level_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:58</span></td></tr>
+        <tr><td><code>subject</code></td><td><code>subject_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:61</span></td></tr>
+        <tr><td><code>subject_group</code></td><td><code>subject_group_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:64</span></td></tr>
+        <tr><td><code>chapter</code></td><td><code>chapter_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:67</span></td></tr>
+        <tr><td><code>slo</code></td><td><code>slo_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>true</code></td><td>—</td><td><span class="ln">20260802140000:70</span></td></tr>
+        <tr><td colspan="6"><em>…and one <code>&lt;table&gt;_admin_write</code> per table, all <span class="pill all">ALL</span> with <code>USING (app.is_admin()) WITH CHECK (app.is_admin())</code>, from the loop at <span class="ln">20260801120100:241</span>.</em></td></tr>
+        <tr><td><code>teacher_subject_scope</code></td><td><code>tss_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>teacher_id = cuid() OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:249</span></td></tr>
+        <tr><td><code>teacher_subject_scope</code></td><td><code>tss_admin_write</code></td><td><span class="pill all">ALL</span></td><td><code>app.is_admin()</code></td><td><code>app.is_admin()</code></td><td><span class="ln">20260801120100:253</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Classroom — 8 policies</summary>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>classroom_space</code></td><td><code>space_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:261</span></td></tr>
+        <tr><td><code>classroom_space</code></td><td><code>space_owner_write</code></td><td><span class="pill all">ALL</span></td><td><code>owner_id = cuid()</code></td><td><code>owner_id = cuid()</code> <em>(B10 — no role check)</em></td><td><span class="ln">20260801120100:269</span></td></tr>
+        <tr><td><code>join_code</code></td><td><code>join_code_owner</code></td><td><span class="pill all">ALL</span></td><td><code>app.owns_space(space_id) OR app.is_admin()</code></td><td><code>app.owns_space(space_id)</code></td><td><span class="ln">20260801120100:275</span></td></tr>
+        <tr><td><code>enrollment</code></td><td><code>enrollment_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid() OR app.owns_space(space_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:281</span></td></tr>
+        <tr><td><code>enrollment</code></td><td><code>enrollment_student_join</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>student_id = cuid()</code> <em>(B9 — any space)</em></td><td><span class="ln">20260801120100:289</span></td></tr>
+        <tr><td><code>enrollment</code></td><td><code>enrollment_leave</code></td><td><span class="pill upd">UPDATE</span></td><td><code>student_id = cuid() OR app.owns_space(space_id)</code></td><td><em>none — falls back to USING</em></td><td><span class="ln">20260801120100:294</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_enrolled_in(space_id) OR app.owns_space(space_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:298</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_write</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>app.owns_space(space_id)</code></td><td><span class="ln">20260801120100:302</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Assessment — 14 policies (plus <code>question_key</code>, which has none)</summary>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>past_paper</code></td><td><code>past_paper_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260801120100:310</span></td></tr>
+        <tr><td><code>past_paper</code></td><td><code>past_paper_admin</code></td><td><span class="pill all">ALL</span></td><td><code>app.is_admin()</code></td><td><code>app.is_admin()</code></td><td><span class="ln">20260801120100:312</span></td></tr>
+        <tr><td><code>question</code></td><td><code>question_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260801120100:315</span></td></tr>
+        <tr><td><code>question</code></td><td><code>question_admin</code></td><td><span class="pill all">ALL</span></td><td><code>app.is_admin()</code></td><td><code>app.is_admin()</code></td><td><span class="ln">20260801120100:317</span></td></tr>
+        <tr><td><code>question_slo</code></td><td><code>question_slo_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260801120100:320</span></td></tr>
+        <tr><td><code>item_difficulty</code></td><td><code>item_difficulty_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260801120100:322</span></td></tr>
+        <tr><td><code>slo_frequency_cluster</code></td><td><code>slo_freq_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>cuid() IS NOT NULL</code></td><td>—</td><td><span class="ln">20260801120100:324</span></td></tr>
+        <tr><td><code>question_key</code></td><td><strong>none — deliberate and permanent</strong></td><td>—</td><td>—</td><td>—</td><td><span class="ln">20260801120100:327-332</span></td></tr>
+        <tr><td><code>quiz</code></td><td><code>quiz_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>created_by = cuid() OR (space_id IS NOT NULL AND app.is_enrolled_in(space_id)) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:334</span></td></tr>
+        <tr><td><code>quiz</code></td><td><code>quiz_teacher_write</code></td><td><span class="pill all">ALL</span></td><td><code>created_by = cuid()</code></td><td><code>created_by = cuid()</code> <em>(B8 — no space, no role)</em></td><td><span class="ln">20260801120100:342</span></td></tr>
+        <tr><td><code>quiz_question</code></td><td><code>quiz_question_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>EXISTS (SELECT 1 FROM public.quiz q WHERE q.id = quiz_id)</code> <em>(B18 — safe by accident; B12 — no write path)</em></td><td>—</td><td><span class="ln">20260801120100:347</span></td></tr>
+        <tr><td><code>quiz_attempt</code></td><td><code>attempt_student_own</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:351</span></td></tr>
+        <tr><td><code>quiz_attempt</code></td><td><code>attempt_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>EXISTS (… q.id = quiz_id AND q.space_id IS NOT NULL AND app.owns_space(q.space_id)) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:357</span></td></tr>
+        <tr><td><code>attempt_answer</code></td><td><code>attempt_answer_owner</code></td><td><span class="pill all">ALL</span></td><td><code>EXISTS (… a.id = attempt_id AND a.student_id = cuid())</code></td><td>same expression</td><td><span class="ln">20260801120100:367</span></td></tr>
+        <tr><td><code>attempt_answer</code></td><td><code>attempt_answer_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>EXISTS (quiz_attempt JOIN quiz … AND app.owns_space(q.space_id))</code></td><td>—</td><td><span class="ln">20260801120100:378</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Learner analytics and tutor sessions — 10 policies</summary>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>mastery_estimate</code></td><td><code>mastery_owner</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:392</span></td></tr>
+        <tr><td><code>mastery_estimate</code></td><td><code>mastery_guardian_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_verified_guardian_of(student_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:397</span></td></tr>
+        <tr><td><code>coverage_record</code></td><td><code>coverage_owner</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:401</span></td></tr>
+        <tr><td><code>coverage_record</code></td><td><code>coverage_viewers_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_verified_guardian_of(student_id) OR app.teaches_student_subject(student_id, subject_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:406</span></td></tr>
+        <tr><td><code>exam_readiness_score</code></td><td><code>readiness_owner</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:414</span></td></tr>
+        <tr><td><code>exam_readiness_score</code></td><td><code>readiness_viewers_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_verified_guardian_of(student_id) OR app.teaches_student_subject(student_id, subject_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:419</span></td></tr>
+        <tr><td><code>review_schedule</code></td><td><code>review_owner</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:427</span></td></tr>
+        <tr><td><code>chat_session</code></td><td><code>chat_session_owner</code></td><td><span class="pill all">ALL</span></td><td><code>student_id = cuid()</code></td><td><code>student_id = cuid()</code></td><td><span class="ln">20260801120100:438</span></td></tr>
+        <tr><td><code>message</code></td><td><code>message_owner</code></td><td><span class="pill all">ALL</span></td><td><code>EXISTS (chat_session s … s.student_id = cuid())</code></td><td>same expression</td><td><span class="ln">20260801120100:443</span></td></tr>
+        <tr><td><code>visual_aid</code></td><td><code>visual_aid_owner</code></td><td><span class="pill all">ALL</span></td><td><code>EXISTS (message JOIN chat_session … s.student_id = cuid())</code></td><td>same expression</td><td><span class="ln">20260801120100:454</span></td></tr>
+      </table>
+      <p class="offline-note">B7: the five <code>*_owner</code> policies here that are <span class="pill all">ALL</span> mean every number a parent or teacher reads is student-writable.</p>
+    </details>
+
+    <details>
+      <summary>Security and operations — 8 policies (plus 2 policy-less default partitions)</summary>
+      <table>
+        <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
+        <tr><td><code>agent_component</code></td><td><code>component_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:471</span></td></tr>
+        <tr><td><code>permission_manifest</code></td><td><code>manifest_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:473</span></td></tr>
+        <tr><td><code>agent_sbom_entry</code></td><td><code>sbom_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:475</span></td></tr>
+        <tr><td><code>vetting_result</code></td><td><code>vetting_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:477</span></td></tr>
+        <tr><td><code>audit_log</code></td><td><code>audit_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>true</code></td><td><span class="ln">20260801120100:482</span></td></tr>
+        <tr><td><code>audit_log</code></td><td><code>audit_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:484</span></td></tr>
+        <tr><td><code>api_request_log</code></td><td><code>reqlog_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>true</code> <em>(B15 — the log is forgeable)</em></td><td><span class="ln">20260801120100:488</span></td></tr>
+        <tr><td><code>api_request_log</code></td><td><code>reqlog_admin_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:490</span></td></tr>
+        <tr><td><code>audit_log_default</code></td><td><strong>none — deliberate</strong></td><td>—</td><td colspan="2">Row-Level Security enabled + forced, no policy ⇒ direct access default-deny; parent-routed access uses <code>audit_log</code>'s policies</td><td><span class="ln">20260802150000:35-36</span></td></tr>
+        <tr><td><code>api_request_log_default</code></td><td><strong>none — deliberate</strong></td><td>—</td><td colspan="2">as above</td><td><span class="ln">20260802150000:37-38</span></td></tr>
+      </table>
+    </details>
+
+    <p class="offline-note"><strong>19 + 14 + 8 + 14 + 10 + 8 = 73.</strong> Every live policy object is above; the four
+    objects with no policy at all — <code>question_key</code>, the two default partitions and the unprotected
+    <code>two_factor_status_v</code> view — are listed in
+    <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
+
+    <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
+    <h2>The <code>app.*</code> privileged functions — 33 live</h2>
+    <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
+    of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
+    <strong>35 are <code>SECURITY DEFINER</code></strong> and <strong>36 carry <code>SET search_path = public, pg_temp</code></strong>
+    — the exceptions being the trigger function and, for the definer count, <code>app.current_user_id()</code>. None takes
+    dynamic SQL. Full signatures, return types, call sites and grants are in
+    <a href="database.md#the-app-privileged-functions">database.md</a>.</p>
+
+    <div class="callout">
+      <span class="t">Why these exist at all</span>
+      Login, refresh, email verification, password reset, two-factor enrolment and the guardian flow all run
+      <strong>before a session exists</strong> — there is no <code>app.current_user_id()</code> to satisfy an owner-scoped
+      policy with. The alternative was to connect as the Row-Level-Security-bypassing service role, but then the bypass is
+      implicit in a connection and spreads. These functions make the exception <strong>explicit, auditable and narrow</strong>:
+      each returns only the columns its flow needs <span class="ln">20260802140000:96-110</span>. The standing rule is to
+      add another narrow function, never to widen the door.
+    </div>
+
+    <details open>
+      <summary>Row-Level Security helpers — called by policies, not by routes</summary>
+      <table>
+        <tr><th>Function</th><th>Volatility</th><th>Definer</th><th>Returns</th><th>Grant</th><th>Defined at</th></tr>
+        <tr><td><code>app.current_user_id()</code></td><td>STABLE</td><td>no</td><td><code>uuid</code> — the bound user, or NULL</td><td>default PUBLIC</td><td><span class="ln">20260801120100:49</span></td></tr>
+        <tr><td><code>app.is_admin()</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — caller is an <code>active</code> <code>admin</code></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:56</span></td></tr>
+        <tr><td><code>app.is_verified_guardian_of(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — a <strong>verified</strong> link exists</td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:67</span></td></tr>
+        <tr><td><code>app.teaches_student_subject(uuid, uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — active enrolment in a space the caller owns <strong>and</strong> a matching scope row</td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:81</span></td></tr>
+        <tr><td><code>app.owns_space(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — <em>(B11: no subject-scope check)</em></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:99</span></td></tr>
+        <tr><td><code>app.is_enrolled_in(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — enrolled and <code>left_at IS NULL</code></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:109</span></td></tr>
+        <tr><td><code>app.set_updated_at()</code></td><td>VOLATILE</td><td>no</td><td><code>trigger</code> — 9 tables</td><td>default PUBLIC</td><td><span class="ln">20260801120000:85</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Session and token lifecycle — 6 functions</summary>
+      <table>
+        <tr><th>Function</th><th>Returns</th><th>Called from</th><th>Endpoint</th><th>Defined at</th></tr>
+        <tr><td><code>app.lookup_user_for_login(text)</code></td><td><code>TABLE(id, password_hash, status, email_verified_at)</code> — deliberately not <code>SELECT *</code></td><td><span class="ln">service.py:294</span></td><td><code>POST /auth/login</code></td><td><span class="ln">20260802140000:115</span></td></tr>
+        <tr><td><code>app.lookup_2fa_for_login(uuid)</code></td><td><code>TABLE(method, status, locked_until)</code> — no secret, no counter</td><td><span class="ln">service.py:324</span></td><td><code>POST /auth/login</code></td><td><span class="ln">20260803180000:36</span></td></tr>
+        <tr><td><code>app.lookup_refresh_token(text)</code></td><td><code>TABLE(id, user_id, kind, revoked, expires_at)</code> — takes a hash, never a token</td><td><span class="ln">tokens.py:80</span></td><td><code>POST /auth/refresh</code></td><td><span class="ln">20260802140000:133</span></td></tr>
+        <tr><td><code>app.insert_auth_token(uuid, token_kind, text, timestamptz)</code></td><td><code>uuid</code> — <em>(C1: any kind, any user, caller-chosen hash)</em></td><td><span class="ln">tokens.py:54</span></td><td>every token-issuing path</td><td><span class="ln">20260802140000:182</span></td></tr>
+        <tr><td><code>app.revoke_auth_token(uuid)</code></td><td><code>void</code></td><td><span class="ln">tokens.py:119</span></td><td>refresh rotation</td><td><span class="ln">20260802140000:152</span></td></tr>
+        <tr><td><code>app.revoke_refresh_family(uuid)</code></td><td><code>integer</code> — how many were revoked, so the caller can audit it</td><td><span class="ln">tokens.py:134</span></td><td>reuse-detection breach response</td><td><span class="ln">20260802140000:163</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Two-factor authentication — 11 functions</summary>
+      <table>
+        <tr><th>Function</th><th>Returns</th><th>Called from</th><th>Endpoint</th><th>Defined at</th></tr>
+        <tr><td><code>app.lookup_challenge_token(text, token_kind)</code></td><td><code>TABLE(id, user_id, kind, revoked, expires_at)</code> — the single place the enrolment/pending token boundary is enforced</td><td><span class="ln">service.py:703, :785</span></td><td><code>/2fa/enroll</code>, <code>/2fa/confirm</code></td><td><span class="ln">20260803120000:43</span></td></tr>
+        <tr><td><code>app.upsert_2fa_enrollment(uuid, two_factor_method, bytea)</code></td><td><code>void</code> — never clears <code>failed_attempts</code> or <code>locked_until</code></td><td><span class="ln">service.py:749, :762</span></td><td><code>POST /auth/2fa/enroll</code></td><td><span class="ln">20260803160000:44</span></td></tr>
+        <tr><td><code>app.activate_2fa(uuid, bigint DEFAULT NULL)</code></td><td><code>void</code> — seeds <code>last_used_counter</code> with the step just consumed</td><td><span class="ln">service.py:856</span></td><td><code>POST /auth/2fa/confirm</code></td><td><span class="ln">20260803160000:78</span></td></tr>
+        <tr><td><code>app.replace_backup_codes(uuid, text[])</code></td><td><code>integer</code> — atomic swap; no window where both sets are valid</td><td><span class="ln">service.py:863</span></td><td><code>POST /auth/2fa/confirm</code></td><td><span class="ln">20260803120000:131</span></td></tr>
+        <tr><td><code>app.start_2fa_challenge(text, token_kind)</code></td><td><code>TABLE(token_user_id, token_id, method, status, totp_secret_encrypted, last_used_counter, failed_attempts, locked_until)</code></td><td><span class="ln">service.py:907, :1028</span></td><td><code>/2fa/verify</code>, <code>/2fa/resend</code></td><td><span class="ln">20260803120000:166</span></td></tr>
+        <tr><td><code>app.verify_2fa_success(uuid, bigint)</code></td><td><code>void</code> — the <strong>only</strong> event that clears a lockout</td><td><span class="ln">service.py:994</span></td><td><code>POST /auth/2fa/verify</code></td><td><span class="ln">20260803120000:203</span></td></tr>
+        <tr><td><code>app.verify_2fa_failure(uuid, smallint, timestamptz)</code></td><td><code>void</code></td><td><span class="ln">service.py:671</span></td><td>every failed verification</td><td><span class="ln">20260803120000:229</span></td></tr>
+        <tr><td><code>app.consume_backup_code(uuid, text)</code></td><td><code>integer</code> — 1 or 0</td><td><span class="ln">service.py:982</span></td><td><code>POST /auth/2fa/verify</code></td><td><span class="ln">20260803120000:255</span></td></tr>
+        <tr><td><code>app.get_unused_backup_codes(uuid)</code></td><td><code>TABLE(code_hash)</code> — hashes only, never plaintext</td><td><span class="ln">service.py:975</span></td><td><code>POST /auth/2fa/verify</code></td><td><span class="ln">20260803120000:284</span></td></tr>
+        <tr><td><code>app.issue_email_otp(uuid, text, timestamptz)</code></td><td><code>uuid</code> — revokes every prior unrevoked one-time password first</td><td><span class="ln">service.py:569</span></td><td>login, <code>/2fa/enroll</code>, <code>/2fa/resend</code></td><td><span class="ln">20260803120000:304</span></td></tr>
+        <tr><td><code>app.lookup_email_otp(uuid, text)</code></td><td><code>TABLE(id, user_id, expires_at)</code></td><td><span class="ln">service.py:840, :958</span></td><td><code>/2fa/confirm</code>, <code>/2fa/verify</code></td><td><span class="ln">20260803120000:339</span></td></tr>
+      </table>
+    </details>
+
+    <details>
+      <summary>Email verification, password reset and the guardian gate — 9 functions</summary>
+      <table>
+        <tr><th>Function</th><th>Returns</th><th>Called from</th><th>Endpoint</th><th>Defined at</th></tr>
+        <tr><td><code>app.consume_token_and_verify_email(text)</code></td><td><code>TABLE(user_id, already_verified)</code> — <strong>idempotent</strong>, so a link opened twice by a mail-client prefetch does not error</td><td><span class="ln">service.py:1098</span></td><td><code>POST /auth/email/verify</code></td><td><span class="ln">20260803120000:373</span></td></tr>
+        <tr><td><code>app.consume_password_reset_token(text, text)</code></td><td><code>boolean</code> — also revokes <strong>every</strong> refresh token; a password change kills every session</td><td><span class="ln">service.py:1193</span></td><td><code>POST /auth/password/reset</code></td><td><span class="ln">20260803120000:447</span></td></tr>
+        <tr><td><code>app.check_token_status(text, token_kind)</code></td><td><code>TABLE(token_found, token_expired, token_revoked, token_user_id)</code> — separates 410 from 400</td><td><span class="ln">service.py:601</span></td><td><code>/email/verify</code>, <code>/password/reset</code></td><td><span class="ln">20260803160000:105</span></td></tr>
+        <tr><td><code>app.lookup_user_for_email_flow(text)</code></td><td><code>TABLE(id, email, full_name, language_pref, email_verified_at, status)</code> — the <strong>stored</strong> address, so delivery never depends on the caller's spelling</td><td><span class="ln">service.py:624</span></td><td><code>/password/forgot</code>, <code>/email/resend</code></td><td><span class="ln">20260803160000:131</span></td></tr>
+        <tr><td><code>app.lookup_user_email(uuid)</code></td><td><code>TABLE(email, full_name)</code> — <strong>no call site</strong>; superseded in practice by the row above</td><td>—</td><td>—</td><td><span class="ln">20260803120000:499</span></td></tr>
+        <tr><td><code>app.lookup_parent_id_by_email(text)</code></td><td><code>uuid</code> — only an <strong>active</strong> account whose <code>role = 'parent'</code></td><td><span class="ln">service.py:1236</span></td><td><code>POST /auth/guardian/invite</code></td><td><span class="ln">20260802150000:133</span></td></tr>
+        <tr><td><code>app.reinvite_guardian_link(uuid, uuid)</code></td><td><code>guardian_status</code>, or NULL when nothing was reset. Hard guard <code>status &lt;&gt; 'verified'</code></td><td><span class="ln">service.py:1270</span></td><td><code>POST /auth/guardian/invite</code></td><td><span class="ln">20260803090000:87</span></td></tr>
+        <tr><td><code>app.lookup_guardian_parent_email(uuid)</code></td><td><code>text</code> — representative parent email (verified wins, then latest)</td><td><span class="ln">service.py:1329</span></td><td><code>GET /auth/guardian/status</code></td><td><span class="ln">20260802150000:116</span></td></tr>
+        <tr><td><code>app.confirm_guardian_link(uuid, text)</code></td><td><code>TABLE(status, student_name)</code> — the status <strong>before</strong> the transition, so 200 and 409 are distinguishable. <em>(C2: does not check <code>p_parent = cuid()</code>)</em></td><td><span class="ln">service.py:1357</span></td><td><code>POST /auth/guardian/confirm</code></td><td><span class="ln">20260802150000:75</span></td></tr>
+      </table>
+    </details>
+
+    <!-- ════════════════════════ INVARIANTS ════════════════════════ -->
+    <h2>Invariants, each with its reason</h2>
+    <table>
+      <tr><th>Invariant</th><th>Why it exists</th><th>Where</th></tr>
+      <tr>
+        <td><strong><code>question_key</code> has no policy, and must never gain one</strong></td>
+        <td>Forced Row-Level Security with no policy is deny-all, so <code>app_backend</code> cannot read an answer key at all. The database refuses before the application is consulted. Database-level backstop for NFR-8.</td>
+        <td><span class="ln">20260801120100:327-332</span> · restated <span class="ln">20260802140000:16-18</span></td>
+      </tr>
+      <tr>
+        <td><strong><code>audit_log</code> is insert-plus-admin-read, so it is append-only</strong></td>
+        <td>No UPDATE and no DELETE policy exists, so under forced Row-Level Security the trail cannot be tampered with through <code>app_backend</code>. The protection is the <em>absence</em> of policies — silently destroyed by adding a <code>FOR ALL</code> policy to tidy up.</td>
+        <td><span class="ln">20260801120100:480-485</span></td>
+      </tr>
+      <tr>
+        <td><strong>A partitioned table needs Row-Level Security on the <em>default partition</em> too</strong></td>
+        <td><code>ENABLE ROW LEVEL SECURITY</code> does not cascade to partitions and policies are per-table. The blanket loop skipped <code>%_default</code>, so both default partitions were readable directly, past their parent's admin-only policy.</td>
+        <td>trap at <span class="ln">20260801120100:131</span> · fixed <span class="ln">20260802150000:35-38</span></td>
+      </tr>
+      <tr>
+        <td><strong>Grants are table-wide, so Row-Level Security gives no column protection</strong></td>
+        <td>Row-Level Security filters <em>rows</em>. Wherever a policy allows a row it allows every column of it. Column protection needs column-level <code>GRANT</code>s, which do not exist yet — this is what turns several <code>FOR ALL</code> policies into real privilege problems.</td>
+        <td><span class="ln">20260801120100:36-39</span></td>
+      </tr>
+      <tr>
+        <td><strong>Unset binding means zero rows, and zero rows looks like "nothing to see here"</strong></td>
+        <td>An unset <code>app.current_user_id()</code> makes every owner-scoped comparison NULL, so the query returns empty <em>with no error</em>. This is why pre-authentication reads go through narrow <code>SECURITY DEFINER</code> functions, and why a policy of the form <code>USING (cuid() IS NULL)</code> was deliberately rejected: it would turn fail-closed into fail-open on the exact path most likely to carry the bug.</td>
+        <td><span class="ln">20260802140000:102-106</span> · the live failure at <span class="ln">20260803180000:5-28</span></td>
+      </tr>
+      <tr>
+        <td><strong>Trial length lives in the database default</strong></td>
+        <td><code>trial_ends_at DEFAULT (now() + interval '14 days')</code> is the source of truth; the application must not carry its own copy of the number.</td>
+        <td><span class="ln">20260802120000:68-70</span></td>
+      </tr>
+      <tr>
+        <td><strong>Absence of a subscription row is not <code>trialing</code></strong></td>
+        <td>Derive access fail-closed — no row means no access — so a failed insert can never silently grant free access forever.</td>
+        <td><span class="ln">20260802120000:19-22</span></td>
+      </tr>
+      <tr>
+        <td><strong>Chat is owner-only</strong></td>
+        <td>A minor's chat is private. No teacher, parent or admin path, and no privileged function touches the three tables. Re-verified; holds.</td>
+        <td><span class="ln">20260801120100:432-465</span></td>
+      </tr>
+    </table>
+
+    <!-- ════════════════════════ MIGRATION RULES ════════════════════════ -->
+    <h2>Migration rules</h2>
+    <table>
+      <tr><th>Rule</th><th>Why</th></tr>
+      <tr><td><strong>Filename is <code>YYYYMMDDHHMMSS_snake_case_description.sql</code></strong></td><td>Migrations run in filename order, so the timestamp prefix is a dependency declaration, not decoration. <code>supabase migration new &lt;name&gt;</code> generates it.</td></tr>
+      <tr><td><strong>Never edit an applied migration — add a new one</strong></td><td>The files and the applied database <em>can</em> diverge and have: <span class="ln">20260803090000:12-22</span> records a live path that failed silently because the applied <code>guardian_link_update</code> was parent-only while the file said either participant. Read <code>pg_policies</code>, not the file, for what is live.</td></tr>
+      <tr><td><strong>Make every migration re-runnable</strong></td><td>The Supabase command-line interface <strong>does not wrap a migration file in a transaction</strong>. A part-way failure leaves earlier statements committed and the migration unrecorded, and the obvious retry then dies on "policy already exists". <code>DROP POLICY IF EXISTS</code> before every <code>CREATE POLICY</code> — PostgreSQL has no <code>CREATE POLICY IF NOT EXISTS</code>.</td></tr>
+      <tr><td><strong>A changed <code>RETURNS TABLE</code> needs drop-then-create</strong></td><td><code>RETURNS TABLE</code> columns are <code>OUT</code> parameters, so adding one changes the return type and PostgreSQL refuses: <em>"cannot change return type of existing function"</em> (SQLSTATE 42P13). <span class="ln">20260803160000:94-104</span>.</td></tr>
+      <tr><td><strong>Adding a parameter is worse, because it fails quietly</strong></td><td><code>CREATE OR REPLACE</code> does not replace a different arity — it <strong>overloads</strong>. Without the explicit drop, both <code>activate_2fa(uuid)</code> and <code>activate_2fa(uuid, bigint)</code> would exist and a one-argument call would match both, failing at runtime with "function name is not unique". <span class="ln">20260803160000:70-76</span>.</td></tr>
+      <tr><td><strong>A drop takes its grant and its comment with it</strong></td><td><code>DROP FUNCTION</code> silently removes the <code>GRANT EXECUTE</code> and the <code>COMMENT ON FUNCTION</code>. Every drop-and-recreate must re-issue <code>REVOKE ALL … FROM PUBLIC</code>, <code>GRANT EXECUTE … TO app_backend</code> and the comment. Forget it and the function survives with the default <code>EXECUTE</code> to <code>PUBLIC</code> — the silent version of finding C5. <span class="ln">20260803160000:158-179</span>.</td></tr>
+      <tr><td><strong>A new enum value gets its own file</strong></td><td>PostgreSQL will not let a value added by <code>ALTER TYPE … ADD VALUE</code> be <em>used</em> in the same transaction, and the CLI runs each migration as one. <span class="ln">20260802140100_token_kind_enrollment.sql</span> adds one value and does nothing else.</td></tr>
+      <tr><td><strong>A new table needs four things, not one</strong></td><td><code>ENABLE</code>, <code>FORCE</code>, at least one policy (or a deliberate comment saying why none), and — if partitioned — steps 1 and 2 repeated on every partition including the default. Grants are forward-looking; enablement is not (finding B19).</td></tr>
+      <tr><td><strong>The agent never pushes a migration</strong></td><td>It produces the file, verifies it with a dry run against a shadow or branch database, and reports the real output. The repository owner applies it.</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <span class="t">One manual step the migrations cannot do</span>
+      <code>app_backend</code> is created <code>NOLOGIN</code> with no password, because passwords are never committed. Set
+      it once, out of band, with <code>ALTER ROLE app_backend WITH LOGIN PASSWORD '&lt;strong-password&gt;';</code> and point
+      <code>DATABASE_URL</code> at <strong>that role, not <code>postgres</code></strong>. Connecting as <code>postgres</code>
+      bypasses Row-Level Security and makes every policy on this page inert — which is why
+      <span class="ln">backend/app/core/db.py:119-164</span> refuses to start when it detects <code>rolsuper</code> or
+      <code>rolbypassrls</code>.
+    </div>
+
+    <h2>Connecting from FastAPI</h2>
+    <p>The codebase is <strong>entirely synchronous SQLAlchemy</strong> — <code>Session</code>, <code>db.execute</code>,
+    <code>sessionmaker</code>. There is no <code>AsyncEngine</code>, no <code>async with engine.begin()</code> and no
+    <code>await</code> on a database call anywhere.</p>
+<pre>from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+def set_current_user_id(session: Session, user_id: UUID | str) -&gt; None:
+    parsed = UUID(str(user_id))
+    session.execute(
+        text("SELECT set_config('app.current_user_id', :uid, true)"),
+        {"uid": str(parsed)},
+    )</pre>
+    <p><code>set_config(..., is_local =&gt; true)</code> is the parameterised equivalent of <code>SET LOCAL</code>, which
+    cannot take a bind parameter and would otherwise have to be built by string concatenation. Verbatim at
+    <span class="ln">backend/app/core/db.py:33-59</span>.</p>
+    <div class="callout danger">
+      <span class="t">A stray <code>commit()</code> silently unbinds the user</span>
+      The setting is <strong>transaction-scoped</strong>. A <code>commit()</code> mid-request ends the transaction and
+      discards it; every query after that runs with no user bound and returns <strong>zero rows with no error raised
+      anywhere</strong>. If you are chasing a "the query returns nothing but the row is definitely there" bug, look for a
+      stray commit first. <span class="ln">backend/app/core/db.py:45-50</span>.
+    </div>
+
+    <p class="offline-note">Diagrams render with Mermaid from <code>assets/mermaid.min.js</code>, vendored locally on purpose —
+    this project is demonstrated in a viva room, and a diagram that fails because the network is unreliable is worse than a
+    static image. If the diagrams above are blank, that file has not been vendored yet: see <code>assets/README.md</code>.</p>
+
+  </div>
+  <footer>EduBridge AI · Architecture documentation · snapshot 2026-08-15 · keep in sync with code per <code>/CLAUDE.md</code> and <code>/Claude/DOC-SYNC-MAP.md</code></footer>
+</body>
+</html>

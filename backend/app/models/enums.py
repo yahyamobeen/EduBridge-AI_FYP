@@ -8,6 +8,33 @@ class UserRole(str, Enum):
     admin = "admin"
 
 
+class RegistrableRole(str, Enum):
+    """
+    The roles `POST /auth/register` accepts. DELIBERATELY EXCLUDES `admin`.
+
+    A separate type rather than a validator on `UserRole`, because this way the
+    restriction lands in the generated OpenAPI schema — a client reading the
+    interface description sees three roles, not four with one that always fails.
+    The frontend already models it the same way (`Exclude<Role, 'admin'>` in
+    `lib/api/types.ts`).
+
+    Registering an admin used to reach `active` in a single request: the student
+    validators return early for a non-student, the role chain in `register()`
+    has no `else`, and `derive_onboarding_state` skips both the guardian and the
+    subscription rules — so nothing downstream objected. `app.is_admin()` then
+    opened six read policies.
+
+    Narrowing the type is the FIRST of two layers. The second is the
+    `app_user_insert` policy, which refuses an admin row to `app_backend`
+    outright. Neither is sufficient alone: a validator can be bypassed by a new
+    endpoint that forgets it, and the policy cannot produce a readable error.
+    """
+
+    student = "student"
+    teacher = "teacher"
+    parent = "parent"
+
+
 class UserStatus(str, Enum):
     active = "active"
     suspended = "suspended"

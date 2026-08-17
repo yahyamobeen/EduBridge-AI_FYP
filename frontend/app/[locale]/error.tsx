@@ -27,7 +27,19 @@ export default function LocaleError({
   const t = useTranslations('errorPage')
 
   useEffect(() => {
-    console.error(error)
+    // ⚠️ FINDING D17 — `console.error(error)` LOGGED THE WHOLE OBJECT, message
+    //    and stack included, which is precisely what the docstring above says
+    //    must not be shown. Rendering was careful and logging was not, on a page
+    //    reachable by anyone: a shared school computer, a screen-shared demo, or
+    //    a browser extension with console access sees whatever the render
+    //    deliberately withheld.
+    //
+    //    `digest` is Next.js's server-side correlation id and is the one field
+    //    designed to be safe to surface — it identifies the error in the server
+    //    log without carrying any of its content. The name is included because
+    //    the CLASS of error ("TypeError") aids triage and cannot itself contain
+    //    user data.
+    console.error('[error boundary]', { name: error.name, digest: error.digest })
   }, [error])
 
   return (

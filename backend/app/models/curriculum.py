@@ -17,9 +17,13 @@ from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
-from app.models.enums import ContentStrategy, StudentGroup
+from app.models.enums import BoardCode, ContentStrategy, StudentGroup
 
+# ⚠️ `BoardCode` ADDED FIRST — `_pg_enum` looks its argument up here and raises
+#    `KeyError` otherwise, so registering the mapping is a prerequisite for the
+#    `Board.code` change below rather than a tidy-up alongside it.
 _PG_ENUM_NAMES: dict[type, str] = {
+    BoardCode: "board_code",
     ContentStrategy: "content_strategy",
     StudentGroup: "student_group",
 }
@@ -37,7 +41,18 @@ class Board(Base):
     __tablename__ = "board"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
-    code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # ⚠️ FINDING D14. Declared `Text` while the applied column is the `board_code`
+    #    ENUM ('PCTB', 'STBB'). `StudentProfile.board` in `identity.py` already
+    #    maps the same database type correctly, so the two models described one
+    #    enum two different ways — and the `Text` one silently accepts any string
+    #    the database would refuse.
+    #
+    #    The mismatch is invisible today because nothing queries this model:
+    #    everything that runs is SQLAlchemy Core with hand-written `text()`.
+    #    That is exactly why it is worth fixing now — the first ORM query written
+    #    against `Board` would inherit a type that disagrees with the schema, and
+    #    the failure would arrive far from this line.
+    code: Mapped[BoardCode] = mapped_column(_pg_enum(BoardCode), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")

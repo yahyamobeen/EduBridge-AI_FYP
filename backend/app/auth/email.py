@@ -4,16 +4,29 @@ Email delivery seam (KAN-10b).
 The protocol is trivial; swapping providers means adding one class that
 implements ``EmailSender``. No route or service code changes.
 
-Two implementations ship:
+Three implementations ship:
 
 * ``LoggingEmailSender`` — writes structured metadata to the Python logger.
   Development and CI. The token is in the HTML body, which is NOT logged
   (only ``to``, ``subject``, and ``body_length`` are), so secrets do not
   leak into log aggregators.
 
-* ``ResendEmailSender`` — sends via the Resend REST API. Production.
+* ``SendGridEmailSender`` — sends via the SendGrid Web API. **The chosen
+  provider** (KAN-21).
+
+* ``ResendEmailSender`` — sends via the Resend REST API. Still supported,
+  currently unused: its unverified free tier delivers ONLY to the account
+  owner's own address and rejects everything else at the API, so a send could
+  look successful and never leave. That is what forced the switch — a guardian
+  invite has to reach a stranger's inbox by definition.
 
 The factory picks based on ``settings.email_provider``.
+
+⚠️ ADDING A PROVIDER IS TWO EDITS, NOT ONE. A class here is not enough:
+``email_provider`` is a ``Literal`` in ``core/config.py`` and a value missing
+from it is refused at BOOT rather than ignored — finding A3's fix working as
+designed. The two halves arrived on different branches once, git found no
+conflict between them, and the application would not start.
 """
 
 from __future__ import annotations
@@ -24,6 +37,9 @@ import logging
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Protocol
+
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 
@@ -110,15 +126,50 @@ class ResendEmailSender:
         logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
 
 
+class SendGridEmailSender:
+    """
+    Production: send via the SendGrid Web API (https://sendgrid.com).
+
+    Like `ResendEmailSender`, the SDK is an OPTIONAL extra (``uv sync --extra
+    email``) and is imported inside `send` so an environment that never mails
+    does not need it installed.
+    """
+
+    def send(self, to: str, subject: str, html_body: str) -> None:
+        try:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import Mail
+        except ImportError as exc:  # pragma: no cover -- configuration error
+            raise RuntimeError(
+                "EMAIL_PROVIDER=sendgrid but the sendgrid SDK is not installed. "
+                "Run `uv sync --extra email`, or set EMAIL_PROVIDER=logging."
+            ) from exc
+
+        settings = get_settings()
+        if not settings.sendgrid_api_key:
+            raise RuntimeError("EMAIL_PROVIDER=sendgrid but SENDGRID_API_KEY is empty.")
+        message = Mail(
+            from_email=settings.email_from,
+            to_emails=[to],
+            subject=subject,
+            html_content=html_body,
+        )
+        SendGridAPIClient(settings.sendgrid_api_key).send(message)
+        logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
+
+
 def get_email_sender() -> EmailSender:
     """
     Factory. Returns ``ResendEmailSender`` when ``EMAIL_PROVIDER=resend``,
+    ``SendGridEmailSender`` when ``EMAIL_PROVIDER=sendgrid``, and
     ``LoggingEmailSender`` otherwise. The default (``logging``) is safe for
     development, CI, and any environment without a configured API key.
     """
     settings = get_settings()
     if settings.email_provider == "resend":
         return ResendEmailSender()
+    if settings.email_provider == "sendgrid":
+        return SendGridEmailSender()
     return LoggingEmailSender()
 
 
@@ -165,9 +216,65 @@ def _deliver(to: str, subject: str, html_body: str) -> None:
 
 
 def send_async(to: str, subject: str, html_body: str) -> None:
-    """Queue an email. Returns immediately; delivery happens off the request."""
+    """
+    Queue an email. Returns immediately; delivery happens off the request.
+
+    ⚠️ THIS DISPATCHES NOW, WITH NO REGARD FOR THE TRANSACTION. Almost every
+    caller should use `send_after_commit` instead — see finding D1 below. This
+    stays public because the after-commit path calls it, and because a message
+    that depends on no database state is legitimately sent this way.
+    """
     future = _pool().submit(_deliver, to, subject, html_body)
     _pending.append(future)
+
+
+# ---------------------------------------------------------------------------
+# Finding D1 — dispatch must wait for the transaction that justified it.
+#
+# `send_async` hands the message to a worker thread IMMEDIATELY. Every caller
+# in `service.py` runs inside an open transaction that has not committed yet:
+# the real commit happens in `core/db.py`'s `get_db`, AFTER the route returns.
+#
+# So the ordering was: mint a token -> queue the email -> worker sends it ->
+# request fails -> transaction rolls back. The user receives a verification or
+# password-reset link for a token row that does not exist, and clicking it is an
+# INVALID_TOKEN they cannot do anything about. The email is unrecallable; the
+# database is not, which is exactly the wrong way round.
+#
+# The outbox lives in `Session.info`, so it is per-session and needs no globals
+# and no plumbing through call signatures beyond the session already in scope.
+# ---------------------------------------------------------------------------
+
+_OUTBOX = "edubridge_email_outbox"
+
+
+def send_after_commit(session: Session, to: str, subject: str, html_body: str) -> None:
+    """
+    Queue an email to be dispatched **only if this transaction commits**.
+
+    Discarded on rollback: an email about a row that no longer exists is worse
+    than no email, because the user acts on it.
+    """
+    session.info.setdefault(_OUTBOX, []).append((to, subject, html_body))
+
+
+@event.listens_for(Session, "after_commit")
+def _dispatch_outbox_on_commit(session: Session) -> None:
+    # `.pop` rather than read-then-clear: a send that raises must not leave the
+    # message queued for the next commit on the same session.
+    for message in session.info.pop(_OUTBOX, []):
+        send_async(*message)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _discard_outbox_on_rollback(session: Session, previous_transaction: object) -> None:
+    """
+    ⚠️ `after_soft_rollback`, NOT `after_rollback`. The latter fires only when a
+    DBAPI-level rollback actually happens; a session whose transaction never
+    reached the database would keep its outbox and dispatch it on the NEXT
+    commit — mailing a link for a token that was discarded.
+    """
+    session.info.pop(_OUTBOX, None)
 
 
 def drain_pending_emails(timeout: float = 10.0) -> None:

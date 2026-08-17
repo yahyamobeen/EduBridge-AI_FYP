@@ -20,25 +20,28 @@ from app.core.db import set_current_user_id
 from app.models.enums import TokenKind
 
 
-def _make_user(session, email: str, *, verified: bool = True) -> str:
+def _make_user(session, email: str, *, verified: bool = True, status: str = "active") -> str:
+    """
+    `status` is set AT INSERT rather than by a follow-up UPDATE.
+
+    Since 20260816160000 (finding B3), `app_backend` holds UPDATE on exactly one
+    column of `app_user` — `full_name` — so `UPDATE app_user SET status = …`
+    is refused with "permission denied for column status". INSERT is a separate
+    privilege and still covers every column, which is what registration needs.
+
+    The old fixture did the UPDATE, and having to change it is the fix working:
+    the whole point of B3 is that a bound user cannot rewrite their own status.
+    """
     user_id = uuid4()
     set_current_user_id(session, user_id)
-    if verified:
-        session.execute(
-            text(
-                "INSERT INTO app_user (id, email, password_hash, role, full_name, "
-                "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', now())"
-            ),
-            {"id": user_id, "email": email},
-        )
-    else:
-        session.execute(
-            text(
-                "INSERT INTO app_user (id, email, password_hash, role, full_name) "
-                "VALUES (:id, :email, 'x', 'student', 'Test User')"
-            ),
-            {"id": user_id, "email": email},
-        )
+    session.execute(
+        text(
+            "INSERT INTO app_user (id, email, password_hash, role, full_name, status, "
+            "email_verified_at) VALUES (:id, :email, 'x', 'student', 'Test User', "
+            ":status, CASE WHEN :verified THEN now() ELSE NULL END)"
+        ),
+        {"id": user_id, "email": email, "status": status, "verified": verified},
+    )
     session.flush()
     set_current_user_id(session, user_id)
     return str(user_id)
@@ -154,14 +157,57 @@ class TestReEnrollingCannotLaunderALockout:
         assert locked_before is not None, "precondition: the account should be locked"
 
         # The page reload.
-        client.post(
+        resp = client.post(
             "/api/auth/2fa/enroll",
             json={"method": "totp", "enrollment_token": _enrollment_token(db, user_id)},
         )
 
+        # FINDING A9, fixed: /2fa/enroll now checks the lockout, so the reload is
+        # refused outright rather than being served and merely failing to launder
+        # the counters. Asserted here because this test previously ignored the
+        # response entirely and would have passed either way.
+        assert resp.status_code == 423, resp.text
+        assert resp.json()["error"]["code"] == "TWO_FACTOR_LOCKED"
+
+        # The original guarantee, still asserted. `upsert_2fa_enrollment`
+        # preserving the counters is the layer underneath — it is what holds if
+        # the check above is ever bypassed by a new caller.
         after = _enrollment_row(db, user_id)
         assert after["locked_until"] is not None, "re-enrolling cleared the lockout"
         assert after["failed_attempts"] >= 1, "re-enrolling reset the failure counter"
+
+    def test_a_locked_account_is_not_sent_another_enrolment_email(self, client, db, unique_email):
+        """
+        Finding A9, the reason it mattered.
+
+        `/2fa/enroll` with `method=email_otp` SENDS MAIL. Without the lockout
+        check, a caller holding a live enrolment token could re-post it against a
+        locked account and generate a message every time — bounded only by the
+        per-account rate limit, which is five per five minutes.
+
+        Scope, honestly: this was never a way to bypass guessing. `/2fa/confirm`
+        checked the lockout throughout, and `app.upsert_2fa_enrollment`
+        deliberately preserves `failed_attempts` and `locked_until`. It was mail
+        flooding, not a breach — fixed because a lockout that four of five entry
+        points honour is not a lockout.
+        """
+        user_id = _make_user(db, unique_email("nomail"))
+        _enrolled_totp(client, db, user_id)
+
+        for _ in range(4):
+            client.post(
+                "/api/auth/2fa/confirm",
+                json={"code": "000000", "enrollment_token": _enrollment_token(db, user_id)},
+            )
+        assert _enrollment_row(db, user_id)["locked_until"] is not None, "precondition"
+
+        resp = client.post(
+            "/api/auth/2fa/enroll",
+            json={"method": "email_otp", "enrollment_token": _enrollment_token(db, user_id)},
+        )
+
+        assert resp.status_code == 423, resp.text
+        assert resp.json()["error"]["details"]["locked_until"]
 
 
 class TestEnrolmentCodeCannotBeReplayed:
@@ -273,12 +319,9 @@ class TestEnumerationSurface:
 
     def test_a_suspended_account_looks_exactly_like_an_unknown_one(self, client, db, unique_email):
         email = unique_email("suspended")
-        user_id = _make_user(db, email, verified=True)
-        set_current_user_id(db, user_id)
-        db.execute(
-            text("UPDATE app_user SET status = 'suspended' WHERE id = :uid"), {"uid": user_id}
-        )
-        db.flush()
+        # Inserted suspended, not suspended afterwards: `app_backend` no longer
+        # holds UPDATE on `status` (finding B3, migration 20260816160000).
+        user_id = _make_user(db, email, verified=True, status="suspended")
 
         resp = client.post("/api/auth/password/forgot", json={"email": email})
         assert resp.status_code == 204

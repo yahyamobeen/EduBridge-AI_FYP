@@ -1,7 +1,9 @@
 name: frontend
 
-# Runs entirely against the mock layer (NEXT_PUBLIC_API_MODE=mock), so this
-# workflow stays green while the three backend tracks are still in progress.
+# Lint, typecheck, unit tests and a production build. There is no mock layer any
+# more, so the build produces a live bundle; nothing here contacts a backend,
+# because every test stubs `fetch` and the one server-rendered page that fetches
+# reference data already has an error fallback for when it cannot.
 # End-to-end browser tests are owned by the backend track, not here.
 
 on:
@@ -23,7 +25,6 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     env:
-      NEXT_PUBLIC_API_MODE: mock
       # Keeps CI output free of Next's first-run telemetry notice.
       NEXT_TELEMETRY_DISABLED: '1'
     steps:

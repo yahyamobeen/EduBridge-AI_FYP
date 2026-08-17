@@ -15,27 +15,19 @@ import {
 import { useRouter } from '@/i18n/navigation'
 import { resetPassword } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
+import { checkPassword } from '@/lib/auth/passwordRules'
 
 type State = 'form' | 'done' | 'expired' | 'invalid'
 
-/**
- * The three requirements the prototype lists.
- *
- * ADVISORY, NOT ENFORCED — except the length rule. No source states the real
- * password policy (plan assumption A6), so the client cannot be the authority
- * on it: enforcing rules stricter than the server's would block valid
- * passwords, and the server's `VALIDATION_ERROR` governs either way. They are
- * shown live because a checklist that fills in as you type is genuinely useful;
- * they are not a gate because the client does not know the rule.
- */
-const RULES = [
-  { key: 'length', test: (v: string) => v.length >= 8, gates: true },
-  { key: 'uppercase', test: (v: string) => /[A-Z]/.test(v), gates: false },
-  { key: 'number', test: (v: string) => /[0-9\W_]/.test(v), gates: false },
-] as const
+// The rules moved to `lib/auth/passwordRules.ts` in Phase 7, and their copy to
+// the `auth.password` namespace, so the settings screen shows the same
+// checklist without importing a constant from a reset screen or reading a
+// reset-specific message namespace. The reasoning for why they are advisory
+// rather than enforced now lives with them.
 
 export function ResetPassword({ token }: { token: string | null }) {
   const t = useTranslations('auth.resetPassword')
+  const tp = useTranslations('auth.password')
   const te = useTranslations('auth.errors')
   const router = useRouter()
 
@@ -46,7 +38,7 @@ export function ResetPassword({ token }: { token: string | null }) {
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
-  const checks = RULES.map((rule) => ({ ...rule, met: rule.test(password) }))
+  const checks = checkPassword(password)
   const mismatch = confirm !== '' && confirm !== password
   const canSubmit =
     !submitting &&
@@ -155,7 +147,9 @@ export function ResetPassword({ token }: { token: string | null }) {
             />
 
             <ul className="space-y-2 rounded border border-outline-variant/50 bg-surface-container-highest p-3">
-              <li className="mb-1 text-label-caps uppercase text-outline">{t('rulesTitle')}</li>
+              <li className="mb-1 text-label-caps uppercase text-outline">
+                {tp('rulesTitle')}
+              </li>
               {checks.map((check) => (
                 <li
                   key={check.key}
@@ -173,8 +167,10 @@ export function ResetPassword({ token }: { token: string | null }) {
                       className="h-4 w-4 shrink-0 rounded-full border border-outline"
                     />
                   )}
-                  <span>{t(`rule_${check.key}`)}</span>
-                  <span className="sr-only">{check.met ? t('ruleMet') : t('ruleNotMet')}</span>
+                  <span>{tp(`rule_${check.key}`)}</span>
+                  <span className="sr-only">
+                    {check.met ? tp('ruleMet') : tp('ruleNotMet')}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -189,7 +185,7 @@ export function ResetPassword({ token }: { token: string | null }) {
             icon={<LockIcon className="h-5 w-5" />}
             value={confirm}
             onChange={setConfirm}
-            error={mismatch ? t('mismatch') : undefined}
+            error={mismatch ? tp('mismatch') : undefined}
             required
             disabled={submitting}
           />

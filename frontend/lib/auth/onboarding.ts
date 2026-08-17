@@ -28,8 +28,33 @@ const ONBOARDING_ROUTES: Record<Exclude<OnboardingState, 'active'>, string> = {
   plan_selection_pending: '/onboarding/plan',
 }
 
+/**
+ * ⚠️ FINDING D6 — THE TYPE IS NOT A CHECK, AND THIS IS THE BOUNDARY.
+ *
+ * `OnboardingState` is a compile-time union. The value reaching these functions
+ * came from a JSON response, so TypeScript's guarantee stops at the network:
+ * a backend that returned a state this table does not list — a new one, a typo,
+ * a stale deployment — produced `ONBOARDING_ROUTES[state] === undefined`, and
+ * the caller then did `router.replace(undefined)`.
+ *
+ * That does not throw. Next's router treats it as a navigation to nowhere, so
+ * the user sits on a screen that has decided to move them and never does, with
+ * nothing in the console. Validating here is cheap and turns an invisible hang
+ * into a visible failure.
+ *
+ * Falling back to the dashboard rather than throwing: an unknown state is a
+ * server-side problem the user cannot act on, and stranding them is worse than
+ * showing them something. The console line is for whoever has to find out why.
+ */
+function assertKnownState(state: OnboardingState): state is Exclude<OnboardingState, 'active'> {
+  if (state in ONBOARDING_ROUTES) return true
+  console.error('[onboarding] unroutable onboarding_state from the API:', state)
+  return false
+}
+
 export function routeForOnboardingState(state: OnboardingState, role: Role): string {
-  return state === 'active' ? dashboardFor(role) : ONBOARDING_ROUTES[state]
+  if (state === 'active') return dashboardFor(role)
+  return assertKnownState(state) ? ONBOARDING_ROUTES[state] : dashboardFor(role)
 }
 
 /**
@@ -41,7 +66,12 @@ export function routeForOnboardingState(state: OnboardingState, role: Role): str
  * it worth a round trip to the identity endpoint to find out.
  */
 export function pendingOnboardingRoute(state: OnboardingState): string | null {
-  return state === 'active' ? null : ONBOARDING_ROUTES[state]
+  if (state === 'active') return null
+  // `null` for an unknown state, not `undefined`: every caller already handles
+  // "no step left", and that path leaves the user where they are rather than
+  // navigating nowhere. See `assertKnownState` above for why this is checked at
+  // all when the type says it cannot happen.
+  return assertKnownState(state) ? ONBOARDING_ROUTES[state] : null
 }
 
 /**

@@ -16,10 +16,12 @@
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.3.9 | 2026-08-17 | EduBridge AI Team | **Transactional email provider resolved to SendGrid, and the guardian invite is actually delivered (KAN-21).** The `EmailSender` seam in `app/auth/email.py` gains **`SendGridEmailSender`**; the factory returns it when `EMAIL_PROVIDER=sendgrid`, and `email_provider`'s `Literal` gains the value — **both halves are required**, because a sender class whose name is absent from the Literal is refused at boot rather than ignored (that is v0.3.8's A3 fix behaving correctly). `Settings` gains `SENDGRID_API_KEY`, and the `EMAIL_FROM` guard now covers **every** real provider rather than naming one. The `email` extra adds `sendgrid>=6.11.0`; `requirements.txt` is regenerated, since Render installs from it. `EMAIL_PROVIDER=logging` remains the safe default and stays refused in production. Resend is retained but unused: its unverified free tier delivers **only to the account owner's own address**, which is what made it unusable for a guardian invite. **A10 closes** — `guardian_invite()` builds the confirm URL, renders the email and queues it to the parent through the after-commit outbox (v0.3.8's D1 seam), so an invite is released only if the transaction that minted its token commits. **C3 closes in the same change**, because wiring A10 is what made it reachable: `student_name` is `app_user.full_name`, editable at will through `PATCH /auth/me`, so escaping is now structural — `_wrap` escapes the document title, the body escapes text content with `quote=False` so a real *O'Brien* is not mangled, and the subject **header** is flattened rather than entity-escaped, a CR/LF being the injection a header actually suffers. The invite's language is read from `app_user.language_pref`, not the `student_profile` copy v0.3.8 superseded (§3.1, §8.2). |
+| 0.3.8 | 2026-08-17 | EduBridge AI Team | **Epic 1 correctness pass (Phases 3–7).** §3.1 gains the three **account-management routes** the document had specified and the code never had — `PATCH /api/auth/me`, `POST /api/auth/password/change` and `GET /api/auth/2fa/status`, the last carrying **`backup_codes_remaining`**. `language_pref` moves from `student_profile` to `app_user`, because FR-A8 is "Role: all" and the lookup behind every outgoing email joined a table teachers, parents and administrators have no row in — so **no non-student could ever receive Urdu mail**. §7.3 records that `password/change` answers `401 UNAUTHENTICATED` for a wrong current password rather than inventing a code. **Sessions gain an end**: an absolute ceiling on a rotating refresh chain, atomic rotation under a row lock (closing the two-tab race that forked a token family), and account-wide invalidation on password change — the last of which widens its cutoff by a configurable **clock-skew allowance**, measured at 1.1s between the application and database hosts and in the direction that made the check silently inert. Refusals now follow the onboarding order, every credential-bearing field is length-bounded, and outgoing email is dispatched **only after the transaction commits** (D1), so a request that fails late no longer mails a link for a token that was rolled back. `email_provider` and `environment` become `Literal`s (**A3**), turning a typo into a boot failure instead of a silent fall-through to the logging sender. |
 | 0.1.0 | 2026-07-19 | EduBridge AI Team | Initial TDD draft derived from the accepted `prd.md`; matches supervisor TDD format, extended to engineering depth. Data-first (polyglot store + star-schema OLAP). |
 | 0.1.1 | 2026-07-19 | EduBridge AI Team | Applied 15 critical-review fixes (§14); locked **Celery**; GPU/model-serving **mostly cloud**; added `api_request_log` + `fact_endpoint_calls` + admin **daily endpoint-logs** panel. |
 | 0.3.7 | 2026-08-09 | EduBridge AI Team | **Consistency pass, driven by writing the User Stories & Epics deliverable.** §3.1 gains the **account-management routes** — `PATCH /api/auth/me`, `POST /api/auth/password/change`, `GET /api/auth/2fa/status` — closing a gap where `prd.md` §4.2 granted every role "manage own account" and this document routed nothing for it (now `prd.md` FR-A8). §3.6's claim that "the guardian-space join path creates/verifies a `guardian_link`" is **corrected**: the v0.3.5 write boundary in §6.8 already made `verified` reachable only through `app.confirm_guardian_link` with a one-time invite token, so a join code could never have verified anything — the student-initiated invite is the sole route, and parents create no spaces. §5.4's migration table listed **4 of the 11 applied migrations**, omitting `20260803090000_guardian_link_write_boundary.sql` — which §6.8 cites by name — and six others; all eleven are now documented with what each does. §5.4 also records that the subscriptions migration took the schema from **45 to 48 tables**. §7.3's error table was **split in half by two prose paragraphs**, so `NOT_GROUNDED`, `RATE_LIMITED` and `MODEL_UNAVAILABLE` rendered as a header-less fragment; the table is whole and the prose follows it. §11.1's second one-row version table, which claimed v0.1.0, is removed, and the closing Document Status no longer reads "Draft v0.1.1". No design decision changed in this pass — every edit brings the document into line with what was already decided or already applied. |
-| 0.3.6 | 2026-08-03 | EduBridge AI Team | **2FA / email / password-reset hardened (KAN-10b review fixes).** §6.9 D7 now applies to **enrolment as well as challenge**: `/2fa/confirm` counted no failures and never locked, so a six-digit emailed OTP was guessable with only a per-address limiter in the way — and `upsert_2fa_enrollment` cleared `failed_attempts`/`locked_until`, so the client's enrolment resend (a re-call of `/2fa/enroll`, §14.4 finding 2) laundered any lockout that did exist. Enrolment also records the TOTP step it consumed, closing a window in which the code that completed enrolment was replayable at `/2fa/verify`. Rate limits gain a **per-account** layer, because an address-keyed limit of ten verifications per five minutes is ten for an entire school lab. Transactional mail is **locale-aware** (§3.1): every link carried `/en/` in an Urdu-first product; copy stays English pending a human writer, but the URL locale is correct now. Mail leaves the request thread so `password/forgot` is constant-time in fact and not only in intent — a synchronous provider call in the known-address branch was an enumeration oracle the dummy hash did not cover. §7.3 gains the `INVALID_TOKEN`/`TOKEN_EXPIRED` rule for **spent** tokens. No provider is chosen: the Resend SDK is an optional extra and `EMAIL_PROVIDER=logging` is refused in production. |
+| 0.3.6 | 2026-08-03 | EduBridge AI Team | **2FA / email / password-reset hardened (KAN-10b review fixes).** §6.9 D7 now applies to **enrolment as well as challenge**: `/2fa/confirm` counted no failures and never locked, so a six-digit emailed OTP was guessable with only a per-address limiter in the way — and `upsert_2fa_enrollment` cleared `failed_attempts`/`locked_until`, so the client's enrolment resend (a re-call of `/2fa/enroll`, §14.4 finding 2) laundered any lockout that did exist. Enrolment also records the TOTP step it consumed, closing a window in which the code that completed enrolment was replayable at `/2fa/verify`. Rate limits gain a **per-account** layer, because an address-keyed limit of ten verifications per five minutes is ten for an entire school lab. Transactional mail is **locale-aware** (§3.1): every link carried `/en/` in an Urdu-first product; copy stays English pending a human writer, but the URL locale is correct now. Mail leaves the request thread so `password/forgot` is constant-time in fact and not only in intent — a synchronous provider call in the known-address branch was an enumeration oracle the dummy hash did not cover. §7.3 gains the `INVALID_TOKEN`/`TOKEN_EXPIRED` rule for **spent** tokens. At this revision **no provider was chosen** — the Resend SDK was an optional extra and `EMAIL_PROVIDER=logging` was refused in production; that decision was later resolved to **SendGrid** in v0.3.9. |
 | 0.3.5 | 2026-08-03 | EduBridge AI Team | **Guardian gate hardened (RBAC-002 review fixes).** §6.8 gains the `guardian_link` **write boundary**: either participant may INSERT only as `pending`, only the parent may UPDATE and never to `verified`, so the status is reachable through `app.confirm_guardian_link` alone — the policies now enforce the anti-forgery claim §3.1 had been making on their behalf. The student's re-invite reset moves to `app.reinvite_guardian_link`, because the applied `guardian_link_update` is parent-only and the student's UPDATE was matching zero rows **silently**: a resend after a revoke reported success while changing nothing and produced an unconfirmable invitation. §3.1 rule 3 extends to an **unknown class level**, which now fails closed rather than waving the student through. New error code **`GUARDIAN_NOT_FOUND` (422)** catalogued in §7.3 — it was already being returned. Rate limits on the authenticated guardian endpoints key on the **acting user** rather than the address, so a shared school-lab or carrier-NAT address no longer makes one student spend the cohort's allowance. `guardian/confirm` returns `student_name` as **nullable**, matching `app_user.full_name`. |
 | 0.3.4 | 2026-08-02 | EduBridge AI Team | **Frontend feature-complete (Phases 10–12).** Plan selection, the role guard, the three dashboard shells and the error boundary. §6.11 records a **deviation**: `script-src` now carries `'unsafe-inline'`, because the Phase-1 policy blocked the App Router's inline bootstrap scripts and left the whole application non-interactive in production (**new §14.5**). §9.5 gains two enforced rules — the RTL physical-property sweep and the parent-navigation assertion — plus the requirement that a production build be opened and interacted with before a phase is done. |
 | 0.3.3 | 2026-08-02 | EduBridge AI Team | **Frontend auth screens built (Phases 6–9).** §3.10 gains the rules the implementation forced: challenge credentials (`pending_token`, `enrollment_token`) stored in memory under the access token's rule; the `200`-always-advances login discriminator and its `noRetry` consequence; the 2FA challenge opening on the server's method with a server-driven lockout; `type="text"` for one-time codes; per-minute countdown announcements; site chrome scoped by route group. New **§14.4** records the contract findings for the backend tracks — chiefly that **nothing switches the second factor mid-challenge** (`2fa/resend` only re-sends to a user already enrolled in email OTP), that **enrolment has no resend at all**, and that guardian status has **no push channel**. Prototype links to unbuilt areas now resolve to a coming-soon page rather than being removed. |
@@ -171,8 +173,9 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | Method | Path | Auth | Role | Purpose |
 |--------|------|------|------|---------|
 | GET | `/api/reference/enums` | No | — | Boards, class levels, **groups keyed by class**, mediums, languages. Signup reads its options from here rather than hard-coding them |
-| POST | `/api/auth/register` | No | — | Create student (board/class/**group**/medium/language); teacher/parent variants. **Issues no session** — the account starts at `email_verification_pending` |
-| POST | `/api/auth/login` | No | — | Authenticate → `200` + `status` discriminator (never a session directly) |
+| POST | `/api/auth/register` | No | — | Create student (board/class/**group**/medium/language); teacher/parent variants. **`role` accepts `student`, `teacher`, `parent` only — never `admin`** (FR-A2a); an `admin` value is `400 VALIDATION_ERROR`. **Issues no session** — the account starts at `email_verification_pending` |
+| POST | `/api/auth/login` | No | — | Authenticate → `200` + `status` discriminator (never a session directly). **Refuses administrators** (FR-A2a) with a `401 UNAUTHENTICATED` whose body is identical to a wrong password — not a `403`, which would let anyone enumerate administrator addresses by status code |
+| POST | `/api/auth/admin/login` | No | — | The administrator half of the same rule. Same request and same response union as `/auth/login`; refuses every **non**-administrator with the identical `401`. Its own rate-limit bucket, so hammering the public form cannot lock administrators out. Reached through an unlisted path (`ADMIN_LOGIN_PATH`, a server-only variable), which is **not** the control — this role check is. The 2FA, refresh and logout continuations are deliberately **shared** with `/auth/login` |
 | POST | `/api/auth/email/verify` | No (token) | any | Verify address → **returns `access_token` + `enrollment_token`** (v0.3.2) |
 | POST | `/api/auth/email/resend` | No | any | Re-send the verification email (rate-limited) |
 | POST | `/api/auth/password/forgot` | No | any | Begin reset. Response is identical whether or not the address exists |
@@ -191,7 +194,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | GET | `/api/auth/me` | Yes | any | Current identity + **`onboarding_state`** |
 | PATCH | `/api/auth/me` | Yes | any | Update own profile and **stored `language_pref`**, which governs outgoing email (v0.3.7 — FR-A8) |
 | POST | `/api/auth/password/change` | Yes | any | Change password from inside the account; **requires the current password** (v0.3.7 — FR-A8) |
-| GET | `/api/auth/2fa/status` | Yes | any | Own second-factor method and state. **Never returns the secret** (v0.3.7 — FR-A8) |
+| GET | `/api/auth/2fa/status` | Yes | any | Own second-factor method and state, plus **`backup_codes_remaining`**. **Never returns the secret** (v0.3.7 — FR-A8; count added v0.3.8) |
 
 **Key design decisions:**
 - Passwords hashed with **argon2id** (never MD5 — the supervisor's template's MD5 is the explicit anti-pattern we avoid). Refresh tokens stored hashed, rotated, revocable.
@@ -1072,7 +1075,58 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 
 **No endpoint invents a code.** `/2fa/resend` against a TOTP enrolment answers `400 VALIDATION_ERROR` with `details.fields`, not a bespoke `INVALID_METHOD`: a code outside this table reaches the client as an unrecognised string and renders as "something went wrong".
 
+**`POST /api/auth/password/change` answers `401 UNAUTHENTICATED` when the *current* password is wrong** — not a new `WRONG_PASSWORD` code, by the rule above and by the `UNAUTHENTICATED` row's own "also the only response meaning 'wrong password'". *(Stated explicitly in v0.3.8, because it has a consequence no other route has.)*
+
+> ⚠️ **This is the one route where both meanings of `401 UNAUTHENTICATED` are live at once** — an expired access token *and* a wrong password. Clients keep an allow-list of 401 codes worth retrying after a token refresh, and `UNAUTHENTICATED` is necessarily on it. **A client must therefore opt this route out of refresh-and-retry**, or every mistyped password silently fires a token refresh and replays the request. The reference client does so with `noRetry: true` (`lib/api/endpoints.ts`). The guard that shields `/2fa/confirm` — "the credential travelled as `bearer`" — does not apply here, because this credential travels in the body.
+
 Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
+
+**Session lifetime (v0.3.8).** A refresh chain has an **absolute ceiling** of
+`SESSION_ABSOLUTE_TTL_DAYS` (default 14) measured from when the chain BEGAN, carried forward across
+every rotation — without it, rotation extends a session for ever, seven days at a time, and no
+session anybody keeps using ever expires. ⚠️ The real ceiling is that **plus up to one
+`JWT_ACCESS_TTL_MINUTES`**, because a refused rotation stamps nothing and the access token already
+issued lives out its own TTL; the setting is not a hard 14 days and must not be described as one. A
+ceiling that does not exceed `JWT_REFRESH_TTL_DAYS` is refused at boot, since the individual token
+would expire first on every chain and the cap could never fire.
+
+**Ending live sessions.** Password change, password reset and detected token reuse stamp
+`app_user.sessions_invalidated_at`, and every access token issued at or before it is refused.
+Revoking refresh tokens alone does not do this — it ends only the ability to obtain a NEW access
+token, leaving the one already held valid for up to its TTL.
+
+**Refresh rotation is atomic, and a race is not a theft.** Two concurrent refreshes presenting the
+same token cannot both succeed. The loser receives a plain `401 UNAUTHENTICATED` and **the family is
+not revoked**, provided the token was revoked moments earlier and a live sibling of the same chain
+still exists; a replay outside that window, or with no live sibling, is reuse and revokes the family.
+⚠️ A client's single-flight guard is typically per browser TAB, so two tabs are enough to collide —
+treating that as theft signs the user out of every device. The loser's 401 is self-healing, because
+the winner's `Set-Cookie` has already replaced the token. Race events are audited as
+`refresh_token_race_detected`.
+
+**Retention (§5.9).** `auth_token` rows are deleted **30 days after expiry**, not on expiry: reuse
+detection reads the revoked row, so deleting it early turns a replayed stolen token into a silent 401
+instead of a family revocation.
+
+**Refusals follow the onboarding order (v0.3.8).** An account that is not yet email-verified is
+answered `email_verification_required` even when it carries a live second-factor lockout. The
+previous order returned `423 TWO_FACTOR_LOCKED` first, which told the user to wait out a lockout on
+a factor they had not reached and disclosed that the account had 2FA state at all. Verify, then
+enrol, then challenge — the refusals must match the journey.
+
+**Outgoing email is dispatched only after the transaction commits (v0.3.8).** A verification or
+reset link is queued against the session that minted its token and released when that session
+commits; a rollback discards it. Sending during the open transaction meant a request that failed
+late delivered a link for a token that no longer existed — unrecallable, and answerable only with
+`INVALID_TOKEN`. Signing in to an `email_otp` account also sends the code, which it previously did
+not: the challenge screen said one had been sent while nothing had.
+
+**Every credential-bearing field is length-bounded (v0.3.8).** Passwords, tokens and codes all carry
+a maximum, because an unbounded string reaching argon2 is an unbounded amount of work on the one
+endpoint an unauthenticated caller can hammer. ⚠️ Fields carrying an EXISTING password — login, and
+the current password on change — are bounded above only: a minimum there would refuse any account
+whose password predates a policy change, and would answer `400` where every other wrong password
+answers `401`.
 
 **Clients branch on `code`, never on `message`** — messages are localized and will change. An unrecognised
 code must still render a usable state rather than a blank screen (`prd.md` §20).
@@ -1104,6 +1158,9 @@ Python ≥3.12, `uv`; Node ≥20 (Next.js); Docker + docker-compose; PostgreSQL 
 | `TTS_MCP`, `STT_MCP`, `OCR_MCP` | — | MCP server addresses |
 | `RATE_LIMIT_DEFAULT` | e.g. `60/min` | per-user/IP quota (SEC-3) |
 | `SIM_THRESHOLD` | **[PROPOSED]** | grounding similarity gate |
+| `EMAIL_PROVIDER` | `logging` | `logging` (dev/CI) · `sendgrid` (production, chosen v0.3.9) · `resend` (retained, unused). A **`Literal`** — a value outside the three is refused at boot, not ignored (A3). `logging` is refused in production |
+| `SENDGRID_API_KEY` | — | SendGrid Web API key (`SG.…`); required when `EMAIL_PROVIDER=sendgrid` |
+| `EMAIL_FROM` | — | Required by **every** real provider; the application refuses to start without it. For SendGrid: a verified Single Sender, or an address on an authenticated domain. ⚠️ An unauthenticated single sender delivers but commonly lands in **spam** — domain authentication (SPF/DKIM) is the fix, and it is a DNS change |
 
 ### 8.3 Project structure (monorepo)
 

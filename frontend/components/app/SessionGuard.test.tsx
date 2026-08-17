@@ -23,6 +23,7 @@ function identity(role: Role, state: OnboardingState): MeResponse {
     user_id: 'u-1',
     email: 'a@example.com',
     full_name: 'Aisha Khan',
+    language_pref: 'en',
     role,
     onboarding_state: state,
     email_verified: true,

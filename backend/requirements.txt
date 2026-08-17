@@ -31,7 +31,9 @@ colorama==0.4.6 ; sys_platform == 'win32'
     #   click
     #   qrcode
 cryptography==50.0.0
-    # via edubridge-backend
+    # via
+    #   edubridge-backend
+    #   sendgrid
 dnspython==2.8.0
     # via email-validator
 email-validator==2.3.0
@@ -56,6 +58,8 @@ idna==3.18
     #   email-validator
     #   httpx
     #   requests
+markupsafe==3.0.3
+    # via werkzeug
 pillow==12.3.0
     # via qrcode
 psycopg==3.3.4
@@ -81,6 +85,8 @@ python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
+python-http-client==3.3.7
+    # via sendgrid
 pyyaml==6.0.3
     # via uvicorn
 qrcode==8.2
@@ -88,6 +94,8 @@ qrcode==8.2
 requests==2.34.2
     # via resend
 resend==2.35.0
+    # via edubridge-backend
+sendgrid==6.12.5
     # via edubridge-backend
 sqlalchemy==2.0.51
     # via edubridge-backend
@@ -121,3 +129,5 @@ watchfiles==1.2.0
     # via uvicorn
 websockets==17.0.1
     # via uvicorn
+werkzeug==3.1.8
+    # via sendgrid

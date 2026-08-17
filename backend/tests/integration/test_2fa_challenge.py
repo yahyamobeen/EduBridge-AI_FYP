@@ -10,6 +10,7 @@ Tests the verification lifecycle:
 - /auth/2fa/resend (email_otp only)
 """
 
+from datetime import datetime
 from uuid import uuid4
 
 import pyotp
@@ -66,8 +67,35 @@ def _enroll_and_activate_totp(client, db, user_id: str) -> tuple[str, list[str]]
         "/api/auth/2fa/confirm",
         json={"code": totp.now(), "enrollment_token": enroll_token},
     )
-    assert resp2.status_code == 200
+    assert resp2.status_code == 200, resp2.text
     return secret, resp2.json()["backup_codes"]
+
+
+def _challenge_code(secret: str) -> str:
+    """
+    A TOTP code for the NEXT time step, for use at `/2fa/verify`.
+
+    Confirm records the counter it consumed as `last_used_counter`
+    (`TestEnrolmentCodeCannotBeReplayed` in test_2fa_hardening.py), so a
+    challenge presenting `totp.now()` in the same 30-second window is refused as
+    a replay — correctly, and that is the security property `d0ed717` added.
+    Because enrolment and challenge here are consecutive in-process calls, they
+    almost always land in that one window, which is why three tests in this file
+    failed for a reason that was a feature.
+
+    THE NEXT STEP RATHER THAN THE PREVIOUS ONE, deliberately. Both leave an
+    unconsumed counter, but a code one step BEHIND sits at the trailing edge of
+    the server's ±1 window: any latency that crosses a boundary pushes it out and
+    the request fails. A code one step AHEAD survives the server being 0, 1 or 2
+    steps later — latency only moves it toward the middle of the window. The
+    behind-version passed in isolation and failed inside the full 11-minute run,
+    which is exactly the flakiness this avoids.
+
+    `counter_offset` rather than arithmetic on a datetime, because subtracting
+    from an AWARE datetime and letting pyotp run it through `time.mktime`
+    reintroduces the local-versus-UTC confusion that finding D7 is about.
+    """
+    return pyotp.TOTP(secret).at(datetime.now(), 1)
 
 
 def _get_pending_token(db, user_id: str) -> str:
@@ -82,8 +110,7 @@ class TestVerifyTotp:
         secret, _ = _enroll_and_activate_totp(client, db, user_id)
 
         pending_token = _get_pending_token(db, user_id)
-        totp = pyotp.TOTP(secret)
-        code = totp.now()
+        code = _challenge_code(secret)
 
         resp = client.post(
             "/api/auth/2fa/verify",
@@ -131,12 +158,11 @@ class TestVerifyRejectsEnrollmentToken:
             db, user_id, kind=TokenKind.two_factor_enrollment, ttl_seconds=900
         )
 
-        totp = pyotp.TOTP(secret)
         resp = client.post(
             "/api/auth/2fa/verify",
             json={
                 "pending_token": enrollment_token,
-                "code": totp.now(),
+                "code": _challenge_code(secret),
                 "type": "totp",
             },
         )
@@ -233,8 +259,7 @@ class TestTotpReplayGuard:
         secret, _ = _enroll_and_activate_totp(client, db, user_id)
 
         pending_token1 = _get_pending_token(db, user_id)
-        totp = pyotp.TOTP(secret)
-        code = totp.now()
+        code = _challenge_code(secret)
 
         # First use should succeed
         resp1 = client.post(
@@ -358,17 +383,35 @@ class TestPendingTokenExpired:
         user_id = _make_user(db, unique_email("pending-expired"))
         secret, _ = _enroll_and_activate_totp(client, db, user_id)
 
-        # Issue an already-expired token
+        # EXPIRED BY AN HOUR, NOT BY A SECOND — and the difference is the whole
+        # test.
+        #
+        # `app.start_2fa_challenge` filters on `t.expires_at > now()`, and in
+        # PostgreSQL `now()` is `transaction_timestamp()`. This suite runs every
+        # test inside ONE outer transaction (conftest), so `now()` is pinned to
+        # the moment that transaction opened and does not advance — measured:
+        # zero movement across three real seconds, while `clock_timestamp()`
+        # moved 3.24.
+        #
+        # `issue_challenge_token` computes `expires_at` in PYTHON, off the wall
+        # clock. With `ttl_seconds=-1` that is `wall_clock - 1s` — and since the
+        # enrolment above takes several seconds of argon2 and HTTP, it lands
+        # AFTER the transaction started. The token read as live, the endpoint
+        # returned 200, and this assertion only passed because an unrelated
+        # replay-guard failure was answering 401 first.
+        #
+        # An hour is past any plausible transaction start, so the row is filtered
+        # in both the harness and production. Production was never affected:
+        # there each request is its own transaction and `now()` tracks the clock.
         pending_token = issue_challenge_token(
-            db, user_id, kind=TokenKind.two_factor_pending, ttl_seconds=-1
+            db, user_id, kind=TokenKind.two_factor_pending, ttl_seconds=-3600
         )
 
-        totp = pyotp.TOTP(secret)
         resp = client.post(
             "/api/auth/2fa/verify",
             json={
                 "pending_token": pending_token,
-                "code": totp.now(),
+                "code": _challenge_code(secret),
                 "type": "totp",
             },
         )

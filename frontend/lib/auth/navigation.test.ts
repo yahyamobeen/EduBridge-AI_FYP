@@ -62,6 +62,11 @@ describe('the map itself', () => {
     expect(navFor('student')[0]?.href).toBe('/dashboard')
     expect(navFor('teacher')[0]?.href).toBe('/teacher')
     expect(navFor('parent')[0]?.href).toBe('/parent')
+    // `admin` was missing here while the href test below allow-listed it, so
+    // NEITHER test covered the admin row — which is how finding A6 survived: the
+    // role routes to /admin, and no such page exists. The page is built in
+    // phase 1b; this assertion is the one that should have caught it.
+    expect(navFor('admin')[0]?.href).toBe('/admin')
   })
 
   it('gives every item a translated label in all three locales', async () => {
@@ -83,8 +88,42 @@ describe('the map itself', () => {
   it('routes every non-dashboard item somewhere that exists', () => {
     // Each must be either a built route or a coming-soon slug; `href="#"` and
     // bare paths that 404 are both regressions.
+    //
+    // ⚠️ `settings` JOINED THE BUILT LIST IN PHASE 7, and this test is how that
+    //    was noticed rather than discovered in a browser: pointing the nav at
+    //    `/settings` failed here naming the item, and the alternation was only
+    //    widened afterwards. A route added to this regex before it exists is a
+    //    404 this test then certifies as fine, so the order matters.
     for (const item of Object.values(NAV_BY_ROLE).flat()) {
-      expect(item.href, item.key).toMatch(/^\/(dashboard|teacher|parent|admin|coming-soon\/)/)
+      expect(item.href, item.key).toMatch(
+        /^\/(dashboard|teacher|parent|admin|settings|coming-soon\/)/,
+      )
     }
+  })
+
+  it('points every coming-soon link at a slug that is actually prerendered', async () => {
+    /*
+      THE GAP THE TEST ABOVE LEAVES. A regex on the prefix accepts
+      `/coming-soon/anything`, so adding a nav entry without appending its slug
+      to the page's SLUGS list passes it and then 404s in the browser — the
+      runtime membership check at `[slug]/page.tsx` calls `notFound()` on
+      anything absent. Two of the four administrator entries added in phase 1b
+      needed new slugs, which is exactly the mistake this catches.
+
+      `generateStaticParams` is read rather than the SLUGS constant because it
+      is the module's real export, and because it is the same function Next
+      itself uses to decide what gets built. A slug that is in the list but not
+      in the prerender is equally broken.
+    */
+    const page = await import('@/app/[locale]/(site)/coming-soon/[slug]/page')
+    const prerendered = new Set(page.generateStaticParams().map((p) => p.slug))
+
+    const linked = Object.values(NAV_BY_ROLE)
+      .flat()
+      .map((i) => i.href)
+      .filter((href) => href.startsWith('/coming-soon/'))
+      .map((href) => href.slice('/coming-soon/'.length))
+
+    for (const slug of linked) expect(prerendered, slug).toContain(slug)
   })
 })

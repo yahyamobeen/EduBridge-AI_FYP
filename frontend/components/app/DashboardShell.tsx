@@ -7,6 +7,7 @@ import { ArrowIcon } from '@/components/ui/Icon'
 import { Link, useRouter } from '@/i18n/navigation'
 import { logout } from '@/lib/api/endpoints'
 import type { MeResponse } from '@/lib/api/types'
+import { avatarInitial, displayName } from '@/lib/auth/displayName'
 import { navFor, ROLE_ACCENT } from '@/lib/auth/navigation'
 
 /**
@@ -40,11 +41,30 @@ export function DashboardShell({
 
   const items = navFor(me.role)
   const accent = ROLE_ACCENT[me.role]
-  const initial = me.full_name.trim().charAt(0).toUpperCase() || '?'
+  const initial = avatarInitial(me)
 
+  /**
+   * The redirect must happen on BOTH paths.
+   *
+   * `logout()` clears the in-memory session in a `finally` and then RE-THROWS,
+   * deliberately — dropping the local session matters more than the server call
+   * succeeding. Awaiting it without a `catch` meant a network failure threw
+   * here, `router.replace` never ran, and the dashboard stayed on screen fully
+   * rendered, because `me` is already in state and `SessionGuard` has already
+   * passed. The user clicked "sign out", nothing changed, and on the shared
+   * devices prd.md §3.1 describes they walk away from a page still showing
+   * their name and their child's progress.
+   */
   async function signOut() {
-    await logout()
-    router.replace('/login')
+    try {
+      await logout()
+    } catch {
+      // Nothing to recover: the token is already gone. Swallowed rather than
+      // surfaced, because the user asked to leave and the next screen is the
+      // sign-in page either way.
+    } finally {
+      router.replace('/login')
+    }
   }
 
   const nav = (
@@ -61,7 +81,9 @@ export function DashboardShell({
           {initial}
         </span>
         <div className="min-w-0">
-          <p className="truncate font-headline text-body-lg text-on-surface">{me.full_name}</p>
+          <p className="truncate font-headline text-body-lg text-on-surface">
+            {displayName(me)}
+          </p>
           <p className="truncate text-body-sm text-on-surface-variant">{subtitle}</p>
         </div>
       </div>

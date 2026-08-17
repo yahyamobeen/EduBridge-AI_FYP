@@ -1,0 +1,940 @@
+<!--
+  EDUBRIDGE AI ARCHITECTURE DOC — Backend Architecture page
+  Shared shell <head> / CSS / topbar copied verbatim from the in-house pattern at
+  MySwiftlyApp/swiftly-back-end/Architecture, with two deliberate departures:
+    * Mermaid is VENDORED locally (assets/mermaid.min.js), never a CDN — this
+      project is demonstrated in a viva room and an unreliable network must not
+      cost us a diagram.
+    * The nav points at this repository's four pages.
+  Parallel to architecture.md, NOT generated from it. The Markdown reads
+  anywhere; this page carries the diagrams.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Backend Architecture · EduBridge AI Architecture</title>
+<script src="assets/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      darkMode: true,
+      background: '#0d1117',
+      primaryColor: '#15323b',
+      primaryBorderColor: '#2596be',
+      primaryTextColor: '#e6edf3',
+      // ER attribute rows: Mermaid's base theme leaves these light, which put
+      // near-white text on a near-white row and made every column unreadable.
+      attributeBackgroundColorOdd: '#161b22',
+      attributeBackgroundColorEven: '#1c2230',
+      lineColor: '#5b93a3',
+      secondaryColor: '#21262d',
+      tertiaryColor: '#161b22',
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true, nodeSpacing: 45, rankSpacing: 55 },
+    er: { layoutDirection: 'TB', entityPadding: 10 }
+  });
+</script>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --border:#30363d;
+    --text:#c9d1d9; --head:#e6edf3; --muted:#8b949e; --teal:#2596be; --teal-dim:#15323b;
+    --green:#3fb950; --amber:#d29922; --red:#f85149; --purple:#a371f7; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,.mono{font-family:var(--mono);font-size:.86em}
+  .topbar{position:sticky;top:0;z-index:20;background:rgba(13,17,23,.92);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .topbar .brand{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--head);font-size:16px;white-space:nowrap}
+  .topbar .brand .dot{width:11px;height:11px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .nav{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  .nav a{padding:5px 11px;border-radius:7px;font-size:13px;color:var(--muted);border:1px solid transparent}
+  .nav a:hover{background:var(--panel);color:var(--head);text-decoration:none}
+  .nav a.active{background:var(--teal-dim);color:#9fdcef;border-color:var(--teal)}
+  .container{max-width:1180px;margin:0 auto;padding:34px 28px 90px}
+  h1{color:var(--head);font-size:30px;margin:0 0 6px;letter-spacing:-.4px}
+  h2{color:var(--head);font-size:22px;margin:42px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{color:var(--head);font-size:17px;margin:28px 0 8px}
+  .subtitle{color:var(--muted);font-size:16px;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:12.5px;font-family:var(--mono);margin-bottom:26px}
+  .prose p{margin:10px 0}
+  section{margin-bottom:10px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin:18px 0}
+  .diagram{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:24px;margin:20px 0;overflow-x:auto}
+  .mermaid{display:flex;justify-content:center}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:10px 2px 0}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .swatch{width:13px;height:13px;border-radius:4px;display:inline-block;border:1px solid var(--border)}
+  .ln{color:var(--amber);font-family:var(--mono);font-size:.84em}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--head);background:var(--panel-2);font-weight:600;position:sticky;top:0}
+  tr:hover td{background:rgba(37,150,190,.05)}
+  td code{color:#9fdcef}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11.5px;font-family:var(--mono);
+    background:var(--teal-dim);color:#9fdcef;border:1px solid var(--teal)}
+  .pill.opus{background:#2a1d3d;color:#c8a6f5;border-color:var(--purple)}
+  .pill.sonnet{background:#15323b;color:#9fdcef;border-color:var(--teal)}
+  .pill.haiku{background:#1d2e1f;color:#7ee787;border-color:var(--green)}
+  .callout{border-left:3px solid var(--teal);background:var(--teal-dim);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
+  .callout.warn{border-color:var(--amber);background:#2b220c}
+  .callout.warn strong{color:var(--amber)}
+  .callout.danger{border-color:var(--red);background:#2d1314}
+  .callout .t{font-weight:700;color:var(--head);display:block;margin-bottom:3px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin:18px 0}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+  .stat .n{font-size:26px;font-weight:700;color:var(--teal);font-family:var(--mono)}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:2px}
+  details{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:4px 16px;margin:10px 0}
+  summary{cursor:pointer;padding:10px 0;color:var(--head);font-weight:600}
+  pre{background:#0a0e14;border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:12.5px;color:#b9c2cc}
+  blockquote{margin:14px 0;padding:2px 16px;border-left:3px solid var(--muted);color:var(--muted);font-style:italic}
+  footer{border-top:1px solid var(--border);color:var(--muted);font-size:12.5px;padding:22px 28px;text-align:center}
+  .offline-note{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span> EduBridge AI Architecture</div>
+    <nav class="nav">
+      <a href="README.md">Index</a>
+      <a href="architecture.html" class="active">Architecture</a>
+      <a href="database.html">Database</a>
+      <a href="api-endpoints.md">API endpoints</a>
+    </nav>
+  </div>
+  <div class="container">
+    <h1>Backend Architecture</h1>
+    <p class="subtitle">The layers a request falls through, the two-layer authorization model and where it currently fails,
+    the seven token kinds, the onboarding state machine and the parental-consent gate.</p>
+    <p class="meta">Snapshot 2026-08-15 · Source of truth: the code · every count records the command that produced it ·
+    keep in sync per <code>backend/CLAUDE.md</code></p>
+
+    <div class="callout">
+      <span class="t">Acronyms, expanded once</span>
+      API — Application Programming Interface · RLS — Row-Level Security · RBAC — Role-Based Access Control ·
+      JWT — JSON Web Token · TOTP — Time-based One-Time Password · OTP — One-Time Password · TTL — Time To Live ·
+      CORS — Cross-Origin Resource Sharing · ORM — Object-Relational Mapper · SQL — Structured Query Language ·
+      HMAC — Hash-based Message Authentication Code · MCP — Model Context Protocol ·
+      HSTS — HTTP Strict Transport Security.
+    </div>
+
+    <section class="prose">
+      <h2>Overview</h2>
+      <p>The backend is a <strong>single FastAPI application with one router</strong>. All server logic lives under
+      <code>backend/app/</code>: <code>app/auth/</code> (the router, the service layer, dependencies, tokens, the gate,
+      the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/core/</code> (configuration, the
+      database engines and the per-transaction user binding, the error envelope, the rate limiter) and
+      <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
+      <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
+      <code>supabase/migrations/</code> rather than by the ORM. Authentication is <strong>application-managed</strong> —
+      Supabase Auth is not used, so <code>auth.uid()</code> does not exist and every Row-Level Security policy reads
+      <code>app.current_user_id()</code> instead. The frontend is a separate Next.js application in the same repository
+      that talks to this backend over HTTP.</p>
+
+      <div class="grid">
+        <div class="stat"><div class="n">26</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">1</div><div class="l">router · <code>app/auth/routes.py</code> <span class="ln">:79</span></div></div>
+        <div class="stat"><div class="n">17</div><div class="l">implemented routes · <code>grep -c "^@router\." backend/app/auth/routes.py</code></div></div>
+        <div class="stat"><div class="n">31</div><div class="l">specified but missing · 48 in <code>tdd.md</code> §3.1 + §7.2, minus 17</div></div>
+        <div class="stat"><div class="n">11</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">25</div><div class="l">test files · 10 unit + 15 integration</div></div>
+      </div>
+
+      <div class="callout warn">
+        <span class="t">Scaffolded, no implementation</span>
+        <code>ml/</code>, <code>mcp-servers/</code>, <code>infra/</code> and <code>backend/app/workers/</code> contain
+        <strong>only <code>.gitkeep</code> placeholders plus an <code>.env.example</code> in two of them</strong> —
+        directory structure, no code. That matters when reading <code>tdd.md</code>: §3.3 (Skills and MCP), §3.8 (the
+        curriculum pipeline) and §2.2's machine-learning serving stack describe systems whose directories exist and
+        whose implementation does not.
+        <pre>find ml mcp-servers infra backend/app/workers -type f
+  backend/app/workers/.gitkeep      mcp-servers/ocr/.gitkeep
+  infra/.env.example                mcp-servers/stt/.gitkeep
+  infra/deploy/.gitkeep             mcp-servers/translation/.gitkeep
+  infra/docker/.gitkeep             mcp-servers/tts_avatar/.gitkeep
+  mcp-servers/.env.example          mcp-servers/web_search/.gitkeep
+  ml/eval/.gitkeep                  ml/serving/.gitkeep</pre>
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>The layers</h2>
+      <p>A request falls through seven layers. Nothing skips a layer, and the order is load-bearing at three points:
+      the rate limiter runs before any password hash; the <code>authenticated</code> dependency binds the user before it
+      reads the user's own row; and the transaction that carries that binding is the one the service code runs inside.</p>
+
+      <div class="diagram">
+        <div class="mermaid">
+flowchart TB
+  CL["Client<br/><span class='ln'>Next.js frontend · same repo · HTTP</span>"]
+  subgraph L1["1-2 · Middleware"]
+    CORS["CORSMiddleware<br/><span class='ln'>main.py:61 · allow_credentials, never '*'</span>"]
+    RC["request_context<br/><span class='ln'>main.py:69 · X-Request-ID + 3 security headers</span>"]
+  end
+  subgraph L3["3 · Route — the ONLY router"]
+    R["app/auth/routes.py<br/><span class='ln'>:79 · 17 routes · mounted at /api</span>"]
+    H["GET /health<br/><span class='ln'>main.py:86 · outside /api, unlimited</span>"]
+  end
+  subgraph L4["4 · Rate limit"]
+    RL["enforce(...)<br/><span class='ln'>core/ratelimit.py:117 · in-process, single instance</span>"]
+  end
+  subgraph L5["5 · Identity"]
+    AU["authenticated<br/><span class='ln'>auth/dependencies.py:29 · binds app.current_user_id</span>"]
+    RR["require_role<br/><span class='ln'>dependencies.py:108</span>"]
+    RG["require_guardian_verified<br/><span class='ln'>dependencies.py:158 · NO route yet</span>"]
+  end
+  subgraph L6["6 · Service"]
+    SV["app/auth/service.py<br/><span class='ln'>26 functions</span>"]
+    GT["gate.py · onboarding.py<br/><span class='ln'>pure, no DB imports</span>"]
+  end
+  subgraph L7["7 · Data"]
+    TX["SQLAlchemy Core text() · bound params<br/><span class='ln'>no string interpolation anywhere</span>"]
+    PG["PostgreSQL as app_backend<br/><span class='ln'>NOBYPASSRLS · verified at boot main.py:37</span>"]
+    SD["app.* SECURITY DEFINER<br/><span class='ln'>24 functions · pre-auth only</span>"]
+  end
+  CL --> CORS --> RC --> R
+  RC --> H
+  R --> RL --> AU
+  AU --> RR --> SV
+  AU --> RG
+  AU --> SV
+  SV --> GT
+  SV --> TX --> PG
+  SV --> SD --> PG
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b"></span> layer boundary (subgraph)</span>
+          <span><span class="swatch" style="background:#2596be"></span> request path</span>
+          <span><span class="ln">file:line</span> source reference</span>
+        </div>
+        <div class="offline-note">Diagrams render with Mermaid from <code>assets/mermaid.min.js</code>, vendored locally on purpose —
+        this page must render in a viva room with the network disabled.</div>
+      </div>
+
+      <h3>1 · CORS <span class="ln">main.py:61</span></h3>
+      <p><code>allow_origins</code> comes from <code>settings.cors_origins</code> with
+      <code>allow_credentials=True</code>. The comment at <code>main.py:57-60</code> records why a wildcard is refused:
+      with credentials enabled Starlette does <strong>not</strong> send a literal <code>*</code>, it echoes the
+      requesting origin back — so a wildcard would let any site make credentialed calls, and the refresh cookie is a
+      credential. <code>Settings._production_is_actually_hardened</code> <span class="ln">core/config.py:159</span>
+      raises at startup if <code>"*"</code> appears in production.</p>
+
+      <div class="callout danger">
+        <span class="t">Known defect D4 — 500 responses bypass CORS and every security header</span>
+        The catch-all handler at <code>core/errors.py:138</code> returns its <code>JSONResponse</code> in a way that does
+        not re-enter the CORS layer, so a browser sees an opaque network failure rather than the
+        <code>INTERNAL_ERROR</code> envelope. Recorded, not yet fixed.
+      </div>
+
+      <h3>2 · Request-context middleware <span class="ln">main.py:69</span></h3>
+      <p>One <code>uuid4</code> per request on <code>request.state.request_id</code>, echoed as
+      <code>X-Request-ID</code> and attached to the body of any 500 <span class="ln">errors.py:152</span>. It also sets
+      <code>X-Content-Type-Options: nosniff</code>, <code>X-Frame-Options: DENY</code> and
+      <code>Referrer-Policy: no-referrer</code>.</p>
+      <p><strong>Known defects D15 and E3:</strong> there is no <code>Cache-Control: no-store</code> on token-bearing
+      responses and no HSTS (HTTP Strict Transport Security) header anywhere in <code>main.py</code>.</p>
+
+      <h3>3 · Route <span class="ln">app/auth/routes.py</span></h3>
+      <p>The single router is created at <code>routes.py:79</code> and mounted at <code>settings.api_base_path</code>
+      (default <code>/api</code>) by <code>main.py:84</code>. Handlers are thin — enforce a limit, call one service
+      function, shape the response. The only non-pass-through route logic is the refresh-cookie write, which appears in
+      three handlers <span class="ln">routes.py:119, :188, :220</span>. A standing note sits at the top of the file
+      <span class="ln">routes.py:81-85</span>: <strong>no route depends on <code>get_service_db</code></strong>.</p>
+      <p><code>GET /health</code> is defined on the application rather than the router
+      <span class="ln">main.py:86</span>, so it sits outside <code>/api</code> and outside the limiter.
+      <strong>Known defect D16:</strong> it is unauthenticated, unrate-limited, and reports
+      <code>settings.environment</code> <span class="ln">main.py:91</span>.</p>
+
+      <h3>4 · Rate limiter <span class="ln">core/ratelimit.py:117</span></h3>
+      <p><code>enforce(request, bucket=…, limit=…, subject=…)</code> is the first statement of every rate-limited
+      handler. It is an <strong>in-process fixed-window counter</strong> over a module-level dictionary guarded by a
+      <code>threading.Lock</code> <span class="ln">ratelimit.py:77-78</span>. Its own docstring states the limit of that
+      design, quoted rather than paraphrased:</p>
+      <blockquote>SCOPE, STATED PLAINLY: this is an IN-PROCESS fixed-window counter. It is a real control for a
+      single-process deployment and it is NOT sufficient for several workers or several instances, because each keeps
+      its own counters — N workers means N times the allowance. <code>REDIS_URL</code> is already in the environment
+      template for exactly this reason; moving the store there is the upgrade, and the interface here does not change
+      when it happens. <span class="ln">core/ratelimit.py:9-14</span></blockquote>
+      <p>Two keying strategies <span class="ln">ratelimit.py:81</span>. <strong>Pre-authentication</strong> buckets
+      (<code>register</code>, <code>login</code>, <code>refresh</code>) key on <code>request.client.host</code>; behind a
+      proxy that is the proxy, and <code>X-Forwarded-For</code> is deliberately <em>not</em> trusted because any caller
+      can set it <span class="ln">ratelimit.py:93-96</span>. <strong>Authenticated</strong> buckets pass
+      <code>subject=str(ctx.user_id)</code> so the bucket is per-user — the deployment target is Pakistani school
+      laboratories and mobile carriers, where a whole cohort shares one public address, so an address key would let
+      fifteen students polling the guardian screen exhaust the allowance for the building
+      <span class="ln">ratelimit.py:82-90</span>.</p>
+      <p>The 2FA endpoints carry a second, per-account layer: the address ceilings are deliberately loose and the real
+      bound is <code>enforce_subject</code> <span class="ln">ratelimit.py:127</span>, called from inside the service once
+      a token has identified whose account it is <span class="ln">service.py:720, :802, :923, :1042</span>.</p>
+      <table>
+        <thead><tr><th>Bucket</th><th>Address limit</th><th>Per-account limit</th><th>Defined at</th></tr></thead>
+        <tbody>
+          <tr><td><code>login</code></td><td>10 / 60 s</td><td>—</td><td><span class="ln">ratelimit.py:39</span></td></tr>
+          <tr><td><code>register</code></td><td>5 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:40</span></td></tr>
+          <tr><td><code>refresh</code></td><td>30 / 60 s</td><td>—</td><td><span class="ln">ratelimit.py:41</span></td></tr>
+          <tr><td><code>guardian_status</code></td><td>60 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:47</span></td></tr>
+          <tr><td><code>guardian_invite</code></td><td>5 / 300 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:48</span></td></tr>
+          <tr><td><code>guardian_confirm</code></td><td>10 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:49</span></td></tr>
+          <tr><td><code>2fa_enroll</code></td><td>60 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:61, :72</span></td></tr>
+          <tr><td><code>2fa_confirm</code></td><td>100 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:62, :73</span></td></tr>
+          <tr><td><code>2fa_verify</code></td><td>200 / 300 s</td><td><strong>10 / 300 s</strong></td><td><span class="ln">ratelimit.py:63, :74</span></td></tr>
+          <tr><td><code>2fa_resend</code></td><td>60 / 300 s</td><td><strong>3 / 300 s</strong></td><td><span class="ln">ratelimit.py:64, :75</span></td></tr>
+          <tr><td><code>email_verify</code></td><td>100 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:65</span></td></tr>
+          <tr><td><code>email_resend</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:66</span></td></tr>
+          <tr><td><code>password_forgot</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:67</span></td></tr>
+          <tr><td><code>password_reset</code></td><td>60 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:68</span></td></tr>
+        </tbody>
+      </table>
+      <p><code>rate_limited_with_retry</code> <span class="ln">ratelimit.py:135</span> puts a real
+      <code>retry_after</code> into <code>details</code> so the client's countdown is honest.
+      <strong>Known defect E3:</strong> it goes into the JSON body, not the HTTP <code>Retry-After</code> header that
+      <code>tdd.md</code> §7.3 specifies.</p>
+
+      <h3>5 · The <code>authenticated</code> dependency <span class="ln">auth/dependencies.py:29</span></h3>
+      <p>The single dependency for every authenticated route. Read the bearer credentials
+      <span class="ln">dependencies.py:17</span>; verify the JWT and require <code>type == "access"</code>
+      <span class="ln">auth/security.py:92</span>; open a session; <strong>bind first, read second</strong>
+      <span class="ln">dependencies.py:66</span>; read <code>status, role FROM app_user</code>
+      <span class="ln">dependencies.py:68-75</span>; yield the <code>AuthContext</code>
+      <span class="ln">dependencies.py:20, :82</span>; commit, or roll back on any exception
+      <span class="ln">dependencies.py:83-86</span>.</p>
+      <p>Three dependencies wrap it, none of which opens a privileged connection:</p>
+      <table>
+        <thead><tr><th>Dependency</th><th>file:line</th><th>Purpose</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>require_role(*roles)</code></td><td><span class="ln">dependencies.py:108</span></td><td>Role gate; 403 <code>FORBIDDEN_SCOPE</code></td><td>the three guardian routes</td></tr>
+          <tr><td><code>require_subject_scope</code></td><td><span class="ln">dependencies.py:123</span></td><td>Teacher must hold a <code>teacher_subject_scope</code> row for the path's <code>{subject_id}</code></td><td><strong>no route yet</strong></td></tr>
+          <tr><td><code>require_guardian_verified</code></td><td><span class="ln">dependencies.py:158</span></td><td>The parental-consent gate</td><td><strong>no route yet</strong></td></tr>
+        </tbody>
+      </table>
+
+      <h3>6 · Service layer <span class="ln">app/auth/service.py</span></h3>
+      <p>One module, 26 functions, no classes; every function takes the <code>Session</code> first. Two explicit commits
+      sit inside otherwise commit-free requests, and both are deliberate: <code>refresh()</code> commits <em>before</em>
+      raising after a token-reuse detection <span class="ln">service.py:386</span>, because the 401 would otherwise
+      unwind through <code>get_db</code>'s rollback and undo the family revocation; and
+      <code>_record_2fa_failure()</code> commits <span class="ln">service.py:685</span> because a lockout written and not
+      committed is a lockout that never happened.</p>
+
+      <h3>7 · SQLAlchemy Core <code>text()</code> → PostgreSQL</h3>
+      <p>Queries are SQL strings passed to <code>sqlalchemy.text()</code> with <strong>bound parameters</strong>. The ORM
+      declarations exist for the few statements that use them (<code>revoke_user_tokens</code>
+      <span class="ln">auth/tokens.py:150</span> is the only ORM write in a request path) and as documentation of a
+      schema the migrations own. There is <strong>no SQL string interpolation anywhere</strong> in the backend —
+      checked across the whole codebase during the Epic 1 review and recorded as verified-correct.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The two-layer authorization model — and its current failure</h2>
+
+      <h3>How the binding works</h3>
+      <p>There is no <code>auth.uid()</code>. Every policy reads <code>app.current_user_id()</code>, which resolves a
+      transaction-scoped PostgreSQL setting the application writes:</p>
+      <pre>session.execute(
+    text("SELECT set_config('app.current_user_id', :uid, true)"),
+    {"uid": str(parsed)},
+)                                              # core/db.py:56-59</pre>
+      <p>Three properties are load-bearing, all documented in <code>set_current_user_id</code>'s own docstring
+      <span class="ln">core/db.py:33-54</span>: <code>is_local =&gt; true</code> is the parameterised equivalent of
+      <code>SET LOCAL</code>, which cannot take a bind parameter, so this is the safe form every other module copies;
+      the setting is <strong>scoped to the transaction</strong>, so a stray <code>commit()</code> mid-request discards it
+      and every query afterwards silently returns zero rows with <strong>no error raised anywhere</strong>; and it is
+      <strong>never called with <code>None</code></strong>, because "unset" is the fail-closed default and must stay
+      reachable only by not calling the function at all.</p>
+      <table>
+        <thead><tr><th>Session factory</th><th>file:line</th><th>User bound?</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>get_db</code></td><td><span class="ln">core/db.py:62</span></td><td>No — every owner-scoped policy denies</td><td>unauthenticated routes; <code>register</code> binds the id it is about to create <span class="ln">service.py:120</span></td></tr>
+          <tr><td><code>authenticated</code></td><td><span class="ln">auth/dependencies.py:29</span></td><td>Yes, from the verified token</td><td>every authenticated route</td></tr>
+          <tr><td><code>get_service_db</code></td><td><span class="ln">core/db.py:86</span></td><td><strong>Bypasses RLS entirely</strong></td><td>background jobs only — <strong>no route depends on it</strong></td></tr>
+        </tbody>
+      </table>
+      <p>The application <strong>refuses to start</strong> if its own connection can bypass Row-Level Security.
+      <code>assert_backend_role_cannot_bypass_rls</code> <span class="ln">core/db.py:119</span> queries
+      <code>rolsuper, rolbypassrls</code> and raises <code>UnsafeDatabaseRoleError</code>
+      <span class="ln">core/db.py:103</span>. Being unable to <em>check</em> is also a refusal, reported separately as
+      <code>DatabaseUnreachableError</code> <span class="ln">core/db.py:107</span> — the two mean opposite things and
+      need different responses from whoever reads the log. Wired into the lifespan at
+      <span class="ln">main.py:37</span>.</p>
+
+      <h3>What Card 1.5 promises</h3>
+      <blockquote>As a security administrator, I want each request checked by the application and again by the database,
+      so that a single missed check can never expose another student's data.
+      <span class="ln">user-stories.md:134-135</span></blockquote>
+
+      <div class="callout danger">
+        <span class="t">The database layer does not currently hold</span>
+        <strong>The second layer would not catch a missed application check.</strong> The Epic 1 database sweep produced
+        nineteen findings (B1–B19) that together mean <strong>the application layer is holding alone</strong>. The full
+        policy catalogue — table, policy, verb, <code>USING</code>, <code>WITH CHECK</code> — and the detail of every one
+        of these findings live on the <a href="database.html">database page</a>. This page records the consequence:
+        wherever a section below says a read or write "runs under Row-Level Security", that is a true statement about the
+        <em>mechanism</em>, not a claim that the policy would refuse a request the application should have refused.
+        Until the B-series is fixed, treat every application-layer check in <code>dependencies.py</code> and
+        <code>service.py</code> as the <strong>only</strong> check.
+      </div>
+
+      <table>
+        <thead><tr><th>#</th><th>Finding</th><th>Effect on the second layer</th></tr></thead>
+        <tbody>
+          <tr><td>B1</td><td><code>two_factor_status_v</code> is a <strong>view</strong>, so the RLS-enablement loop (reading <code>pg_tables</code>) never saw it; <code>GRANT … ON ALL TABLES</code> includes views; no <code>security_invoker</code>, so it runs as owner</td><td>Every account's two-factor method, lockout state and backup-code count is readable</td></tr>
+          <tr><td>B2</td><td>Grants are <strong>table-wide</strong></td><td>Row-Level Security gives <strong>no column protection on any table</strong></td></tr>
+          <tr><td>B3</td><td><code>app_user_self_update</code> permits self-writes to <code>role</code>, <code>email_verified_at</code>, <code>status</code>, <code>password_hash</code></td><td>A user can promote themselves to administrator</td></tr>
+          <tr><td>B4</td><td><code>student_profile_write</code> is <code>FOR ALL</code></td><td><code>class_level</code> — the input to the parental-consent gate — is student-writable</td></tr>
+          <tr><td>B5</td><td><code>subscription_owner</code> is <code>FOR ALL</code></td><td>A user can set their own <code>status='active'</code></td></tr>
+          <tr><td>B6</td><td><code>auth_token_owner</code> is <code>FOR ALL</code></td><td>Revocation is reversible — logout, password reset and theft response are all undoable</td></tr>
+          <tr><td>B7</td><td>Five attempt / mastery / coverage / readiness policies are <code>FOR ALL</code></td><td>Every number a parent or teacher reads is student-writable</td></tr>
+          <tr><td>B13</td><td>Six curriculum policies were changed to <code>USING (true)</code></td><td>The bound-user requirement was dropped</td></tr>
+          <tr><td>B15</td><td><code>reqlog_insert</code> is <code>WITH CHECK (true)</code></td><td>The operational log the admin panel reads is forgeable</td></tr>
+          <tr><td>B19</td><td>RLS enablement is a one-shot loop while grants are forward-looking</td><td>Every future table is granted automatically and protected only if someone remembers</td></tr>
+        </tbody>
+      </table>
+      <p>B8–B12, B14 and B16–B18 concern the classroom, quiz and OAuth tables and are catalogued on the
+      <a href="database.html">database page</a>.</p>
+
+      <div class="callout">
+        <span class="t">What did hold — recorded so nobody re-audits it</span>
+        <strong>Card 1.5's chat-privacy invariant holds.</strong> <code>chat_session</code>, <code>message</code> and
+        <code>visual_aid</code> are owner-only with no teacher, parent or admin path, and no privileged function touches
+        them. <strong>Every</strong> <code>SECURITY DEFINER</code> function carries <code>SET search_path</code> — see the
+        <a href="database.html">database page</a> for the measured count and the per-function catalogue. Turnstile fails closed.
+        There is no SQL string interpolation and no hardcoded secret anywhere.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>The <code>SECURITY DEFINER</code> escape hatch</h2>
+      <p>Login and refresh run <strong>before there is a user to bind</strong>, so an owner-scoped policy such as
+      <code>app_user_self_read</code> (<code>USING (id = app.current_user_id())</code>) cannot be satisfied — and unset
+      means zero rows, not an error. The login lookup would return nothing for every account, and the code would read
+      that as "no such user".</p>
+      <p>This is not hypothetical. <code>service.py:313-321</code> records the exact failure it caused: reading
+      <code>two_factor_enrollment</code> directly with no bound user returned zero rows for <em>every</em> account, which
+      login read as "no second factor yet". A user with active TOTP was handed an enrolment token,
+      <code>/2fa/enroll</code> refused because its own read happens after binding and saw the truth, and the account
+      became unreachable <strong>with the correct password and the correct authenticator</strong>.</p>
+      <p>There are two ways out: connect as a role that bypasses Row-Level Security, or expose exactly the columns the
+      flow needs through a <code>SECURITY DEFINER</code> function. The project takes the second.
+      <code>get_service_db</code> exists <span class="ln">core/db.py:86</span> but its docstring says "Background jobs
+      only … Reaching for this from a route almost always means the real answer is a narrow SECURITY DEFINER function
+      instead", and <code>routes.py:81-85</code> records that no route in the file depends on it.</p>
+
+      <div class="callout">
+        <span class="t">The standing rule <span class="ln">backend/README.md:60-61</span></span>
+        <em>"If a new endpoint appears to need the service connection, add another narrow function rather than widening
+        the door."</em> A function that returns four columns for one flow is auditable; a connection that turns every
+        policy off is not. The same instruction appears in the code at <code>core/db.py:20-24</code> and again at
+        <code>routes.py:83-85</code>.
+      </div>
+
+      <p><strong>24 distinct <code>app.*</code> functions, 28 call sites</strong>
+      (<code>grep -rnE "SELECT (\*|[a-z_, ]+) FROM app\.|SELECT app\." backend/app --include=*.py</code>):</p>
+      <table>
+        <thead><tr><th>Function</th><th>Called from</th><th>Flow</th></tr></thead>
+        <tbody>
+          <tr><td><code>app.lookup_user_for_login</code></td><td><span class="ln">service.py:294</span></td><td>login</td></tr>
+          <tr><td><code>app.lookup_2fa_for_login</code></td><td><span class="ln">service.py:324</span></td><td>login</td></tr>
+          <tr><td><code>app.lookup_refresh_token</code></td><td><span class="ln">tokens.py:80</span></td><td>refresh</td></tr>
+          <tr><td><code>app.insert_auth_token</code></td><td><span class="ln">tokens.py:54</span></td><td>every token issuance</td></tr>
+          <tr><td><code>app.revoke_auth_token</code></td><td><span class="ln">tokens.py:119</span></td><td>refresh rotation</td></tr>
+          <tr><td><code>app.revoke_refresh_family</code></td><td><span class="ln">tokens.py:134</span></td><td>reuse detection</td></tr>
+          <tr><td><code>app.lookup_challenge_token</code></td><td><span class="ln">service.py:703, :785</span></td><td>2FA enrol / confirm</td></tr>
+          <tr><td><code>app.start_2fa_challenge</code></td><td><span class="ln">service.py:907, :1028</span></td><td>2FA verify / resend</td></tr>
+          <tr><td><code>app.upsert_2fa_enrollment</code></td><td><span class="ln">service.py:749, :762</span></td><td>2FA enrol</td></tr>
+          <tr><td><code>app.issue_email_otp</code></td><td><span class="ln">service.py:569</span></td><td>email OTP issuance</td></tr>
+          <tr><td><code>app.lookup_email_otp</code></td><td><span class="ln">service.py:840, :958</span></td><td>2FA confirm / verify</td></tr>
+          <tr><td><code>app.activate_2fa</code></td><td><span class="ln">service.py:856</span></td><td>2FA confirm</td></tr>
+          <tr><td><code>app.verify_2fa_success</code></td><td><span class="ln">service.py:994</span></td><td>2FA verify</td></tr>
+          <tr><td><code>app.verify_2fa_failure</code></td><td><span class="ln">service.py:671</span></td><td>failed 2FA attempt</td></tr>
+          <tr><td><code>app.replace_backup_codes</code></td><td><span class="ln">service.py:863</span></td><td>2FA confirm</td></tr>
+          <tr><td><code>app.get_unused_backup_codes</code></td><td><span class="ln">service.py:975</span></td><td>2FA verify by backup code</td></tr>
+          <tr><td><code>app.consume_backup_code</code></td><td><span class="ln">service.py:982</span></td><td>2FA verify by backup code</td></tr>
+          <tr><td><code>app.consume_token_and_verify_email</code></td><td><span class="ln">service.py:1098</span></td><td>email verification</td></tr>
+          <tr><td><code>app.consume_password_reset_token</code></td><td><span class="ln">service.py:1193</span></td><td>password reset</td></tr>
+          <tr><td><code>app.check_token_status</code></td><td><span class="ln">service.py:601</span></td><td><code>INVALID_TOKEN</code> vs <code>TOKEN_EXPIRED</code></td></tr>
+          <tr><td><code>app.lookup_user_for_email_flow</code></td><td><span class="ln">service.py:624</span></td><td>forgot-password / resend</td></tr>
+          <tr><td><code>app.lookup_parent_id_by_email</code></td><td><span class="ln">service.py:1236</span></td><td>guardian invite</td></tr>
+          <tr><td><code>app.reinvite_guardian_link</code></td><td><span class="ln">service.py:1270</span></td><td>guardian re-invite</td></tr>
+          <tr><td><code>app.lookup_guardian_parent_email</code></td><td><span class="ln">service.py:1329</span></td><td>guardian status</td></tr>
+          <tr><td><code>app.confirm_guardian_link</code></td><td><span class="ln">service.py:1357</span></td><td>guardian confirm</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <span class="t">Known defects C1 and C2 — latent, one route signature away</span>
+        Roughly ten of these functions accept a user identifier <strong>without checking it belongs to the caller</strong>.
+        <code>app.insert_auth_token</code> <span class="ln">tokens.py:54</span> mints a token of <em>any</em> kind, for
+        <em>any</em> user, with a <em>caller-chosen hash</em> — a complete authentication bypass if a request-controlled
+        identifier ever reaches it. <code>app.confirm_guardian_link</code> does not check
+        <code>p_parent = app.current_user_id()</code>. Both are latent: the review verified that
+        <strong>no current route passes a request-controlled identifier</strong> to any of them. That is precisely why
+        the rule above is a rule and not a preference.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>The lifecycle of an authenticated request</h2>
+      <p><strong>Two database round trips happen before any business logic</strong>, and they are not interchangeable.
+      The first writes the binding; the second proves the token's subject is a real, active, non-deleted user — and
+      because it runs <em>after</em> the binding, that proof is itself evaluated by Row-Level Security rather than around
+      it. Reversing them would leave the identity check running with no user bound, which returns zero rows and reads as
+      "no such user" for everyone.</p>
+
+      <div class="diagram">
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant M as Middleware<br/>main.py:61,:69
+  participant R as Route<br/>auth/routes.py
+  participant L as Rate limiter<br/>ratelimit.py:117
+  participant A as authenticated<br/>dependencies.py:29
+  participant S as Service<br/>auth/service.py
+  participant D as PostgreSQL<br/>as app_backend
+
+  C->>M: HTTP + Authorization: Bearer JWT
+  M->>R: request_id set on request.state
+  R->>L: enforce(bucket, limit, subject?)
+  Note over L: in-process counter, no I/O<br/>429 RATE_LIMITED if over
+  L->>A: proceed
+  A->>A: decode_access_token — signature + type=="access"<br/>security.py:92 — no database
+  A->>D: ROUND TRIP 1 — SELECT set_config('app.current_user_id', :uid, true)
+  Note over A,D: db.py:56 — BINDS HERE.<br/>Transaction-scoped: a stray commit() discards it<br/>and every later query silently returns zero rows.
+  D-->>A: ok
+  A->>D: ROUND TRIP 2 — SELECT status, role FROM app_user WHERE id = :uid
+  Note over D: evaluated UNDER app_user_self_read<br/>USING (id = app.current_user_id())<br/>dependencies.py:68
+  D-->>A: row or none — none/non-active is 401
+  A-->>R: AuthContext(session, user_id, role) — dependencies.py:82
+  R->>S: one service call, same session
+  S->>D: business queries — same transaction, same binding
+  D-->>S: rows
+  S-->>R: dict
+  R-->>C: 200 + X-Request-ID
+  Note over A: session.commit() dependencies.py:83<br/>rollback on any exception :85 — binding dies with the transaction
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b"></span> in-process, no I/O</span>
+          <span><span class="swatch" style="background:#2596be"></span> database round trip</span>
+          <span class="pill">bind → read → act</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>The seven token kinds</h2>
+      <p><code>TokenKind</code> <span class="ln">app/models/enums.py:54</span> mirrors the PostgreSQL
+      <code>token_kind</code> enumeration. Every one is stored in <code>auth_token</code> as a <strong>keyed hash</strong>,
+      never plaintext: <code>hash_token</code> <span class="ln">auth/security.py:48</span> is HMAC-SHA256 over the token
+      with <code>jwt_refresh_secret</code> as the key. The reason is at <code>service.py:560-562</code> — a six-digit
+      OTP is a million possibilities, and a plain SHA of that space is a rainbow table, whereas an HMAC is useless to
+      anyone holding a database dump but not the application secret.</p>
+      <table>
+        <thead><tr><th>Kind</th><th>Lifetime</th><th>Storage</th><th>Accepted by</th></tr></thead>
+        <tbody>
+          <tr><td><code>refresh</code></td><td><strong>7 days</strong> default <span class="ln">config.py:50</span></td><td><code>auth_token</code>, hashed. Plaintext goes <strong>only</strong> into an httpOnly, path-scoped <code>refresh_token</code> cookie <span class="ln">routes.py:119-132</span> — deliberately absent from the response body <span class="ln">routes.py:133-139</span></td><td><code>POST /api/auth/refresh</code> <em>only</em></td></tr>
+          <tr><td><code>two_factor_enrollment</code></td><td><strong>900 s</strong> <span class="ln">config.py:51</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/enroll</code>, <code>POST /api/auth/2fa/confirm</code></td></tr>
+          <tr><td><code>two_factor_pending</code></td><td><strong>300 s</strong> <span class="ln">config.py:52</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/verify</code>, <code>POST /api/auth/2fa/resend</code></td></tr>
+          <tr><td><code>two_factor_email_otp</code></td><td><strong>600 s</strong> <span class="ln">service.py:95</span></td><td><code>auth_token</code>, hashed. The six-digit code is emailed</td><td><code>POST /api/auth/2fa/confirm</code>, <code>POST /api/auth/2fa/verify</code> — as the <code>code</code> field</td></tr>
+          <tr><td><code>email_verify</code></td><td><strong>3600 s</strong> <span class="ln">service.py:92</span></td><td><code>auth_token</code>, hashed. Plaintext in an emailed link</td><td><code>POST /api/auth/email/verify</code></td></tr>
+          <tr><td><code>password_reset</code></td><td><strong>3600 s</strong> (same constant)</td><td><code>auth_token</code>, hashed. Plaintext in an emailed link</td><td><code>POST /api/auth/password/reset</code></td></tr>
+          <tr><td><code>guardian_invite</code></td><td><strong>7 days</strong> <span class="ln">tokens.py:226</span></td><td><code>auth_token</code>, hashed, with the <strong>student</strong> as <code>user_id</code> — the gate subject, not the redeemer</td><td><code>POST /api/auth/guardian/confirm</code></td></tr>
+        </tbody>
+      </table>
+      <p>Alongside these sit two JWTs, which are <strong>not</strong> rows in <code>auth_token</code> and are
+      <strong>not revocable</strong>:</p>
+      <table>
+        <thead><tr><th>JWT <code>type</code> claim</th><th>Lifetime</th><th>Issued by</th><th>Accepted by</th></tr></thead>
+        <tbody>
+          <tr><td><code>access</code></td><td>15 min default <span class="ln">config.py:49</span></td><td><code>create_access_token</code> <span class="ln">security.py:58</span></td><td>every authenticated route, via <code>decode_access_token</code>'s default <code>expected_type="access"</code> <span class="ln">security.py:92</span></td></tr>
+          <tr><td><code>onboarding</code></td><td>same 15 min</td><td><code>create_onboarding_token</code> <span class="ln">security.py:78</span>; issued by <code>verify_email</code> <span class="ln">service.py:1111-1114</span></td><td><strong>nothing yet</strong> — the default decode requires <code>type == "access"</code>, so it is rejected by every business route including <code>/auth/me</code>. That is the <code>tdd.md</code> §3.1 rule that email verification alone must not become a complete login</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Known defect E2:</strong> an issued access token cannot be revoked. Logout revokes refresh tokens only
+      <span class="ln">service.py:407</span>, so a stolen access token stays valid for the rest of its 15 minutes.</p>
+
+      <h3>Why <code>two_factor_pending</code> and <code>two_factor_enrollment</code> are separate kinds</h3>
+      <p>They were originally the same kind. Migration
+      <code>20260802140100_token_kind_enrollment.sql</code> added the second value, and its header states why:</p>
+      <blockquote>Login issues two different short-lived credentials: an ENROLMENT token (~900 s) for a user who has no
+      second factor yet, which <code>/2fa/enroll</code> and <code>/2fa/confirm</code> accept; a PENDING token (~300 s)
+      for a user who has one, which <code>/2fa/verify</code> exchanges for a FULL SESSION. Both were being stored as kind
+      <code>'two_factor_pending'</code>, so nothing could tell them apart. That means <code>/2fa/verify</code> cannot
+      reject an enrolment token — a longer-lived credential, issued for a weaker purpose, presented at the one endpoint
+      that hands out a session. <span class="ln">20260802140100_token_kind_enrollment.sql:6-16</span></blockquote>
+      <p><strong>The kind is the only thing that can enforce that boundary</strong>, so it has to differ. Three
+      consequences visible in the code:</p>
+      <ol>
+        <li><code>issue_challenge_token</code> <span class="ln">tokens.py:165</span> makes <code>kind</code> a
+        <strong>required</strong> keyword argument and raises <code>ValueError</code> for anything that is not one of the
+        two 2FA kinds <span class="ln">tokens.py:183-184</span>. The caller must say which it means.</li>
+        <li><code>login</code> picks between them on the enrolment's status: enrolment token when there is no active
+        second factor <span class="ln">service.py:348-353</span>, pending token when there is
+        <span class="ln">service.py:360-365</span>.</li>
+        <li><code>/2fa/verify</code> filters on <code>two_factor_pending</code> <em>inside</em>
+        <code>app.start_2fa_challenge</code> <span class="ln">service.py:907-911</span> — in SQL, together with
+        <code>revoked = false</code> and <code>expires_at &gt; now()</code>, which is what makes an enrolment token
+        presented there return zero rows rather than a session.</li>
+      </ol>
+      <p>The migration also records why it is a file of its own: PostgreSQL will not let a value added by
+      <code>ALTER TYPE … ADD VALUE</code> be <em>used</em> in the same transaction, and the Supabase CLI runs each
+      migration in one. A parallel guard exists for the other pair — <code>issue_preauth_token</code>
+      <span class="ln">tokens.py:192</span> accepts only <code>email_verify</code> and <code>password_reset</code> and
+      raises otherwise <span class="ln">tokens.py:213-214</span>.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The onboarding state machine</h2>
+      <p><code>derive_onboarding_state</code> <span class="ln">app/auth/onboarding.py:17</span> is the whole machine:
+      five states, one precedence order, evaluated top to bottom, first match wins. The module is
+      <strong>deliberately free of database and settings imports</strong> <span class="ln">onboarding.py:4-11</span> —
+      this is the single field the frontend routes on and every rule in it is a product decision, so it has to be
+      assertable in <code>tests/unit</code> without a connection string. It mirrors
+      <code>frontend/lib/auth/onboarding.ts</code> on the other side of the contract.</p>
+
+      <div class="diagram">
+        <div class="mermaid">
+flowchart TB
+  START(["identity check<br/><span class='ln'>every /auth/me, every 2FA completion</span>"])
+  Q1{"email_verified?<br/><span class='ln'>onboarding.py:40</span>"}
+  Q2{"two_factor_active?<br/><span class='ln'>onboarding.py:42</span>"}
+  Q3{"guardian_required<br/>AND status != verified?<br/><span class='ln'>onboarding.py:44</span>"}
+  Q4{"student AND subscription<br/>NOT IN trialing, active<br/>(or no row)?<br/><span class='ln'>onboarding.py:46</span>"}
+  S1["1 · email_verification_pending"]
+  S2["2 · two_factor_enrollment_pending"]
+  S3["3 · guardian_link_pending"]
+  S4["4 · plan_selection_pending"]
+  S5["5 · active"]
+  START --> Q1
+  Q1 -- no --> S1
+  Q1 -- yes --> Q2
+  Q2 -- no --> S2
+  Q2 -- yes --> Q3
+  Q3 -- yes --> S3
+  Q3 -- no --> Q4
+  Q4 -- yes --> S4
+  Q4 -- no --> S5
+  S5 -. TRIAL LAPSES — the only backward transition in the system .-> S4
+        </div>
+        <div class="legend">
+          <span><span class="swatch" style="background:#15323b"></span> precedence test</span>
+          <span><span class="swatch" style="background:#2596be"></span> terminal state</span>
+          <span><span class="ln">dotted</span> non-monotonic edge</span>
+        </div>
+      </div>
+
+      <table>
+        <thead><tr><th>Order</th><th>Condition</th><th>State</th><th>file:line</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><code>not email_verified</code></td><td><code>email_verification_pending</code></td><td><span class="ln">onboarding.py:40-41</span></td></tr>
+          <tr><td>2</td><td><code>not two_factor_active</code></td><td><code>two_factor_enrollment_pending</code></td><td><span class="ln">onboarding.py:42-43</span></td></tr>
+          <tr><td>3</td><td><code>guardian_required and guardian_status != "verified"</code></td><td><code>guardian_link_pending</code></td><td><span class="ln">onboarding.py:44-45</span></td></tr>
+          <tr><td>4</td><td>student <strong>and</strong> <code>subscription_status</code> is <code>None</code> or not in <code>{"trialing","active"}</code></td><td><code>plan_selection_pending</code></td><td><span class="ln">onboarding.py:46-49</span></td></tr>
+          <tr><td>5</td><td>otherwise</td><td><code>active</code></td><td><span class="ln">onboarding.py:50</span></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <span class="t">It is NOT monotonic</span>
+        <strong>Rule 4 can fire after a user has already been <code>active</code>.</strong> A student's 14-day trial
+        lapses and they move <em>backwards</em> from <code>active</code> to <code>plan_selection_pending</code>. This is
+        the only backward transition in the system <span class="ln">onboarding.py:34-37</span>, and a consumer that
+        evaluates the state once at session start and caches <code>active</code> will strand that user on a page they no
+        longer have rights to. The state must be re-evaluated on every identity check — which is why <code>me()</code>
+        <span class="ln">service.py:487</span> sits on the hot path and does not cache.
+      </div>
+
+      <p><strong>Rule 4 fails closed.</strong> No subscription row means <em>no access</em>, never "still trialing"
+      <span class="ln">onboarding.py:38-39</span>. Registration therefore inserts the <code>subscription</code> row in
+      the same transaction as the profile <span class="ln">service.py:166-169</span>, leaving <code>status</code> and
+      <code>trial_ends_at</code> to their schema defaults so that
+      <code>DEFAULT (now() + interval '14 days')</code> stays the single definition of trial length.</p>
+
+      <p><strong>One derivation, not four.</strong> <code>onboarding_state_for</code>
+      <span class="ln">service.py:441</span> is the single call site for every endpoint that reports the field. Its
+      docstring <span class="ln">service.py:447-453</span> records that there were previously four copies —
+      <code>/2fa/confirm</code>, <code>/2fa/verify</code> and <code>/email/verify</code> each rebuilt the derivation
+      inline — and that the copies did <strong>not</strong> apply the fail-closed rule in <code>gate.py</code>, so a
+      student with a missing or unreadable <code>student_profile</code> row would be told <code>active</code> by
+      <code>/email/verify</code> and <code>guardian_link_pending</code> by <code>/auth/me</code> in the same session.</p>
+
+      <p><strong>Known defect D13:</strong> <code>onboarding_state</code> is a five-member <code>Literal</code> on
+      <code>MeResponse</code> <span class="ln">schemas.py:228-234</span> and a plain <code>str</code> on four other
+      response models, so only one of the five responses that carry it is validated against the state set.</p>
+    </section>
+
+    <section class="prose">
+      <h2>The guardian gate</h2>
+      <p><code>prd.md</code> §4.3 requires that a Class 9–10 student cannot use the learning endpoints until a parent
+      confirms an out-of-band invitation. <code>user-stories.md:154-175</code> is Card 1.6.</p>
+
+      <h3>The decision is a pure function</h3>
+      <p><code>app/auth/gate.py</code> holds two functions and <strong>no imports at all</strong>:</p>
+      <ul>
+        <li><code>guardian_required(*, is_student, class_level)</code> <span class="ln">gate.py:18</span> — <code>True</code>
+        for a student whose <code>class_level</code> is 9, 10, <strong>or <code>None</code></strong>. Teachers, parents,
+        administrators and Class 11–12 students are never required to link a guardian.</li>
+        <li><code>is_guardian_gate_pending(*, is_student, class_level, guardian_status)</code>
+        <span class="ln">gate.py:38</span> — <code>False</code> when the gate does not apply; otherwise
+        <code>guardian_status != "verified"</code>.</li>
+      </ul>
+      <p>The module is deliberately free of database and settings imports <span class="ln">gate.py:4-8</span>, so the
+      decision is assertable in <code>tests/unit</code> without a connection string — and so that <code>me()</code>
+      <span class="ln">service.py:504</span>, <code>guardian_status()</code> <span class="ln">service.py:1321</span> and
+      <code>require_guardian_verified</code> <span class="ln">dependencies.py:196</span> cannot drift apart on the
+      Class 11–12 rule. All three call the same two functions.</p>
+
+      <h3>Why Row-Level Security cannot express it</h3>
+      <blockquote>The gate is an APPLICATION-layer decision on purpose: "class 9-10 student whose guardian is not
+      verified" is not expressible as a Row Level Security policy (RLS cannot branch on the status of a row in another
+      table per-access). <span class="ln">gate.py:10-12</span></blockquote>
+      <p>A policy is a predicate over <em>the row being accessed</em>. The gate is a predicate over <em>two other</em>
+      rows — the student's <code>student_profile.class_level</code> and the status of a representative
+      <code>guardian_link</code> — and it must hold for tables (<code>chat_session</code>, <code>attempt</code>, and the
+      rest) that have no relationship to either. The database's contribution is narrower and different in kind: the
+      learning tables are student-owner-only anyway, so the gate is about <em>whether the student may act at all</em>,
+      not about <em>whose rows they may touch</em>.</p>
+      <p>This is the clearest example of why the two layers are not redundant copies of one another. Some rules only the
+      application can express; some only the database can enforce — which is exactly why the B-series above matters.
+      Losing one of them is not losing a duplicate.</p>
+
+      <div class="callout warn">
+        <span class="t">Fail-closed on an unreadable class level</span>
+        A student whose <code>class_level</code> is unknown <strong>is gated</strong>: <code>guardian_required</code>
+        returns <code>True</code> for <code>class_level is None</code> <span class="ln">gate.py:35</span>. <code>None</code>
+        means the <code>student_profile</code> row was missing <em>or unreadable</em> — and under Row-Level Security an
+        unreadable row is <strong>indistinguishable from an absent one</strong>, which is also exactly what a forgotten
+        binding looks like. The failure mode of guessing wrong is serving a 14-year-old as though they were 18.
+        The two functions agree on this deliberately: if the gate held while <code>guardian_required</code> reported
+        "not required", <code>onboarding_state</code> would say <code>active</code> while every learning endpoint
+        returned 403 — a student blocked from everything with no screen on which to fix it.
+      </div>
+
+      <p><code>require_guardian_verified</code> <span class="ln">dependencies.py:158</span> supplies the inputs, both
+      read under Row-Level Security as the student: <code>class_level</code> from <code>student_profile</code>
+      <span class="ln">dependencies.py:174-177</span> and the representative guardian status from
+      <code>guardian_link</code>, ordered <code>(status = 'verified') DESC, created_at DESC LIMIT 1</code>
+      <span class="ln">dependencies.py:183-189</span> so a student with several parent links gets the most favourable
+      one. A pending gate raises <code>GATE_PENDING</code> (403) <span class="ln">core/errors.py:73</span>.
+      <strong>It is wired to no route</strong> — the learning endpoints it protects are among the 31 that do not exist.
+      See <a href="api-endpoints.md">api-endpoints.md</a>.</p>
+
+      <h3>The write boundary</h3>
+      <p>Neither participant can write <code>verified</code>. The student's <code>INSERT</code> runs under
+      <code>guardian_link_create</code> as the student <span class="ln">service.py:1261-1268</span>, but the reset to
+      pending goes through <code>app.reinvite_guardian_link</code> <span class="ln">service.py:1270</span>, a privileged
+      function that can only ever write <code>pending</code> (migration <code>20260803090000</code>). The comment at
+      <code>service.py:1252-1260</code> records why widening <code>guardian_link_update</code> is not the fix: a student
+      who can update their own link can set <code>verified</code> and clear their own gate. Confirmation is parent-only
+      at the route <span class="ln">routes.py:335</span>, and the atomic flip lives inside
+      <code>app.confirm_guardian_link</code> <span class="ln">service.py:1357</span>, which returns the status
+      <em>before</em> the transition so the three outcomes can be told apart.</p>
+
+      <div class="callout">
+        <span class="t">A10 and C3 — closed (KAN-21, merged 2026-08-17)</span>
+        <strong>The guardian invitation email is now delivered.</strong> <code>guardian_invite</code>
+        <span class="ln">service.py:1539</span> builds the confirm URL, renders
+        <code>guardian_invite_email</code> <span class="ln">auth/email_templates.py:183</span> and queues it to the
+        parent through <code>send_after_commit</code>, so the message is released only if the transaction that minted
+        the token commits. <strong>The Class 9–10 journey is no longer blocked.</strong>
+        <br><br>
+        C3 closed in the same change, because wiring A10 is what made it reachable:
+        <code>student_name</code> is <code>app_user.full_name</code>, which is length-bounded,
+        character-unrestricted and editable at any time through <code>PATCH /auth/me</code>. Escaping is structural —
+        <code>_wrap</code> escapes the document title, the body escapes text content, and the subject
+        <em>header</em> is flattened rather than entity-escaped, because a newline there forges a header while an
+        entity there is only noise a parent has to read.
+      </div>
+
+      <div class="callout danger">
+        <span class="t">Known defect D3 — still open</span>
+        Closing A10 did <em>not</em> close it. Card 1.6's own failure criterion
+        <span class="ln">user-stories.md:172</span> — "a student satisfies their own gate by registering a throwaway
+        parent account" — remains satisfiable: the student supplies the address, and nothing checks that the account
+        on the other end is a real guardian. Either add something the student cannot self-serve, or amend the card.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Cross-cutting mechanisms</h2>
+
+      <h3>The email seam <span class="ln">app/auth/email.py</span></h3>
+      <p>A <code>Protocol</code> with one method <span class="ln">email.py:36-39</span> and three implementations —
+      <code>LoggingEmailSender</code>, which writes the message <strong>including the one-time code or link</strong> to
+      the logger; <code>SendGridEmailSender</code>, <strong>the chosen provider</strong> since KAN-21; and
+      <code>ResendEmailSender</code>, still supported but unused, whose unverified free tier delivers only to the
+      account owner's own address and so could never reach a real parent. Both real senders import their SDK inside
+      <code>send</code> and ship in one optional extra. <code>get_email_sender</code> picks on
+      <code>settings.email_provider</code>. Logging the body is deliberate
+      <span class="ln">email.py:58-67</span>: the OTP is stored as an HMAC hash, so a code that is neither delivered nor
+      logged cannot be recovered by anyone, and 2FA enrolment by email simply could not be completed on a developer
+      machine. The safety of that decision rests <em>entirely</em> on
+      <code>_production_is_actually_hardened</code> <span class="ln">config.py:166-171</span> refusing to start with
+      <code>EMAIL_PROVIDER=logging</code> in production.</p>
+      <div class="callout warn">
+        <span class="t">Adding a provider is two edits, not one</span>
+        A sender class alone is not enough. <code>email_provider</code> is a <code>Literal</code> in
+        <code>core/config.py</code>, and a value missing from it is <strong>refused at boot</strong> — finding A3's
+        fix working as intended. The class and the Literal must therefore land together, and they did not when
+        KAN-21 merged: git reported no conflict because they are different lines in different files, and the
+        application simply would not start until the Literal was widened.
+        <code>test_config_hardening.py</code> now pins both halves.
+      </div>
+      <p><strong>Dispatch is asynchronous, and that is a security control, not a performance one.</strong>
+      <code>send_async</code> <span class="ln">email.py:167</span> submits to a two-worker
+      <code>ThreadPoolExecutor</code>. The comment at <code>email.py:127-137</code> explains:
+      <code>password/forgot</code> and <code>email/resend</code> must answer identically for a known and an unknown
+      address in <strong>body, status and timing</strong>, and the dummy argon2 verify was equalising the wrong thing —
+      the known-address branch went on to make a synchronous HTTP request to the mail provider, hundreds of milliseconds
+      the unknown-address branch never paid. Anyone with a stopwatch could enumerate the user table.</p>
+
+      <div class="callout danger">
+        <span class="t">Known defects A3, D1 and D8</span>
+        <code>email_provider</code> is an unvalidated string, so a typo falls through to the logging sender
+        <strong>and</strong> past the production guard at <code>config.py:166</code>, writing every two-factor code and
+        reset link to stdout. Emails are dispatched <strong>before the transaction commits</strong>
+        (<code>service.py:198</code> runs before <code>get_db</code>'s commit), so a rolled-back registration still sends
+        a verification link. The queue leaks a <code>Future</code> per message into <code>_pending</code>
+        <span class="ln">email.py:170</span> and its drain is not atomic.
+      </div>
+
+      <h3>The error envelope <span class="ln">app/core/errors.py</span></h3>
+      <pre>{ "error": { "code": "...", "message": "...", "details": {} } }     # errors.py:109</pre>
+      <p><code>AppError</code> <span class="ln">errors.py:11</span> carries <code>code</code>, <code>message</code>,
+      <code>status_code</code> and <code>details</code>; sixteen factory functions build the catalogued errors
+      (<code>validation_error</code> <span class="ln">:27</span>, <code>unauthenticated</code> <span class="ln">:31</span>,
+      <code>two_factor_locked</code> <span class="ln">:35</span>, <code>email_already_registered</code> <span class="ln">:44</span>,
+      <code>invalid_class_group</code> <span class="ln">:52</span>, <code>rate_limited</code> <span class="ln">:56</span>,
+      <code>captcha_failed</code> <span class="ln">:60</span>, <code>forbidden_scope</code> <span class="ln">:69</span>,
+      <code>gate_pending</code> <span class="ln">:73</span>, <code>self_link_forbidden</code> <span class="ln">:77</span>,
+      <code>guardian_already_linked</code> <span class="ln">:81</span>, <code>invalid_token</code> <span class="ln">:85</span>,
+      <code>guardian_not_found</code> <span class="ln">:89</span>, <code>two_factor_invalid</code> <span class="ln">:93</span>,
+      <code>pending_token_expired</code> <span class="ln">:97</span>, <code>token_expired</code> <span class="ln">:105</span>).</p>
+      <p><strong>No endpoint invents a code.</strong> <code>tdd.md</code> §7.3 states the rule and the code follows it at
+      <code>service.py:1057-1065</code>: <code>/2fa/resend</code> against a TOTP enrolment answers
+      <code>400 VALIDATION_ERROR</code> with <code>details.fields</code>, not a bespoke <code>INVALID_METHOD</code>,
+      because a code outside the catalogue reaches the client as an unrecognised string and renders as "something went
+      wrong".</p>
+      <p>Three handlers are registered <span class="ln">errors.py:170-173</span>. The catch-all
+      <span class="ln">errors.py:138</span> <strong>logs the exception</strong> — which it previously did not — and
+      returns a body that says nothing beyond the request id, because a stack or a database message can carry an email
+      address, a token fragment or an internal path <span class="ln">errors.py:145-150</span>.</p>
+      <p><code>INVALID_TOKEN</code> versus <code>TOKEN_EXPIRED</code> is not a coin toss.
+      <code>_raise_for_token_status</code> <span class="ln">service.py:583</span> returns
+      <code>410 TOKEN_EXPIRED</code> <strong>only</strong> for a token that lapsed unused; a token already spent is
+      <code>400 INVALID_TOKEN</code>, because offering a resend for a link that already worked sends the user round a
+      loop they have finished <span class="ln">service.py:588-595</span>.</p>
+
+      <h3>Configuration validation <span class="ln">app/core/config.py</span></h3>
+      <p><code>Settings</code> <span class="ln">config.py:10</span> reads <code>backend/.env</code> through
+      pydantic-settings. The class docstring <span class="ln">config.py:11-24</span> records a real, silent failure:
+      pydantic-settings matches on the <strong>field name</strong>, so <code>environment</code> looked for
+      <code>ENVIRONMENT</code> while <code>.env.example</code> set <code>APP_ENV</code>, which was therefore ignored —
+      and because <code>environment</code> gates <code>/docs</code> exposure and the refresh cookie's <code>secure</code>
+      flag, a deployment stayed in development mode no matter what the file said, with <code>extra="ignore"</code>
+      ensuring nothing ever complained. <strong>Every field whose environment key differs from its name now carries an
+      explicit <code>validation_alias</code>.</strong></p>
+      <table>
+        <thead><tr><th>Validator</th><th>file:line</th><th>Refuses to start on</th></tr></thead>
+        <tbody>
+          <tr><td><code>_secret_is_strong_enough</code></td><td><span class="ln">config.py:106</span></td><td><code>jwt_secret</code> / <code>jwt_refresh_secret</code> under 32 characters, or starting <code>CHANGE_ME</code></td></tr>
+          <tr><td><code>_totp_key_must_be_a_fernet_key</code></td><td><span class="ln">config.py:120</span></td><td>a placeholder or invalid Fernet key — Fernet raises at <em>first use</em>, which would otherwise be the middle of a user's 2FA enrolment, as a 500</td></tr>
+          <tr><td><code>_turnstile_key_is_not_a_placeholder</code></td><td><span class="ln">config.py:145</span></td><td>the placeholder <code>TURNSTILE_SECRET_KEY</code></td></tr>
+          <tr><td><code>_production_is_actually_hardened</code></td><td><span class="ln">config.py:159</span></td><td><code>"*"</code> in <code>cors_origins</code> in production; <code>EMAIL_PROVIDER=logging</code> in production; <code>resend</code> without <code>EMAIL_FROM</code></td></tr>
+        </tbody>
+      </table>
+      <p><code>totp_encryption_key</code> and <code>turnstile_secret_key</code> have <strong>no defaults</strong> on
+      purpose <span class="ln">config.py:58-63</span>: a defaulted encryption key is worse than a missing one, because
+      every deployment that forgot to set it would share the same key and nobody would find out.</p>
+
+      <div class="callout">
+        <span class="t">A3, A4, A5 and D11 — fixed, Phase 1 (2026-08-16)</span>
+        All four had the same shape: a setting typed as a bare <code>str</code>, and consumers comparing it
+        for equality against one expected spelling. Anything else raised nothing — it matched no branch and
+        fell through to the default, and <strong>every one of those defaults was the insecure one</strong>.
+        <ul>
+          <li><code>environment</code> and <code>email_provider</code> are now <code>Literal</code> types, so a
+            value outside the closed set is a <strong>boot failure</strong> rather than a silent downgrade.
+            <code>APP_ENV=prod</code> used to read as <em>development</em> in production: <code>/docs</code>
+            served, the logging sender permitted, and <code>secure</code> dropped from the refresh cookie.
+            <code>EMAIL_PROVIDER=Resend</code> matched neither <code>"resend"</code> nor <code>"logging"</code>,
+            so it selected the logging sender <strong>and</strong> passed the production guard, which also
+            tested <code>== "logging"</code> — every two-factor code and reset link to stdout.</li>
+          <li><code>_normalise_choice</code> (<code>mode="before"</code>) trims and lower-cases first, so
+            <code>Production&nbsp;</code> starts and <code>prod</code> still fails. Formatting is forgiven;
+            guesses are not.</li>
+          <li><code>openapi_url=None</code> in production. <code>docs_url</code> gates only the Swagger HTML;
+            the schema route kept its default and published the whole surface unauthenticated.</li>
+          <li><code>app_base_url</code> must begin <code>https://</code> in production. Left at its localhost
+            default it mails links nobody can open; over <code>http://</code> it puts single-use reset tokens
+            in cleartext.</li>
+        </ul>
+        A guard that already existed became <strong>reachable</strong> as a side effect:
+        <code>EMAIL_PROVIDER=Logging</code> previously bypassed the production check <em>and</em> selected the
+        thing that check exists to prevent. Pinned by <code>tests/unit/test_config_hardening.py</code>.
+      </div>
+
+      <h3>Captcha, passwords and TOTP</h3>
+      <p><code>verify_turnstile_token</code> <span class="ln">auth/turnstile.py:23</span> <strong>fails closed</strong>:
+      a network failure, a non-JSON body and a non-boolean <code>success</code> all return <code>False</code>
+      <span class="ln">turnstile.py:45-53</span>. The raw Cloudflare <code>error-codes</code> are logged and never
+      returned. It is called <em>first</em> in both <code>register</code> <span class="ln">service.py:102</span> and
+      <code>login</code> <span class="ln">service.py:286</span> — before the lookup and before the dummy-hash branch —
+      so the captcha is a constant cost for every account and never reveals whether an address exists.</p>
+      <p>Passwords are <strong>argon2id</strong> <span class="ln">auth/security.py:26-30</span>, with the hasher built on
+      first use rather than at import so the unit tests need no database credentials
+      <span class="ln">security.py:17-24</span>. Login runs a <strong>dummy verify</strong> on the unknown-account branch
+      <span class="ln">service.py:304</span> against a real argon2 hash computed once
+      <span class="ln">service.py:258</span>, because short-circuiting would answer in about a millisecond while a wrong
+      password paid the full cost — a gap measurable from anywhere, which <code>tdd.md</code> §6.11 forbids "by body,
+      status code, OR TIMING".</p>
+      <p>TOTP secrets are Fernet-encrypted before storage <span class="ln">auth/totp.py:104</span>, with the key in
+      application configuration and not in the database, so a database dump alone yields no usable secrets. Backup codes
+      are argon2id-hashed <span class="ln">auth/backup_codes.py:33</span>, which is why verification iterates the unused
+      hashes <span class="ln">service.py:974-986</span> instead of doing a hash lookup.</p>
+
+      <div class="callout warn">
+        <span class="t">Known defects A9, D7 and A7</span>
+        <code>/2fa/enroll</code> <span class="ln">service.py:688</span> skips the lockout check that
+        <code>two_factor_confirm</code> performs <span class="ln">service.py:824-826</span> — <strong>and it sends
+        mail</strong>. The TOTP check passes a float where a <code>datetime</code> is expected. Backup-code download can
+        silently produce no file, and the codes are shown once and then lost.
+      </div>
+    </section>
+
+    <section class="prose">
+      <h2>Cross-references</h2>
+      <table>
+        <thead><tr><th>Document</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><a href="../../prd.md"><code>prd.md</code></a></td><td>Product Requirements Document — the four roles, the monetisation model, §4.3 the parental-consent gate, MON-2 the fail-closed subscription rule</td></tr>
+          <tr><td><a href="../../tdd.md"><code>tdd.md</code></a></td><td>Technical Design Document — §3.1 auth and its endpoint table, §6.8 Row-Level Security, §6.9 two-factor authentication, §6.11 client-side security, §7.2 the consolidated endpoint catalogue, §7.3 the error model</td></tr>
+          <tr><td><a href="../../user-stories.md"><code>user-stories.md</code></a></td><td>12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154)</td></tr>
+          <tr><td><a href="database.html">database.html</a> / <code>database.md</code></td><td>Tables by domain, the <strong>complete Row-Level Security policy catalogue</strong>, the <code>app.*</code> functions with signature and grant, and findings B1–B19 in full</td></tr>
+          <tr><td><a href="api-endpoints.md">api-endpoints.md</a></td><td>Every implemented route → handler → service function with <code>file:line</code>, mapped to its <code>tdd.md</code> §3.1 row, plus the explicit list of the <strong>31 specified-but-missing</strong> routes</td></tr>
+          <tr><td><a href="../README.md"><code>backend/README.md</code></a></td><td>Environment variables, running and testing commands, and the standing <code>SECURITY DEFINER</code> rule quoted above</td></tr>
+          <tr><td><a href="architecture.md">architecture.md</a></td><td>This page as Markdown — a parallel document, not generated from this one; it reads anywhere, this one carries the diagrams</td></tr>
+        </tbody>
+      </table>
+      <div class="offline-note">Mermaid is vendored at <code>backend/Architecture/assets/mermaid.min.js</code> rather than
+      loaded from a Content Delivery Network: this project is demonstrated in a viva room, and a diagram that fails to
+      render because the network is unreliable is worse than a static image.</div>
+    </section>
+
+  </div>
+  <footer>EduBridge AI · backend architecture · snapshot 2026-08-15 · records the system as it stands, defects included ·
+  keep in sync per <code>backend/CLAUDE.md</code></footer>
+</body>
+</html>

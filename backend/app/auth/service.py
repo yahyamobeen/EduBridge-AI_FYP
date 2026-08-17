@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import gate
 from app.auth.backup_codes import generate_backup_codes, hash_backup_code, verify_backup_code
-from app.auth.email import send_async as _queue_email
+from app.auth.email import send_after_commit as _queue_email
 from app.auth.email_templates import (
+    build_guardian_invite_url,
     build_password_reset_url,
     build_verification_url,
+    guardian_invite_email,
     password_reset_email,
     two_factor_otp_email,
     verification_email,
@@ -28,6 +30,8 @@ from app.auth.schemas import (
     GuardianConfirmRequest,
     GuardianInviteRequest,
     LoginRequest,
+    MeUpdateRequest,
+    PasswordChangeRequest,
     PasswordForgotRequest,
     PasswordResetRequest,
     RegisterRequest,
@@ -38,8 +42,8 @@ from app.auth.schemas import (
 )
 from app.auth.security import create_access_token, hash_password, hash_token, verify_password
 from app.auth.tokens import (
+    RefreshTokenRaceError,
     RefreshTokenReuseError,
-    find_token,
     issue_challenge_token,
     issue_guardian_invite_token,
     issue_preauth_token,
@@ -81,7 +85,7 @@ from app.core.ratelimit import (
     TWO_FA_VERIFY_USER_LIMIT,
     enforce_subject,
 )
-from app.models.enums import TokenKind, UserRole
+from app.models.enums import RegistrableRole, TokenKind
 
 # The one plan in v1, seeded by 20260802120000_subscriptions_and_oauth.sql and
 # referenced by subscription.plan_code.
@@ -113,17 +117,24 @@ def register(db: Session, payload: RegisterRequest) -> dict:
     new_id = uuid4()
 
     # REQUIRED, despite looking odd on an unauthenticated endpoint. `app_user`
-    # inserts are open (`app_user_insert` is WITH CHECK (true)), but every
-    # profile policy is `WITH CHECK (user_id = app.current_user_id())`, and so
-    # is `subscription_owner`. Without binding the id we are about to create,
-    # RLS refuses the profile and subscription inserts below.
+    # itself is now owner-scoped -- `app_user_insert` is
+    # `WITH CHECK (id = app.current_user_id() AND role <> 'admin')` -- and every
+    # profile policy is `WITH CHECK (user_id = app.current_user_id())`, as is
+    # `subscription_owner`. Without binding the id we are about to create, RLS
+    # refuses the app_user row itself and every insert below it.
+    #
+    # The comment here previously said `app_user_insert` was `WITH CHECK (true)`.
+    # That was accurate for 20260801120100 and stopped being true at
+    # 20260802150000, which reconciled it to the owner-scoped form. Corrected
+    # while adding the `role <> 'admin'` clause.
     set_current_user_id(db, new_id)
 
     try:
         db.execute(
             text(
-                "INSERT INTO app_user (id, email, password_hash, role, status, full_name) "
-                "VALUES (:id, :email, :pwhash, :role, 'active', :full_name)"
+                "INSERT INTO app_user "
+                "(id, email, password_hash, role, status, full_name, language_pref) "
+                "VALUES (:id, :email, :pwhash, :role, 'active', :full_name, :lang)"
             ),
             {
                 "id": new_id,
@@ -131,6 +142,13 @@ def register(db: Session, payload: RegisterRequest) -> dict:
                 "pwhash": hash_password(payload.password),
                 "role": payload.role.value,
                 "full_name": payload.full_name,
+                # `RegisterRequest.language_pref` was always accepted for every
+                # role and, before 20260816200000, only ever STORED for
+                # students. A teacher's answer was read once for the
+                # verification email below and then thrown away. INSERT on
+                # app_user is still table-wide (only UPDATE narrowed in
+                # 20260816160000), so this needs no additional grant.
+                "lang": payload.language_pref.value,
             },
         )
         db.flush()
@@ -139,7 +157,7 @@ def register(db: Session, payload: RegisterRequest) -> dict:
             raise email_already_registered() from exc
         raise
 
-    if payload.role == UserRole.student:
+    if payload.role == RegistrableRole.student:
         db.execute(
             text(
                 "INSERT INTO student_profile "
@@ -167,14 +185,14 @@ def register(db: Session, payload: RegisterRequest) -> dict:
             text("INSERT INTO subscription (user_id, plan_code) VALUES (:user_id, :plan)"),
             {"user_id": new_id, "plan": _DEFAULT_PLAN_CODE},
         )
-    elif payload.role == UserRole.teacher:
+    elif payload.role == RegistrableRole.teacher:
         db.execute(
             text(
                 "INSERT INTO teacher_profile (user_id, institution) VALUES (:user_id, :institution)"
             ),
             {"user_id": new_id, "institution": payload.institution},
         )
-    elif payload.role == UserRole.parent:
+    elif payload.role == RegistrableRole.parent:
         db.execute(
             text("INSERT INTO parent_profile (user_id) VALUES (:user_id)"),
             {"user_id": new_id},
@@ -195,7 +213,7 @@ def register(db: Session, payload: RegisterRequest) -> dict:
         db, new_id, kind=TokenKind.email_verify, ttl_seconds=_EMAIL_LINK_TTL_SECONDS
     )
     subject, body = verification_email(build_verification_url(token, locale), locale)
-    _queue_email(email, subject, body)
+    _queue_email(db, email, subject, body)
 
     return {
         "user_id": str(new_id),
@@ -269,7 +287,7 @@ def _dummy_password_hash() -> str:
     return hash_password("edubridge-dummy-password-for-constant-time-login")
 
 
-def login(db: Session, payload: LoginRequest) -> dict:
+def login(db: Session, payload: LoginRequest, *, admin_portal: bool = False) -> dict:
     """
     A CORRECT password never returns a session — it returns 200 with a `status`
     discriminator saying which step comes next (tdd.md §3.1). Only a WRONG
@@ -279,6 +297,15 @@ def login(db: Session, payload: LoginRequest) -> dict:
     This runs pre-authentication, so the lookup goes through the narrow
     SECURITY DEFINER function rather than an RLS-bypassing connection: there is
     no `app.current_user_id()` yet to satisfy `app_user_self_read` with.
+
+    `admin_portal` selects WHICH SET OF ROLES may authenticate here, and it is
+    the only difference between the two login endpoints (prd.md FR-A2a). ONE
+    function, deliberately, rather than a second copy for administrators: the
+    constant-time dummy-hash branch, the lockout ladder, the e-mail-verification
+    branch and the two challenge-token branches below are the whole security
+    argument of this path, and a copy would drift from them. That is the same
+    reasoning that produced `onboarding_state_for` after the state machine had
+    been reimplemented four times.
     """
     # 1) CAPTCHA, FIRST — before the lookup and before the dummy-hash branch,
     #    so the captcha is a constant cost for every account and never tells
@@ -290,7 +317,7 @@ def login(db: Session, payload: LoginRequest) -> dict:
     row = (
         db.execute(
             text(
-                "SELECT id, password_hash, status, email_verified_at "
+                "SELECT id, password_hash, status, email_verified_at, role "
                 "FROM app.lookup_user_for_login(:email)"
             ),
             {"email": str(payload.email).lower()},
@@ -306,6 +333,29 @@ def login(db: Session, payload: LoginRequest) -> dict:
     if not verify_password(payload.password, row["password_hash"]):
         raise unauthenticated("Incorrect email or password.")
     if str(row["status"]) != "active":
+        raise unauthenticated("Incorrect email or password.")
+
+    # WHICH DOOR THIS ACCOUNT MAY USE (prd.md FR-A2a). Administrators do not
+    # authenticate at the public endpoint, and nobody else authenticates at the
+    # administrator one.
+    #
+    # THE SAME 401, WITH THE SAME BODY, AS A WRONG PASSWORD — deliberately, and
+    # this is the whole point of the check rather than an implementation detail.
+    # A distinguishable answer (403, or any different message) would turn the
+    # public login form into an administrator-enumeration oracle: submit an
+    # address, read the status code, learn whether it is an admin account. That
+    # is the enumeration-resistance rule in tdd.md §6.11, which forbids
+    # revealing account facts "by body, status code, OR TIMING" — and the timing
+    # side holds too, because the argon2 verify above has already run either way.
+    #
+    # ⚠️ THE UNLISTED URL IS NOT WHAT ENFORCES THIS. The path is an unlisted
+    #    door; these two lines are the lock. Anyone who learns the path still
+    #    cannot sign in without administrator credentials, and anyone who has
+    #    administrator credentials still cannot use them at /auth/login.
+    #
+    # Written as one exclusive-or rather than two `if`s so the rule cannot be
+    # half-changed: the endpoint and the role must agree, in both directions.
+    if (str(row["role"]) == "admin") != admin_portal:
         raise unauthenticated("Incorrect email or password.")
 
     user_id = row["id"]
@@ -328,6 +378,23 @@ def login(db: Session, payload: LoginRequest) -> dict:
         .one_or_none()
     )
 
+    # ⚠️ FINDING D10 — EMAIL VERIFICATION IS CHECKED FIRST, AND THE ORDER USED TO
+    #    BE THE OTHER WAY ROUND.
+    #
+    #    An unverified account with a live 2FA lockout was answered `423
+    #    TWO_FACTOR_LOCKED`, which is wrong twice over. It tells the user to wait
+    #    out a lockout on a second factor they have not reached and cannot use,
+    #    when the actual next step is to verify their address — and it discloses
+    #    that the account has 2FA state at all to someone who has not completed
+    #    the earlier gate. The onboarding order is verify, then enrol, then
+    #    challenge; the refusals have to follow it.
+    #
+    #    Masked: this is reachable with a correct password but no session. The
+    #    client keeps the unmasked address the user typed, because /email/resend
+    #    cannot act on a masked one.
+    if row["email_verified_at"] is None:
+        return {"status": "email_verification_required", "email": _mask_email(str(payload.email))}
+
     # Checked only AFTER the password is verified, so a wrong password against a
     # locked account still answers 401 and reveals nothing about the account.
     if twofa is not None and twofa["locked_until"] is not None:
@@ -336,12 +403,6 @@ def login(db: Session, payload: LoginRequest) -> dict:
             locked_until = datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
         if locked_until > datetime.now(UTC):
             raise two_factor_locked(locked_until.isoformat())
-
-    if row["email_verified_at"] is None:
-        # Masked: this is reachable with a correct password but no session. The
-        # client keeps the unmasked address the user typed, because /email/resend
-        # cannot act on a masked one.
-        return {"status": "email_verification_required", "email": _mask_email(str(payload.email))}
 
     settings = get_settings()
     if twofa is None or str(twofa["status"]) != "active":
@@ -363,6 +424,48 @@ def login(db: Session, payload: LoginRequest) -> dict:
         kind=TokenKind.two_factor_pending,
         ttl_seconds=settings.pending_token_ttl_seconds,
     )
+
+    # ⚠️ FINDING D18. `_issue_and_send_email_otp` was called from
+    # `two_factor_enroll` and `two_factor_resend` ONLY, so signing in to an
+    # `email_otp` account produced a challenge screen saying a code had been
+    # sent while NOTHING WAS SENT. The only way to receive the first code was to
+    # press Resend on a screen that exists to say the first one is on its way —
+    # the same shape as the registration bug fixed in Phase 1, and the reason
+    # Phase 1b's missing `resend` button labels were only half the problem.
+    #
+    # TOTP accounts need nothing here: the code is generated on the user's own
+    # device, which is the point of TOTP.
+    if str(twofa["method"]) == "email_otp":
+        # ⚠️ BIND FIRST. `login` runs on `get_db`, which binds NOBODY, so a plain
+        #    read of `app_user` matches zero rows under `app_user_self_read`
+        #    (`id = app.current_user_id() OR app.is_admin()` — both false with
+        #    nothing bound) and `.one()` raises `NoResultFound` as a 500.
+        #
+        #    This was shipped broken: the first version of D18's fix read the
+        #    row without binding, and every `email_otp` sign-in 500ed. The two
+        #    sibling lookups in `two_factor_enroll` and `two_factor_resend` do
+        #    the same read and work precisely because each calls
+        #    `set_current_user_id` first, having resolved the user from a token.
+        #    This is that same pattern, and the trust is equivalent: the
+        #    password has already been verified above.
+        #
+        #    ⚠️ THE TEST DID NOT CATCH IT, AND COULD NOT HAVE. The integration
+        #       harness routes every session onto ONE connection, so the GUC the
+        #       fixture set while creating the user was still bound when the
+        #       request ran — the read succeeded for a reason production does not
+        #       have. `test_email_dispatch.py` now clears the binding before
+        #       calling the endpoint, which reproduces `get_db`.
+        set_current_user_id(db, user_id)
+        recipient = (
+            db.execute(
+                text("SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"),
+                {"uid": user_id},
+            )
+            .mappings()
+            .one()
+        )
+        _issue_and_send_email_otp(db, user_id, recipient)
+
     return {
         "status": "two_factor_required",
         "pending_token": token,
@@ -374,6 +477,36 @@ def login(db: Session, payload: LoginRequest) -> dict:
 def refresh(db: Session, refresh_token: str) -> dict:
     try:
         rotated = rotate_refresh_token(db, refresh_token)
+    except RefreshTokenRaceError as raced:
+        # ⚠️ A RACE IS NOT A THEFT, AND MUST NOT REVOKE ANYTHING. Two browser
+        # tabs refreshing together present the same token twice — the client's
+        # single-flight guard is per tab. Treating that as reuse signs the user
+        # out of every device and writes an audit row claiming an incident that
+        # did not happen.
+        #
+        # No revocation: a plain 401. It is self-healing, because the winner's
+        # response already replaced the httpOnly cookie, so the client's next
+        # attempt carries the new token.
+        #
+        # ⚠️ BUT IT IS AUDITED, BECAUSE THE COST OF THE GRACE WINDOW IS REAL.
+        # A thief replaying a stolen token within `refresh_race_grace_seconds`
+        # of the legitimate rotation lands here rather than in reuse detection.
+        # They are still refused — the token buys them nothing — but the family
+        # is not revoked and, without this row, nothing anywhere would record
+        # that it happened. A genuine two-tab race is rare enough that these
+        # rows are a signal rather than noise, and a burst of them for one user
+        # is exactly what a stolen token looks like.
+        db.execute(
+            text(
+                "INSERT INTO audit_log (actor_id, action, target) "
+                "VALUES (:uid, 'refresh_token_race_detected', 'auth_token')"
+            ),
+            {"uid": str(raced.user_id)},
+        )
+        # COMMIT BEFORE RAISING, for the same reason the reuse path does: the
+        # 401 unwinds through `get_db`, which rolls back on any exception.
+        db.commit()
+        raise unauthenticated("Invalid or expired refresh token.") from None
     except RefreshTokenReuseError as reuse:
         # Rotation means a token is valid exactly once, so a second use means
         # two parties hold it. Kill the whole family rather than answering 401
@@ -386,15 +519,18 @@ def refresh(db: Session, refresh_token: str) -> dict:
         db.commit()
         raise unauthenticated("Invalid or expired refresh token.") from None
 
+    # Unknown, expired, or a family past the absolute ceiling — all "sign in
+    # again", deliberately indistinguishable.
     if rotated is None:
         raise unauthenticated("Invalid or expired refresh token.")
 
-    new_plain, _ = rotated
-    stored = find_token(db, new_plain)
-    if stored is None:
-        raise unauthenticated("Invalid or expired refresh token.")
+    # The read-back this used to do is gone: `app.rotate_refresh_token` returns
+    # the user id from inside the same locked statement, so re-reading the row
+    # we just wrote in order to learn what we wrote bought nothing and was one
+    # more round trip on the refresh path.
+    new_plain, user_id = rotated
 
-    access_token, expires_in = create_access_token(stored.user_id)
+    access_token, expires_in = create_access_token(user_id)
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -413,8 +549,14 @@ def logout(db: Session, user_id: UUID) -> None:
 
 _ME_QUERY = text(
     """
-    SELECT u.id, u.email, u.full_name, u.role, u.email_verified_at,
-           sp.board, sp.class_level, sp.student_group, sp.medium, sp.language_pref,
+    -- `language_pref` comes from `u`, NOT from `sp`. It moved to app_user in
+    -- 20260816200000 so that FR-A8 could reach the three roles without a
+    -- student_profile row; `student_profile.language_pref` still exists and is
+    -- deliberately read by nothing. Sourcing it here keeps ONE value behind
+    -- both `MeResponse.profile.language_pref` and outgoing email, so the
+    -- settings screen cannot show one thing while mail is sent in another.
+    SELECT u.id, u.email, u.full_name, u.role, u.email_verified_at, u.language_pref,
+           sp.board, sp.class_level, sp.student_group, sp.medium,
            tf.method  AS tf_method,
            tf.status  AS tf_status,
            gl.status  AS guardian_status,
@@ -536,6 +678,9 @@ def me(db: Session, user_id: UUID) -> dict:
         "email": row["email"],
         "full_name": row["full_name"],
         "role": str(row["role"]),
+        # From `app_user`, so every role has one. `profile.language_pref` below
+        # reads the same column for students; they cannot drift.
+        "language_pref": str(row["language_pref"]),
         "onboarding_state": onboarding_state,
         "email_verified": row["email_verified_at"] is not None,
         "two_factor": {
@@ -544,6 +689,166 @@ def me(db: Session, user_id: UUID) -> dict:
         },
         "profile": profile,
         "guardian": {"required": guardian_required, "status": guardian_status},
+    }
+
+
+# ----------------------------------------------------------------------------
+# FR-A8 — manage own account (tdd.md §3.1). Every route below is authenticated,
+# so the session is already bound and every statement runs under the ordinary
+# owner-scoped policies. None of them touches `get_service_db`.
+# ----------------------------------------------------------------------------
+
+
+def change_password(db: Session, user_id: UUID, payload: PasswordChangeRequest) -> int:
+    """
+    POST /api/auth/password/change. Returns the number of sessions ended.
+
+    ⚠️ 401 UNAUTHENTICATED FOR A WRONG CURRENT PASSWORD, NOT A NEW CODE.
+    `tdd.md:1053` makes UNAUTHENTICATED "also the only response meaning 'wrong
+    password'", and `tdd.md:1074` says "No endpoint invents a code." A
+    WRONG_PASSWORD code would reach the client as an unrecognised string and
+    render as "something went wrong".
+
+    ⚠️ THAT MAKES THIS THE ONLY ROUTE WHERE BOTH MEANINGS OF 401 ARE LIVE AT
+    ONCE — expired token and wrong password — which is why the client wrapper
+    must pass `noRetry: true`. Without it every mistyped password fires a token
+    refresh (`REFRESHABLE_401_CODES` in errors.ts).
+
+    READING `password_hash` NEEDS NO PRIVILEGED PATH. §2.2 revoked UPDATE and
+    never SELECT, so `app_user_self_read` still serves it to the bound user.
+    After the column-grant work the instinct is to reach for a function for
+    every `app_user` access; here that would move an argon2 comparison inside
+    something running as the database owner, for no gain.
+    """
+    row = (
+        db.execute(
+            text("SELECT password_hash FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    # `authenticated` already proved this row exists and is active; reaching
+    # here means it stopped being true mid-request.
+    if row is None:
+        raise unauthenticated()
+
+    if not verify_password(payload.current_password, row["password_hash"]):
+        raise unauthenticated("Incorrect password.")
+
+    # The function takes NO user identifier — it acts on `app.current_user_id()`,
+    # which `authenticated` bound. See 20260816210000 for why that is stronger
+    # than passing one and checking it.
+    result = (
+        db.execute(
+            text("SELECT changed, tokens_revoked FROM app.change_password(:new_hash)"),
+            {"new_hash": hash_password(payload.new_password)},
+        )
+        .mappings()
+        .one()
+    )
+    # ⚠️ `changed` IS CHECKED, and it is not ceremony. `tokens_revoked` is 0 for
+    #    a legitimate change by a user with no live sessions, so the count
+    #    cannot carry this signal — that is why the function returns two fields.
+    if not result["changed"]:
+        raise unauthenticated()
+
+    db.execute(
+        text(
+            "INSERT INTO audit_log (actor_id, action, target) "
+            "VALUES (:uid, 'password_changed', 'app_user')"
+        ),
+        {"uid": user_id},
+    )
+    # NO db.commit(). `authenticated` commits on success (dependencies.py:84);
+    # committing here would end the transaction and silently discard the user
+    # binding for anything that ran afterwards.
+    return int(result["tokens_revoked"])
+
+
+def update_me(db: Session, user_id: UUID, payload: MeUpdateRequest) -> dict:
+    """
+    PATCH /api/auth/me — `full_name` and `language_pref` only.
+
+    Returns a full `MeResponse` by delegating to `me()` rather than assembling
+    one, so the PATCH and GET shapes cannot drift. It costs one extra query on a
+    route nobody calls in a loop.
+
+    ⚠️ THE COLUMN LIST IS BUILT FROM THE FIELDS ACTUALLY SUPPLIED, so a PATCH of
+    one field does not overwrite the other with None. Both columns carry their
+    own UPDATE grant (`full_name` from 20260816160000, `language_pref` from
+    20260816200000) and nothing else on `app_user` does — so a future edit that
+    added a column here would be refused by PostgreSQL rather than silently
+    permitted.
+    """
+    payload.validate_at_least_one_field()
+
+    assignments = []
+    params: dict[str, object] = {"uid": user_id}
+    if payload.full_name is not None:
+        assignments.append("full_name = :full_name")
+        params["full_name"] = payload.full_name
+    if payload.language_pref is not None:
+        assignments.append("language_pref = :language_pref")
+        params["language_pref"] = payload.language_pref.value
+
+    # Every fragment above is a fixed literal chosen by the two `if`s; the
+    # values are bound. `updated_at` is left to `trg_app_user_updated`.
+    db.execute(text(f"UPDATE app_user SET {', '.join(assignments)} WHERE id = :uid"), params)  # noqa: S608
+
+    return me(db, user_id)
+
+
+def two_factor_status(db: Session, user_id: UUID) -> dict:
+    """
+    GET /api/auth/2fa/status.
+
+    ONE SELECT against `two_factor_status_v`, which existed unused since
+    20260801120000 and was given `security_invoker = true` by 20260816150000
+    (finding B1) — before that it ran as its owner and a caller bound to a user
+    owning nothing read every account's second-factor state through it.
+    Measured then: 7 of 7 rows readable; now 0. `user_id` is therefore NOT in
+    the WHERE clause by accident of trust — it is there because the view now
+    applies `two_factor_enrollment`'s owner policy to the caller.
+
+    ⚠️ DO NOT SWITCH THIS TO `app.get_unused_backup_codes`. That returns the
+    HASHES (20260803120000:284-293), which the verify path needs because argon2
+    is non-deterministic and a status endpoint has no business reading.
+
+    ⚠️ DO NOT FOLD THIS INTO `GET /auth/me`. That is one deliberate extra round
+    trip, on a screen the user visits occasionally, to keep the dashboard's
+    hot-path query from growing a join nobody there needs.
+
+    An account that never enrolled has no row at all, which is `enabled: false`
+    rather than an error.
+    """
+    row = (
+        db.execute(
+            text(
+                "SELECT method, status, locked_until, unused_backup_codes "
+                "  FROM two_factor_status_v WHERE user_id = :uid"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        return {
+            "enabled": False,
+            "method": None,
+            "locked_until": None,
+            "backup_codes_remaining": 0,
+        }
+
+    enabled = str(row["status"]) == "active"
+    return {
+        "enabled": enabled,
+        # Mirrors `MeResponse.two_factor`, which reports the method only while
+        # the enrolment is active — a pending enrolment is not a second factor.
+        "method": str(row["method"]) if enabled else None,
+        "locked_until": row["locked_until"].isoformat() if row["locked_until"] else None,
+        "backup_codes_remaining": int(row["unused_backup_codes"] or 0),
     }
 
 
@@ -577,7 +882,7 @@ def _issue_and_send_email_otp(db: Session, user_id: UUID, recipient: Mapping) ->
     subject, html = two_factor_otp_email(
         otp_code, expires_minutes=_EMAIL_OTP_TTL_SECONDS // 60, locale=locale
     )
-    _queue_email(str(recipient["email"]), subject, html)
+    _queue_email(db, str(recipient["email"]), subject, html)
 
 
 def _raise_for_token_status(db: Session, token: str, kind: TokenKind) -> None:
@@ -719,11 +1024,31 @@ def two_factor_enroll(db: Session, payload: TwoFactorEnrollRequest) -> dict:
     set_current_user_id(db, user_id)
     enforce_subject(bucket="2fa_enroll", subject=str(user_id), limit=TWO_FA_ENROLL_USER_LIMIT)
 
-    # Reject if 2FA is already active (cannot re-enroll)
+    # One read, two checks. The bind above is what makes it see the row at all —
+    # `two_factor_enrollment_owner` matches on `app.current_user_id()`.
     enrollment_check = db.execute(
-        text("SELECT status FROM two_factor_enrollment WHERE user_id = :uid"),
+        text("SELECT status, locked_until FROM two_factor_enrollment WHERE user_id = :uid"),
         {"uid": user_id},
     ).first()
+
+    # Finding A9: the lockout was enforced at login, confirm, verify and resend,
+    # but NOT here -- and this path sends an email one-time password.
+    #
+    # SCOPE, HONESTLY: this was never a way to bypass guessing. `/2fa/confirm`
+    # checks the lockout, and `app.upsert_2fa_enrollment` deliberately preserves
+    # `failed_attempts` and `locked_until` across a re-enrolment, so the counter
+    # survives. What it allowed was MAIL FLOODING a locked account -- bounded at
+    # five per five minutes per account by `enforce_subject` above, and needing a
+    # live enrolment token, so a nuisance rather than a breach. It is fixed
+    # because a lockout that four of five entry points honour is not a lockout.
+    if (
+        enrollment_check is not None
+        and enrollment_check.locked_until is not None
+        and enrollment_check.locked_until > datetime.now(UTC)
+    ):
+        raise two_factor_locked(enrollment_check.locked_until.isoformat())
+
+    # Reject if 2FA is already active (cannot re-enroll)
     if enrollment_check and str(enrollment_check.status) == "active":
         raise AppError(
             status_code=400,
@@ -734,8 +1059,10 @@ def two_factor_enroll(db: Session, payload: TwoFactorEnrollRequest) -> dict:
     recipient = (
         db.execute(
             text(
-                "SELECT u.email, sp.language_pref FROM app_user u "
-                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+                # `u.language_pref` since 20260816200000. The LEFT JOIN this
+                # replaced returned NULL for every non-student, so a teacher who
+                # had chosen Urdu still received an English OTP mail.
+                "SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"
             ),
             {"uid": user_id},
         )
@@ -1067,8 +1394,10 @@ def two_factor_resend(db: Session, payload: TwoFactorResendRequest) -> dict:
     recipient = (
         db.execute(
             text(
-                "SELECT u.email, sp.language_pref FROM app_user u "
-                "LEFT JOIN student_profile sp ON sp.user_id = u.id WHERE u.id = :uid"
+                # `u.language_pref` since 20260816200000. The LEFT JOIN this
+                # replaced returned NULL for every non-student, so a teacher who
+                # had chosen Urdu still received an English OTP mail.
+                "SELECT u.email, u.language_pref FROM app_user u WHERE u.id = :uid"
             ),
             {"uid": user_id},
         )
@@ -1149,7 +1478,7 @@ def resend_email_verification(db: Session, payload: EmailResendRequest) -> None:
         )
         locale = _locale_of(user_row)
         subject, html = verification_email(build_verification_url(token, locale), locale)
-        _queue_email(str(user_row["email"]), subject, html)
+        _queue_email(db, str(user_row["email"]), subject, html)
 
 
 def forgot_password(db: Session, payload: PasswordForgotRequest) -> None:
@@ -1175,7 +1504,7 @@ def forgot_password(db: Session, payload: PasswordForgotRequest) -> None:
         )
         locale = _locale_of(user_row)
         subject, html = password_reset_email(build_password_reset_url(token, locale), locale)
-        _queue_email(str(user_row["email"]), subject, html)
+        _queue_email(db, str(user_row["email"]), subject, html)
 
 
 def reset_password(db: Session, payload: PasswordResetRequest) -> None:
@@ -1221,7 +1550,18 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # whether an arbitrary address exists from this endpoint's response codes.
     student = (
         db.execute(
-            text("SELECT email FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            text(
+                # `u.language_pref` since 20260816200000, NOT a LEFT JOIN onto
+                # `student_profile`. Both columns still exist and `app_user` is
+                # the source of truth: `PATCH /auth/me` and the settings screen
+                # write only that one, so reading the profile copy would build
+                # this invite in whatever language the student chose at
+                # REGISTRATION and ignore every change since -- silently, since
+                # a stale locale is a valid locale.
+                "SELECT u.email, u.full_name, u.language_pref "
+                "FROM app_user u "
+                "WHERE u.id = :uid AND u.deleted_at IS NULL"
+            ),
             {"uid": student_id},
         )
         .mappings()
@@ -1280,7 +1620,18 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # email link cannot be redeemed after a resend. Both are owner-scoped writes
     # under RLS as the student.
     revoke_user_tokens(db, student_id, kind=TokenKind.guardian_invite.value)
-    issue_guardian_invite_token(db, student_id)
+    plain_token = issue_guardian_invite_token(db, student_id)
+
+    locale = web_locale(student["language_pref"])
+    url = build_guardian_invite_url(plain_token, locale)
+    student_name = str(student["full_name"] or "Student")
+    subject, html = guardian_invite_email(url, student_name, locale)
+    # `db` FIRST: this is `send_after_commit`, not `send_async` (finding D1). The
+    # invite is queued and released only if this transaction commits, so a
+    # failure after `issue_guardian_invite_token` cannot mail a parent a link
+    # for a token that was rolled back -- and a guardian invite is exactly the
+    # message a parent would act on.
+    _queue_email(db, parent_email, subject, html)
 
     return {
         "invite_sent": True,

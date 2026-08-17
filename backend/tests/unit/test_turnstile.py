@@ -238,6 +238,10 @@ class TestLoginOrdersTheCaptchaFirst:
             "password_hash": hash_password(CORRECT_PASSWORD),
             "status": "active",
             "email_verified_at": datetime.now(UTC),
+            # `role` joined the lookup in 20260816140000 so `login()` can refuse
+            # an administrator at the public endpoint. This fixture stands in for
+            # the row that function returns, so it has to carry the column.
+            "role": "student",
         }
         result = login(
             _fake_login_db(user_row=user_row),

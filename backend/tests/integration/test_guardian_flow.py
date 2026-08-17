@@ -20,6 +20,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
+from app.auth import email as email_module
+from app.auth import service as service_module
 from app.auth.security import create_access_token
 from app.auth.tokens import issue_guardian_invite_token
 from app.core.db import set_current_user_id
@@ -83,6 +85,155 @@ class TestInvite:
             {"s": student},
         ).scalar_one()
         assert link_status == "pending"
+
+    def test_invite_delivers_an_email_to_the_parent(self, client, db, unique_email, sent):
+        """
+        The invite must actually be emailed, not just marked `invite_sent`
+        (finding A10 — the token was minted and discarded while the interface
+        rendered "We emailed {email}").
+
+        ⚠️ CAPTURED AT THE PROVIDER SEAM, NOT BY REPLACING `_queue_email`.
+
+        The original version of this test monkeypatched `service._queue_email`
+        with a 3-parameter stub. That made it blind to the ONE thing most likely
+        to break here: this branch reaches mail through `send_after_commit`
+        (session first, finding D1), and a stub with the older signature accepts
+        a call the real function rejects with a TypeError. The endpoint answered
+        500 and this test passed.
+
+        Patching `get_email_sender` instead exercises the whole path — the real
+        alias, the real outbox, the real release on commit — so the only way to
+        pass is for a parent to actually receive something.
+        """
+        student = _create_user(
+            db, unique_email("gate"), role="student", class_level=9, full_name="Ayesha"
+        )
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": parent_email},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["invite_sent"] is True
+
+        # `send_async` returns before delivery; the outbox is released on the
+        # request's commit and dispatched on a worker thread.
+        email_module.drain_pending_emails()
+
+        assert len(sent) == 1, f"expected one delivered email, got {len(sent)}"
+        to, subject, html = sent[0]
+        assert to == parent_email
+        assert "Ayesha" in subject
+        # The confirm URL carries the locale segment and a token query param.
+        assert "/en/guardian/confirm?token=" in html
+
+    def test_a_refused_invite_mails_nobody(self, client, db, unique_email, sent):
+        """
+        The cheap half: validation runs before delivery, so an unknown parent
+        address produces 422 and no mail.
+
+        ⚠️ This does NOT prove the D1 rollback property, and saying so would be
+        the more comfortable lie. The refusal happens before `_queue_email` is
+        ever reached, so this passes whether or not the outbox works. The test
+        below is the one that can tell.
+        """
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": unique_email("nobody")},
+        )
+
+        assert resp.status_code == 422, resp.text
+        email_module.drain_pending_emails()
+        assert sent == []
+
+    def test_an_invite_that_fails_after_queueing_mails_nobody(
+        self, client, db, unique_email, sent, monkeypatch
+    ):
+        """
+        The D1 property at the call site this merge added, forced rather than
+        hoped for.
+
+        The failure is injected AFTER `_queue_email` has run — `_mask_email` is
+        the next statement — so the message is genuinely sitting in the outbox
+        when the request dies. A guardian invite is exactly the message a parent
+        acts on, and the token behind it no longer exists, so the only correct
+        outcome is that nothing leaves.
+
+        With `send_async` in place of `send_after_commit` this test fails: the
+        worker thread has already been handed the message by the time the
+        transaction rolls back.
+        """
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+
+        def _boom(_value: str) -> str:
+            raise RuntimeError("injected failure after the email was queued")
+
+        monkeypatch.setattr(service_module, "_mask_email", _boom)
+
+        with pytest.raises(RuntimeError, match="injected failure"):
+            client.post(
+                "/api/auth/guardian/invite",
+                headers=_auth(student),
+                json={"parent_email": parent_email},
+            )
+
+        email_module.drain_pending_emails()
+        assert sent == [], "an invite survived the rollback of the work that justified it"
+
+    def test_the_invite_language_follows_app_user_not_the_profile(
+        self, client, db, unique_email, sent
+    ):
+        """
+        ⚠️ THE TWO COLUMNS DISAGREE ON PURPOSE HERE, AND ONLY ONE IS AUTHORITATIVE.
+
+        `language_pref` moved to `app_user` in 20260816200000; the
+        `student_profile` copy still exists but nothing writes it after
+        registration. `PATCH /auth/me` and the settings screen update `app_user`
+        alone, so reading the profile copy builds the invite in whatever language
+        the student chose when they signed up and ignores every change since.
+
+        Set to different values, this test fails against the LEFT JOIN and passes
+        against `app_user`. Left equal — as a fixture naturally leaves them — it
+        cannot tell the two apart at all.
+        """
+        student = _create_user(db, unique_email("gate"), role="student", class_level=9)
+        set_current_user_id(db, student)
+        db.execute(text("UPDATE app_user SET language_pref = 'ur' WHERE id = :id"), {"id": student})
+        stale = db.execute(
+            text("SELECT language_pref FROM student_profile WHERE user_id = :id"), {"id": student}
+        ).scalar()
+        assert stale == "en", "fixture no longer sets up the disagreement this test needs"
+
+        parent = _create_user(db, unique_email("gate"), role="parent")
+        parent_email = db.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": parent}
+        ).scalar()
+
+        resp = client.post(
+            "/api/auth/guardian/invite",
+            headers=_auth(student),
+            json={"parent_email": parent_email},
+        )
+
+        assert resp.status_code == 200, resp.text
+        email_module.drain_pending_emails()
+
+        _, _, html = sent[0]
+        assert "/ur/guardian/confirm?token=" in html
+        assert "/en/guardian/confirm?token=" not in html
 
     def test_self_link_is_forbidden(self, client, db, unique_email):
         student = _create_user(db, unique_email("gate"), role="student", class_level=9)

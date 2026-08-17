@@ -3,8 +3,51 @@ import userEvent from '@testing-library/user-event'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
-import { ENUMS } from '@/lib/api/mock/db'
+import type { EnumsResponse } from '@/lib/api/types'
 import { StudentSignupForm } from './StudentSignupForm'
+
+/**
+ * A LOCAL FIXTURE, not an import from the mock layer.
+ *
+ * This used to come from `lib/api/mock/db`, which was deleted when the mock
+ * layer went (phase 1b). Inlining it here is the right home anyway: a test
+ * fixture belongs beside the test that uses it, and importing one out of
+ * application code meant a change to the fake could silently change what this
+ * file asserts.
+ *
+ * The shape mirrors `GET /reference/enums` (tdd.md §3.1). Note that
+ * `groups_by_class` is keyed by STRINGS while `class_levels` holds NUMBERS —
+ * that is the contract, and the trap `TestClassLevelKeys` below pins.
+ */
+const ENUMS: EnumsResponse = {
+  boards: [
+    { code: 'PCTB', name: 'Punjab Curriculum and Textbook Board' },
+    { code: 'STBB', name: 'Sindh Textbook Board' },
+  ],
+  class_levels: [9, 10, 11, 12],
+  groups_by_class: {
+    '9': [
+      { code: 'science', label: 'Science' },
+      { code: 'computer', label: 'Computer Science' },
+    ],
+    '10': [
+      { code: 'science', label: 'Science' },
+      { code: 'computer', label: 'Computer Science' },
+    ],
+    '11': [
+      { code: 'pre_medical', label: 'Pre-Medical' },
+      { code: 'pre_engineering', label: 'Pre-Engineering' },
+      { code: 'ics', label: 'ICS' },
+    ],
+    '12': [
+      { code: 'pre_medical', label: 'Pre-Medical' },
+      { code: 'pre_engineering', label: 'Pre-Engineering' },
+      { code: 'ics', label: 'ICS' },
+    ],
+  },
+  mediums: ['en', 'ur'],
+  languages: ['en', 'ur', 'roman_ur'],
+}
 
 const push = vi.fn()
 const registerAccount = vi.fn()
@@ -221,5 +264,37 @@ describe('submission', () => {
     await user.click(screen.getByRole('button', { name: en.signup.common.submit }))
 
     expect(push).toHaveBeenCalledWith('/onboarding/email')
+  })
+})
+
+/**
+ * Rehomed from `lib/api/mock/db.test.ts` when the mock layer was deleted
+ * (phase 1b). The rest of that file tested the mock's own duplicate of the
+ * onboarding derivation — a second implementation of a backend rule, and no
+ * loss when both went. THIS trap is different: it is real in production code,
+ * because `StudentSignupForm` indexes `groups_by_class` with a value drawn from
+ * `class_levels`, and the two are different types by contract.
+ */
+describe('the class-level key trap', () => {
+  it('pins where the string/number mismatch actually bites', () => {
+    // Bracket access is SAFE: JavaScript coerces the key, so both forms are the
+    // same lookup. COMPARISON is where it silently fails, in both directions --
+    // which is what signup has to normalise around.
+    const keys = Object.keys(ENUMS.groups_by_class)
+    const nine = ENUMS.class_levels[0]
+
+    expect(ENUMS.groups_by_class[9 as unknown as string]).toEqual(ENUMS.groups_by_class['9'])
+    expect(keys.includes(nine as unknown as string)).toBe(false)
+    expect(new Set(keys).has(nine as unknown as string)).toBe(false)
+    expect(ENUMS.class_levels.includes('9' as unknown as number)).toBe(false)
+
+    // The safe form.
+    expect(keys.includes(String(nine))).toBe(true)
+  })
+
+  it('offers groups for every advertised class level', () => {
+    for (const level of ENUMS.class_levels) {
+      expect(ENUMS.groups_by_class[String(level)]?.length ?? 0).toBeGreaterThan(0)
+    }
   })
 })

@@ -30,7 +30,10 @@ const SLUGS = [
   'quizzes',
   'my-classes',
   'planner',
-  'settings',
+  // `settings` was here until Phase 7 built the real screen at `/settings`.
+  // Removed rather than left behind: a prerendered placeholder nothing links to
+  // is a page users can still reach by typing the URL, and it would say the
+  // feature is coming while it is live one path away.
   'spaces',
   'reports',
   'roster',
@@ -38,6 +41,12 @@ const SLUGS = [
   'announcements',
   'my-child',
   'how-to-help',
+  // The administrator surface (prd.md FR-K1). `curriculum` and `security` are
+  // already above and are reused; these two are new. Both must be listed here
+  // or `generateStaticParams` will not prerender them and the membership check
+  // below turns the admin sidebar into two 404s.
+  'quotas',
+  'logs',
 ] as const
 
 type Slug = (typeof SLUGS)[number]

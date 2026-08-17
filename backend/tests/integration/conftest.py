@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
+import app.auth.email as email_module
 from app.core.db import engine, service_engine
 from app.core.ratelimit import reset_for_tests
 from app.main import app
@@ -99,6 +100,38 @@ def never_send_real_email(monkeypatch):
     monkeypatch.setattr(email_module, "get_email_sender", email_module.LoggingEmailSender)
     yield
     email_module.drain_pending_emails()
+
+
+class _Recorder:
+    """Stands in for the mail provider and remembers what it was asked to send."""
+
+    sent: list[tuple[str, str, str]] = []
+
+    def send(self, to: str, subject: str, html_body: str) -> None:
+        type(self).sent.append((to, subject, html_body))
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """
+    Capture delivered messages.
+
+    ⚠️ Patched OVER `never_send_real_email` above, which installs the logging
+    sender. Later monkeypatch wins, and the safety property that matters — never
+    reaching a real provider — holds either way.
+
+    ⚠️ CAPTURE AT THIS SEAM, NOT BY REPLACING `service._queue_email`. Replacing
+    the alias with a stub means the test defines the signature it is testing
+    against, so a call site written for the wrong seam passes. That is not
+    theoretical: it is how a guardian invite that answered 500 shipped with a
+    green test (see `test_email_dispatch.test_every_queued_email_passes_the_session`).
+    Patching the provider leaves the alias, the outbox and the commit release all
+    real.
+    """
+    _Recorder.sent = []
+    monkeypatch.setattr(email_module, "get_email_sender", _Recorder)
+    yield _Recorder.sent
+    _Recorder.sent = []
 
 
 @pytest.fixture(autouse=True)

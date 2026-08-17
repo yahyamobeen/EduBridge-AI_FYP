@@ -40,6 +40,14 @@ LOGIN_LIMIT = Limit(max_requests=10, window_seconds=60)
 REGISTER_LIMIT = Limit(max_requests=5, window_seconds=300)
 REFRESH_LIMIT = Limit(max_requests=30, window_seconds=60)
 
+# ITS OWN BUCKET, NOT `login`'s. Sharing one would let anybody lock every
+# administrator out of the product by hammering the PUBLIC login form until the
+# shared counter is exhausted — a denial of service against the people who fix
+# a denial of service. Tighter than LOGIN because the population is a handful of
+# provisioned accounts, not a school: nobody arrives here by accident, so a
+# burst is an attack rather than a cohort signing in at 08:00.
+ADMIN_LOGIN_LIMIT = Limit(max_requests=5, window_seconds=300)
+
 # Guardian gate (RBAC-002). The status endpoint is polled every 15 s by the
 # gate screen (GuardianGate.tsx, pausing while hidden), so its bucket is wide;
 # it is authenticated and not a brute-force surface. Confirm IS a brute-force
@@ -66,6 +74,21 @@ EMAIL_VERIFY_LIMIT = Limit(max_requests=100, window_seconds=300)
 EMAIL_RESEND_LIMIT = Limit(max_requests=30, window_seconds=300)
 PASSWORD_FORGOT_LIMIT = Limit(max_requests=30, window_seconds=300)
 PASSWORD_RESET_LIMIT = Limit(max_requests=60, window_seconds=300)
+
+# FR-A8 — manage own account. ALL THREE ARE KEYED ON THE USER, not the address:
+# they are authenticated, so a subject is available, and an address key would
+# make one student in a school lab spend the whole building's allowance.
+#
+# `password/change` is the tight one and is a genuine brute-force surface — it
+# accepts the CURRENT password, so an unlocked laptop is an offline-style
+# guessing oracle. Same shape as REGISTER rather than LOGIN, because nobody
+# changes their password ten times a minute.
+PASSWORD_CHANGE_LIMIT = Limit(max_requests=5, window_seconds=300)
+# Loose by comparison: these two cost a query and reveal nothing an
+# authenticated caller does not already have. The ceiling exists so a runaway
+# client loop cannot hammer the database, not to bound an attack.
+ME_UPDATE_LIMIT = Limit(max_requests=30, window_seconds=300)
+TWO_FA_STATUS_LIMIT = Limit(max_requests=60, window_seconds=60)
 
 # Per-ACCOUNT. These are the numbers that actually bound an attack, and they are
 # unaffected by how many people share an address.

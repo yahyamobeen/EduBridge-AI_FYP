@@ -37,7 +37,13 @@ export type NavItem = {
 }
 
 const SETTINGS: NavItem[] = [
-  { key: 'settings', href: '/coming-soon/settings' },
+  // Built in Phase 7. ⚠️ THREE OTHER PLACES MOVE WITH THIS LINE, and two of
+  // them are tests that exist to stop it moving alone: `settings` leaves the
+  // coming-soon `SLUGS` list, `navigation.test.ts`'s route-prefix regex gains
+  // `settings`, and its prerender-pairing test then agrees. Changing this href
+  // without the SLUGS removal leaves a prerendered page nothing links to;
+  // changing SLUGS without this href turns every sidebar's Settings into a 404.
+  { key: 'settings', href: '/settings' },
   { key: 'help', href: '/coming-soon/help' },
 ]
 
@@ -71,7 +77,34 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { key: 'howToHelp', href: '/coming-soon/how-to-help' },
     ...SETTINGS,
   ],
-  admin: [{ key: 'dashboard', href: '/admin' }, ...SETTINGS],
+  /*
+    prd.md FR-K1 names the administrator's four duties beyond the dashboard:
+    "provisioning, curriculum, security/AgentSBOM, quotas, daily endpoint access
+    logs (TEL-5)". Provisioning has no entry because it is not a self-service
+    surface — an administrator is created by SQL run by the repository owner,
+    and `app_user_insert` refuses `role = 'admin'` to the application role.
+
+    NOTHING HERE READS CONVERSATION CONTENT, and nothing may be added that does:
+    user-stories.md:286 requires this surface to "expose no path to conversation
+    content", and the same paste-one-sidebar-into-every-dashboard mistake that
+    handed parents a chat replay button would do far more damage here.
+  */
+  admin: [
+    { key: 'dashboard', href: '/admin' },
+    // Reuses the existing `curriculum` slug rather than adding an
+    // admin-specific one. Checked by reading the rendered page: the heading is
+    // "Curriculum is on the way", which is accurate for an administrator too,
+    // whereas a new slug would fall through to the generic "In development" and
+    // say strictly less. The page's "Create an account" call to action is
+    // wrong for any signed-in user, of every role, and already reachable from
+    // the Settings and Help entries every sidebar carries — pre-existing, and
+    // not something this entry introduces.
+    { key: 'curriculum', href: '/coming-soon/curriculum' },
+    { key: 'security', href: '/coming-soon/security' },
+    { key: 'quotas', href: '/coming-soon/quotas' },
+    { key: 'endpointLogs', href: '/coming-soon/logs' },
+    ...SETTINGS,
+  ],
 }
 
 /** Role palettes from DESIGN.md's "Functional Color Logic". */

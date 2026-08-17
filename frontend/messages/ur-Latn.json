@@ -32,6 +32,10 @@
       "announcements": "Elanaat",
       "myChild": "Mera bacha",
       "howToHelp": "Madad kaise karein",
+      "curriculum": "Nisaab",
+      "security": "Security",
+      "quotas": "Quotas",
+      "endpointLogs": "Endpoint logs",
       "settings": "Tarteebat",
       "help": "Madad markaz",
       "logout": "Log out"
@@ -163,6 +167,16 @@
       "noAccount": "Account nahi hai?",
       "createAccount": "Account banayein"
     },
+    "adminLogin": {
+      "title": "Admin sign in",
+      "subtitle": "Yeh raasta sirf platform administrators ke liye hai.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "admin@example.com",
+      "passwordLabel": "Password",
+      "submit": "Sign in",
+      "submitting": "Sign in ho raha hai…",
+      "notice": "Admin accounts baraah-e-raast banaye jaate hain. Is safhe se na account banaya ja sakta hai aur na password tabdeel ho sakta hai."
+    },
     "turnstile": {
       "label": "Security check"
     },
@@ -176,6 +190,9 @@
       "expiresIn": "Code ki miyaad khatam hone mein",
       "verify": "Code ki tasdeeq karein",
       "verifying": "Tasdeeq ho rahi hai…",
+      "resend": "Code bhejein",
+      "resending": "Bheja ja raha hai…",
+      "resent": "Code bhej diya gaya",
       "tryAnotherWay": "Koi aur tareeqa azmayein",
       "back": "Wapas jayein",
       "optionsTitle": "Doosra tareeqa muntakhib karein",
@@ -243,6 +260,7 @@
       "copied": "Copy ho gaye",
       "download": "Download",
       "copyFailed": "Khudkar tor par copy nahi ho saka. Upar diye codes muntakhib kar ke khud copy karein.",
+      "downloadFailed": "File download nahi ho saki. Aage barhne se pehle upar diye codes muntakhib kar ke kisi mehfooz jagah par mehfooz kar lein.",
       "fileHeading": "EduBridge AI backup codes — har code aik bar kaam karta hai.",
       "acknowledge": "Main ne ye codes mehfooz jagah par rakh liye hain. Mujhe maloom hai ke ye dobara nahi dikhaye jayenge.",
       "continue": "Aage barhein"
@@ -285,18 +303,21 @@
       "spamHint": "Agar chand minute mein na pohanche to apna spam folder dekhein.",
       "tryAnotherAddress": "Koi aur address istemal karein"
     },
+    "password": {
+      "rulesTitle": "Password ki sharait",
+      "rule_length": "Kam az kam aath huroof",
+      "rule_maxLength": "Aik sau athais huroof se ziyada na ho",
+      "rule_uppercase": "Aik bara angrezi harf shamil ho",
+      "rule_number": "Aik hindsa ya alamat shamil ho",
+      "ruleMet": "poori ho gayi",
+      "ruleNotMet": "abhi poori nahi hui",
+      "mismatch": "Dono passwords aik jaise hone chahiyen."
+    },
     "resetPassword": {
       "title": "Password dobara tarteeb dein",
       "subtitle": "Apne account ke liye naya, mehfooz password banayein.",
       "newPassword": "Naya password",
       "confirmPassword": "Password ki tasdeeq",
-      "rulesTitle": "Password ki sharait",
-      "rule_length": "Kam az kam aath huroof",
-      "rule_uppercase": "Aik bara angrezi harf shamil ho",
-      "rule_number": "Aik hindsa ya alamat shamil ho",
-      "ruleMet": "poori ho gayi",
-      "ruleNotMet": "abhi poori nahi hui",
-      "mismatch": "Dono passwords aik jaise hone chahiyen.",
       "submit": "Password update karein",
       "updating": "Update ho raha hai…",
       "doneTitle": "Password update ho gaya",
@@ -433,6 +454,11 @@
       "welcome": "Khush aamdeed, {name}",
       "subtitle": "Aap ke bache ki peshraft, baghair musalsal nigrani ke."
     },
+    "admin": {
+      "role": "Admin dashboard",
+      "welcome": "Khush aamdeed, {name}",
+      "subtitle": "Accounts ki farahmi, nisaab ki taazgi, security ki soorat-e-haal aur quotas."
+    },
     "cards": {
       "performanceTitle": "Majmooi karkardagi",
       "performanceBody": "Aap ke mazameen mein imtehani tayyari aur nisab ki takmeel.",
@@ -457,7 +483,70 @@
       "howToHelpTitle": "Madad kaise karein",
       "howToHelpBody": "Un maqamat par amali tajaweez jahan aap ke bache ko dushwari ho rahi hai.",
       "privacyTitle": "Aap kya dekh sakte hain aur kya nahi",
-      "privacyBody": "Aap peshraft reportein aur mutalie ki sargarmi dekh sakte hain. Aap apne bache ki tuition guftagu ka mawad nahi parh sakte — wo bah lihaz-e-design un ke liye niji rehti hai."
+      "privacyBody": "Aap peshraft reportein aur mutalie ki sargarmi dekh sakte hain. Aap apne bache ki tuition guftagu ka mawad nahi parh sakte — wo bah lihaz-e-design un ke liye niji rehti hai.",
+      "provisioningTitle": "Accounts ki farahmi",
+      "provisioningBody": "Poore platform par accounts, kirdar aur idara jaati rasai.",
+      "curriculumAdminTitle": "Nisaab ki taazgi",
+      "curriculumAdminBody": "Boards, jamaatein aur mazameen, aur mansalik nisaab kitna taaza hai.",
+      "securityTitle": "Security ki soorat-e-haal",
+      "securityBody": "Agent software bill of materials, model janch ke record aur khule masail.",
+      "quotasTitle": "Quotas",
+      "quotasBody": "Har account aur har idare ki istemal ki hudood, aur kaun un ke qareeb hai.",
+      "endpointLogsTitle": "Rozana endpoint rasai logs",
+      "endpointLogsBody": "Kin endpoints ko, kitne accounts ne aur kitni baar istemal kiya. Sirf metadata.",
+      "adminPrivacyTitle": "Admin kya nahi dekh sakta",
+      "adminPrivacyBody": "Aap audit record, rasai logs aur istemal ka metadata dekh sakte hain. Aap kisi bhi tuition guftagu ka mawad nahi parh sakte — bah lihaz-e-design admin ke liye us tak koi raasta mojood hi nahi."
+    }
+  },
+  "settings": {
+    "title": "Tarteebat",
+    "subtitle": "Apne account ki tarjeehat, nisaab ki tafseel aur security sambhalen.",
+    "save": "Tabdeeliyan mehfooz karen",
+    "saving": "Mehfooz ho raha hai…",
+    "saved": "Mehfooz ho gaya",
+    "cancel": "Mansookh karen",
+    "profile": {
+      "heading": "Profile aur nisaab",
+      "fullName": "Poora naam",
+      "board": "Imtihani board",
+      "classLevel": "Jamaat",
+      "contextLocked": "Aap ka board aur jamaat registration ke waqt tay hote hain aur yahan tabdeel nahi ho sakte.",
+      "saveFailed": "Tabdeeliyan mehfooz nahi ho sakin. Dobara koshish karen."
+    },
+    "language": {
+      "heading": "Zaban aur ilaqa",
+      "legend": "Tadrees ki bunyadi zaban",
+      "option_en": "English",
+      "option_ur": "اردو",
+      "option_ur-Latn": "Roman Urdu",
+      "note": "Is se is site ki aur aap ko bheji jane wali email ki zaban badal jaye gi.",
+      "saveFailed": "Zaban mehfooz nahi ho saki. Dobara koshish karen."
+    },
+    "security": {
+      "heading": "Security",
+      "currentPassword": "Maujooda password",
+      "newPassword": "Naya password",
+      "confirmPassword": "Naye password ki tasdeeq",
+      "changePassword": "Password tabdeel karen",
+      "changing": "Tabdeel ho raha hai…",
+      "changed": "Aap ka password tabdeel ho gaya hai.",
+      "wrongPassword": "Yeh aap ka maujooda password nahi hai.",
+      "signsYouOut": "Password tabdeel karne par aap har jagah se sign out ho jayen ge, bashamool yahan se.",
+      "twoFactorHeading": "Do marhalon ki tasdeeq",
+      "twoFactorLoading": "Dekha ja raha hai…",
+      "twoFactorDisabled": "Abhi tarteeb nahi di gayi.",
+      "twoFactorMethod": "Tareeqa",
+      "method_totp": "Authenticator app",
+      "method_email_otp": "Email ke zariye code",
+      "backupCodes": "Baqi backup code"
+    },
+    "guardian": {
+      "heading": "Waldain ka rabt",
+      "status_none": "Abhi koi waldain munsalik nahi.",
+      "status_pending": "Aap ke waldain ki tasdeeq ka intezar hai.",
+      "status_verified": "Aap ke waldain ne rabt ki tasdeeq kar di hai.",
+      "status_revoked": "Yeh rabt khatam kar diya gaya tha.",
+      "readOnly": "Ise waldain ki ijazat wali screen se sambhalen."
     }
   },
   "plan": {

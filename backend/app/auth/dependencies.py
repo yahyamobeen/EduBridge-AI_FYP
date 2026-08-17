@@ -3,13 +3,14 @@ from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth.gate import is_guardian_gate_pending
-from app.auth.security import decode_access_token
+from app.auth.security import decode_access_claims, session_is_invalidated
+from app.core.config import get_settings
 from app.core.db import SessionLocal, set_current_user_id
 from app.core.errors import forbidden_scope, gate_pending, unauthenticated
 from app.models.enums import UserRole
@@ -55,9 +56,10 @@ def authenticated(
         raise unauthenticated("Missing bearer token.")
 
     try:
-        user_id = decode_access_token(credentials.credentials)
+        claims = decode_access_claims(credentials.credentials)
     except ValueError:
         raise unauthenticated("Invalid or expired access token.") from None
+    user_id = claims.user_id
 
     session = SessionLocal()
     try:
@@ -67,7 +69,20 @@ def authenticated(
 
         row = (
             session.execute(
-                text("SELECT status, role FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+                # `sessions_invalidated_at` joins a SELECT this dependency was
+                # already making, so the absolute-invalidation check costs no
+                # extra round trip on the hot path.
+                #
+                # ⚠️ IT IS SELECTED, NEVER COMPARED IN THE `WHERE` CLAUSE. The
+                #    column is NULL until a user's first invalidation event, and
+                #    `issued_at > NULL` is NULL — so a WHERE-clause comparison
+                #    filters out every row, `row is None`, and EVERY REQUEST
+                #    401s FOR EVERYONE. With the same message as a bad token,
+                #    which makes it look like a client bug.
+                text(
+                    "SELECT status, role, sessions_invalidated_at "
+                    "  FROM app_user WHERE id = :uid AND deleted_at IS NULL"
+                ),
                 {"uid": user_id},
             )
             .mappings()
@@ -79,6 +94,16 @@ def authenticated(
         if row is None or row["status"] != "active":
             raise unauthenticated("Invalid or expired access token.")
 
+        # Phase 4. Revoking refresh tokens ends the ability to obtain a NEW
+        # access token and does nothing about the one already in the caller's
+        # memory — so before this, a password change left an attacker signed in
+        # for up to `access_token_ttl_minutes`. The comparison lives in
+        # `security.session_is_invalidated` and is deliberately shared: the
+        # onboarding token carries an issue time too, and a second copy of this
+        # rule is how one of them gets forgotten.
+        if session_is_invalidated(claims.issued_at, row["sessions_invalidated_at"]):
+            raise unauthenticated("Invalid or expired access token.")
+
         yield AuthContext(session=session, user_id=user_id, role=str(row["role"]))
         session.commit()
     except Exception:
@@ -88,11 +113,69 @@ def authenticated(
         session.close()
 
 
+REFRESH_COOKIE_NAME = "refresh_token"
+
+# Scoped, so the cookie is not attached to every API call.
+REFRESH_COOKIE_PATH = "/api/auth/refresh"
+
+
 def read_refresh_token_cookie(request: Request) -> str:
-    token = request.cookies.get("refresh_token")
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
         raise unauthenticated("Missing refresh token.")
     return token
+
+
+def set_refresh_cookie(response: Response, token: str) -> None:
+    """
+    THE ONE DEFINITION OF THE REFRESH COOKIE'S ATTRIBUTES.
+
+    It was written out by hand at three call sites — `/auth/refresh`,
+    `/auth/2fa/confirm` and `/auth/2fa/verify` — which is survivable until
+    something has to *delete* it. A browser only overwrites a cookie when the
+    name, path and domain all match, so a deletion that disagrees with the
+    setter on any of them silently leaves the old cookie in place. Four
+    hand-maintained copies of the same tuple is how that disagreement arrives.
+
+    `SameSite=Lax` is correct while the site and the API share a registrable
+    domain. If they are ever split across sites this must become
+    `SameSite=None; Secure`, or the cookie stops being sent and refresh fails in
+    production only.
+    """
+    settings = get_settings()
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+        max_age=settings.refresh_token_ttl_days * 86400,
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    """
+    Finding A2: logout revoked the rows and left the cookie.
+
+    The browser kept sending it, so the next `/auth/refresh` found
+    `revoked = true`, read that as two parties holding one token, revoked the
+    whole family and wrote a `refresh_token_reuse_detected` audit row. Every
+    ordinary sign-out fabricated a security incident, and the log that exists to
+    surface real theft filled with noise.
+
+    `delete_cookie` must mirror `set_refresh_cookie` on `path`, `secure`,
+    `samesite` and `httponly` — hence both living here, reading the same
+    constants and the same settings.
+    """
+    settings = get_settings()
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        secure=settings.is_production,
+        samesite="lax",
+    )
 
 
 # ----------------------------------------------------------------------------
