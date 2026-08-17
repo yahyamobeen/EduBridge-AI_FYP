@@ -68,6 +68,46 @@ class TestEmailProviderIsAClosedSet:
         # Literal this value silently selected the logging sender.
         assert Settings().email_provider == "resend"
 
+    @pytest.mark.parametrize("raw", ["sendgrid", "SendGrid", " SENDGRID "])
+    def test_sendgrid_is_a_member(self, monkeypatch, raw):
+        """
+        ⚠️ THE MERGE TRAP, AND IT REFUSED TO BOOT RATHER THAN MISBEHAVE.
+
+        `SendGridEmailSender` and this Literal are two halves of adding a
+        provider, and they were written on different branches. KAN-21 built the
+        sender against the older bare `str`; KAN-22 had since closed finding A3
+        by narrowing the field to a Literal of the two providers that existed
+        then. Git merged both without a conflict -- they touch different lines --
+        and the result rejected `EMAIL_PROVIDER=sendgrid` at import, so the
+        application would not start and every test failed at collection.
+
+        Failing closed is the correct behaviour and is why A3's fix is a Literal.
+        This test exists so the next provider is added to BOTH halves.
+        """
+        monkeypatch.setenv("EMAIL_PROVIDER", raw)
+        monkeypatch.setenv("EMAIL_FROM", "no-reply@example.com")
+
+        assert Settings().email_provider == "sendgrid"
+
+    @pytest.mark.parametrize("provider", ["resend", "sendgrid"])
+    def test_a_real_provider_requires_a_sender_address(self, monkeypatch, provider):
+        """
+        Neither API accepts a send without a From. Caught at boot, because the
+        alternative is discovering it when the first user cannot verify.
+        """
+        monkeypatch.setenv("EMAIL_PROVIDER", provider)
+        monkeypatch.setenv("EMAIL_FROM", "")
+
+        with pytest.raises(ValidationError, match="EMAIL_FROM"):
+            Settings()
+
+    def test_logging_needs_no_sender_address(self, monkeypatch):
+        """The inverse. `logging` writes to a log, which has no From line."""
+        monkeypatch.setenv("EMAIL_PROVIDER", "logging")
+        monkeypatch.setenv("EMAIL_FROM", "")
+
+        assert Settings().email_provider == "logging"
+
 
 class TestProductionRefusesAnUnusableBaseUrl:
     def _production_env(self, monkeypatch):

@@ -4,16 +4,29 @@ Email delivery seam (KAN-10b).
 The protocol is trivial; swapping providers means adding one class that
 implements ``EmailSender``. No route or service code changes.
 
-Two implementations ship:
+Three implementations ship:
 
 * ``LoggingEmailSender`` — writes structured metadata to the Python logger.
   Development and CI. The token is in the HTML body, which is NOT logged
   (only ``to``, ``subject``, and ``body_length`` are), so secrets do not
   leak into log aggregators.
 
-* ``ResendEmailSender`` — sends via the Resend REST API. Production.
+* ``SendGridEmailSender`` — sends via the SendGrid Web API. **The chosen
+  provider** (KAN-21).
+
+* ``ResendEmailSender`` — sends via the Resend REST API. Still supported,
+  currently unused: its unverified free tier delivers ONLY to the account
+  owner's own address and rejects everything else at the API, so a send could
+  look successful and never leave. That is what forced the switch — a guardian
+  invite has to reach a stranger's inbox by definition.
 
 The factory picks based on ``settings.email_provider``.
+
+⚠️ ADDING A PROVIDER IS TWO EDITS, NOT ONE. A class here is not enough:
+``email_provider`` is a ``Literal`` in ``core/config.py`` and a value missing
+from it is refused at BOOT rather than ignored — finding A3's fix working as
+designed. The two halves arrived on different branches once, git found no
+conflict between them, and the application would not start.
 """
 
 from __future__ import annotations
@@ -113,15 +126,50 @@ class ResendEmailSender:
         logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
 
 
+class SendGridEmailSender:
+    """
+    Production: send via the SendGrid Web API (https://sendgrid.com).
+
+    Like `ResendEmailSender`, the SDK is an OPTIONAL extra (``uv sync --extra
+    email``) and is imported inside `send` so an environment that never mails
+    does not need it installed.
+    """
+
+    def send(self, to: str, subject: str, html_body: str) -> None:
+        try:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import Mail
+        except ImportError as exc:  # pragma: no cover -- configuration error
+            raise RuntimeError(
+                "EMAIL_PROVIDER=sendgrid but the sendgrid SDK is not installed. "
+                "Run `uv sync --extra email`, or set EMAIL_PROVIDER=logging."
+            ) from exc
+
+        settings = get_settings()
+        if not settings.sendgrid_api_key:
+            raise RuntimeError("EMAIL_PROVIDER=sendgrid but SENDGRID_API_KEY is empty.")
+        message = Mail(
+            from_email=settings.email_from,
+            to_emails=[to],
+            subject=subject,
+            html_content=html_body,
+        )
+        SendGridAPIClient(settings.sendgrid_api_key).send(message)
+        logger.info("EMAIL SENT  to=%s  subject=%r", to, subject)
+
+
 def get_email_sender() -> EmailSender:
     """
     Factory. Returns ``ResendEmailSender`` when ``EMAIL_PROVIDER=resend``,
+    ``SendGridEmailSender`` when ``EMAIL_PROVIDER=sendgrid``, and
     ``LoggingEmailSender`` otherwise. The default (``logging``) is safe for
     development, CI, and any environment without a configured API key.
     """
     settings = get_settings()
     if settings.email_provider == "resend":
         return ResendEmailSender()
+    if settings.email_provider == "sendgrid":
+        return SendGridEmailSender()
     return LoggingEmailSender()
 
 

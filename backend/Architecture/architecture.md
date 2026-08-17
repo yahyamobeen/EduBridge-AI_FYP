@@ -684,14 +684,31 @@ Confirmation is parent-only at the route (`routes.py:335`, `require_role(UserRol
 and the atomic flip lives inside `app.confirm_guardian_link` (`service.py:1357`), which returns the
 status *before* the transition so the three outcomes can be told apart.
 
-> **Known defects A10 and C3.** The guardian invitation email is **never sent** — `guardian_invite`
-> (`service.py:1210`) issues the token but makes no `_queue_email` call, and
-> `guardian_invite_email` (`auth/email_templates.py:118`) has no caller. This was **deferred by the
-> user**. C3 is latent only because of that: `student_name` is interpolated unescaped into that
-> template, which would be HTML injection into a parent's inbox from a verified sending domain.
+> **A10 and C3 are CLOSED** (KAN-21, merged 2026-08-17). `guardian_invite`
+> (`service.py:1539`) now builds the confirm URL, renders `guardian_invite_email`
+> (`auth/email_templates.py:183`) and queues it to the parent, so the flow is reachable end to end
+> and the Class 9–10 gate is passable for the first time.
 >
-> **Known defect D3.** Card 1.6's own failure criterion (`user-stories.md:172`) — "a student
-> satisfies their own gate by registering a throwaway parent account" — is satisfiable today.
+> Three things were corrected while wiring it, none of them visible as a merge conflict:
+>
+> - **The dispatch seam.** The invite goes through `send_after_commit` (session first, finding D1),
+>   not `send_async`. A guardian invite is exactly the message a parent acts on, so mailing one for a
+>   token that was then rolled back is worse than mailing nothing.
+> - **C3.** `student_name` is `app_user.full_name` — length-bounded, character-unrestricted, and
+>   editable at will through `PATCH /auth/me`. Escaping is now structural rather than per-template:
+>   `_wrap` escapes the title (so every template is safe by default), the body escapes with
+>   `quote=False` so a real *O'Brien* is not mangled, and the subject **header** is flattened rather
+>   than HTML-escaped, because a newline there forges a header and an entity there is just noise.
+> - **The language column.** The lookup reads `app_user.language_pref`, not a `LEFT JOIN` onto
+>   `student_profile`. Only `app_user` is written by `PATCH /auth/me`, so the join would have built
+>   the invite in whatever language the student chose at registration — silently, since a stale
+>   locale is still a valid locale.
+>
+> **Known defect D3 — still open, and closing A10 did not close it.** Card 1.6's own failure
+> criterion (`user-stories.md:172`) — "a student satisfies their own gate by registering a throwaway
+> parent account" — remains satisfiable: the student types the address, and the only checks are that
+> it differs from their own and that `ck_guardian_not_self` blocks `parent_id = student_id`. Either
+> add something the student cannot self-serve, or amend the card.
 
 ---
 
@@ -699,12 +716,22 @@ status *before* the transition so the three outcomes can be told apart.
 
 ### 9.1 The email seam — `app/auth/email.py`
 
-A `Protocol` with one method (`email.py:33-36`) and two implementations:
+A `Protocol` with one method (`email.py:36-39`) and three implementations:
 
-| Sender | File:line | Behaviour |
-|---|---|---|
-| `LoggingEmailSender` | `email.py:54` | Writes the message **including the one-time code or link** to the logger |
-| `ResendEmailSender` | `email.py:79` | Sends via the Resend REST API; the SDK is an optional extra (`uv sync --extra email`) |
+| Sender | Behaviour |
+|---|---|
+| `LoggingEmailSender` | Writes the message **including the one-time code or link** to the logger. Development and CI |
+| `SendGridEmailSender` | **The chosen provider** (KAN-21). Sends via the SendGrid Web API |
+| `ResendEmailSender` | Still supported, currently unused. Its unverified free tier delivers **only to the account owner's own address** and rejects everything else at the API, so a send could look successful and never leave — which is what forced the switch |
+
+Both real senders import their SDK **inside** `send`, so an environment that never mails does not
+need either installed; both ship in one optional extra (`uv sync --extra email`).
+
+⚠️ **Adding a provider is two edits, not one.** A sender class alone is not enough:
+`email_provider` is a `Literal` in `core/config.py`, and a value missing from it is refused at boot.
+That is finding A3's fix working as intended — but it means the class and the Literal must land
+together. They did not when KAN-21 merged, and the application would not start until the Literal was
+widened. `test_config_hardening.py` now pins both halves.
 
 `get_email_sender` (`email.py:113`) picks on `settings.email_provider`. Logging the body is
 deliberate (`email.py:58-67`): the OTP is stored as an HMAC hash, so a code that is neither
@@ -779,7 +806,7 @@ Four validators refuse to start rather than run misconfigured:
 | `_secret_is_strong_enough` | `config.py:106` | `jwt_secret` / `jwt_refresh_secret` under 32 characters or starting `CHANGE_ME` |
 | `_totp_key_must_be_a_fernet_key` | `config.py:120` | a `TOTP_ENCRYPTION_KEY` that is a placeholder or not a valid Fernet key — Fernet raises at *first use*, which would otherwise be the middle of a user's 2FA enrolment, as a 500 |
 | `_turnstile_key_is_not_a_placeholder` | `config.py:145` | the placeholder `TURNSTILE_SECRET_KEY` |
-| `_production_is_actually_hardened` | `config.py:159` | `"*"` in `cors_origins` in production; `EMAIL_PROVIDER=logging` in production; `resend` without `EMAIL_FROM` |
+| `_production_is_actually_hardened` | `config.py:159` | `"*"` in `cors_origins` in production; `EMAIL_PROVIDER=logging` in production; **any real provider** (`resend` or `sendgrid`) without `EMAIL_FROM`; a non-`https://` `APP_BASE_URL` in production |
 
 `totp_encryption_key` and `turnstile_secret_key` have **no defaults** on purpose
 (`config.py:58-63`): a defaulted encryption key is worse than a missing one, because every

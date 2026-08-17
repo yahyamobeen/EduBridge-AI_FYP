@@ -20,7 +20,6 @@ screen that exists to say the first one is coming.
 
 from uuid import uuid4
 
-import pytest
 from sqlalchemy import text
 
 from app.auth import email as email_module
@@ -31,28 +30,9 @@ from app.core.db import set_current_user_id
 PASSWORD = "password123"  # noqa: S105 -- a fixture value, not a credential
 
 
-class _Recorder:
-    """Stands in for the mail provider and remembers what it was asked to send."""
-
-    sent: list[tuple[str, str, str]] = []
-
-    def send(self, to: str, subject: str, html_body: str) -> None:
-        type(self).sent.append((to, subject, html_body))
-
-
-@pytest.fixture
-def sent(monkeypatch):
-    """
-    Capture delivered messages.
-
-    ⚠️ Patched OVER conftest's `never_send_real_email`, which installs the
-    logging sender. Later monkeypatch wins, and the safety property that matters
-    — never reaching a real provider — is preserved either way.
-    """
-    _Recorder.sent = []
-    monkeypatch.setattr(email_module, "get_email_sender", _Recorder)
-    yield _Recorder.sent
-    _Recorder.sent = []
+# `_Recorder` and the `sent` fixture moved to conftest.py when the guardian
+# invite acquired a delivery path and needed the same capture. One definition,
+# because two would drift.
 
 
 def _user(db, email: str, *, method: str | None = None) -> str:
@@ -190,6 +170,52 @@ class TestD1TheTransactionDecidesWhetherToSend:
             "service.py imports the immediate dispatch path again -- finding D1"
         )
         assert "send_async" not in called, "service.py calls send_async directly -- finding D1"
+
+    def test_every_queued_email_passes_the_session(self):
+        """
+        ⚠️ THE RIGHT NAME IS NOT THE RIGHT CALL, AND THE ABOVE CANNOT TELL.
+
+        The two seams differ by their FIRST parameter -- `send_async(to, subject,
+        html_body)` against `send_after_commit(session, to, subject, html_body)`
+        -- and both are reached through the same `_queue_email` alias. So a call
+        site written for the old seam still names the new one.
+
+        That is not hypothetical. Merging KAN-21 took OUR import line and THEIR
+        call site, producing `_queue_email(parent_email, subject, html)` against
+        the 4-parameter function: a TypeError on every guardian invite. Git
+        reported no conflict, the check above passed, and KAN-21's own new test
+        passed too -- it monkeypatched `_queue_email` with a 3-parameter stub, so
+        the real callee was never reached. Green suite, dead endpoint.
+
+        Arity is the part that was unguarded, so arity is what this asserts.
+        """
+        import ast
+        from pathlib import Path
+
+        source = Path(__file__).resolve().parents[2] / "app" / "auth" / "service.py"
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+
+        offenders = [
+            (node.lineno, len(node.args))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_queue_email"
+            and (
+                len(node.args) != 4
+                # Positional, and the session first. A keyword call would still
+                # work, but every existing site is positional and one that is
+                # not is worth a human look rather than a silent pass.
+                or not isinstance(node.args[0], ast.Name)
+                or node.args[0].id not in {"db", "session"}
+            )
+        ]
+
+        assert not offenders, (
+            "_queue_email must be called as (session, to, subject, html_body). "
+            f"Wrong at service.py lines {[line for line, _ in offenders]} "
+            f"(arg counts {[count for _, count in offenders]})."
+        )
 
     def test_a_second_commit_does_not_send_it_again(self, db, sent):
         """

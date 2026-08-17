@@ -7,6 +7,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 
+# Providers that actually put mail on the wire, and therefore need a sender
+# address. `logging` is the only member of `email_provider`'s Literal missing
+# from this set, and that is deliberate: it writes to a log, which has no From.
+_PROVIDERS_NEEDING_SENDER = frozenset({"resend", "sendgrid"})
+
 
 class Settings(BaseSettings):
     """
@@ -126,20 +131,34 @@ class Settings(BaseSettings):
     # secret key would silently verify nothing (or every) captcha.
     turnstile_secret_key: str = Field(validation_alias="TURNSTILE_SECRET_KEY")
 
-    # Email delivery (tdd.md §3.1, KAN-10b).
-    # "logging" writes metadata to the logger (development/CI).
-    # "resend" sends via the Resend API, and needs `uv sync --extra email`.
-    # No provider is settled; `logging` is the default so nothing is chosen by
-    # accident.
-    # Finding A3. Also a bare `str`. Every consumer tests `== "logging"` or
-    # `== "resend"`, so `EMAIL_PROVIDER=Resend` matched NEITHER -- it fell
-    # through to the logging sender AND past the production guard below, which
-    # also tests `== "logging"`. A production deployment would have written every
-    # 2FA code and every password-reset link to stdout while reporting healthy.
-    email_provider: Literal["logging", "resend"] = Field(
+    # Email delivery (tdd.md §3.1, KAN-10b; provider resolved to SendGrid in
+    # KAN-21).
+    # "logging"  writes metadata to the logger (development/CI).
+    # "sendgrid" sends via the SendGrid Web API -- the chosen provider.
+    # "resend"   sends via the Resend API. Retained and still supported, but
+    #            its unverified free tier delivers ONLY to the account owner's
+    #            own address, so it could never reach a real parent. That is
+    #            what forced the switch.
+    # Both real providers need `uv sync --extra email`.
+    #
+    # ⚠️ THIS IS A `Literal`, NOT A `str`, AND WIDENING IT IS PART OF ADDING A
+    #    PROVIDER. Finding A3: it used to be a bare `str`, and every consumer
+    #    tests `== "logging"` or `== "resend"`, so `EMAIL_PROVIDER=Resend`
+    #    matched NEITHER -- it fell through to the logging sender AND past the
+    #    production guard below, which also tests `== "logging"`. A production
+    #    deployment would have written every 2FA code and every password-reset
+    #    link to stdout while reporting healthy.
+    #
+    #    The cost of the Literal is that a provider absent from it is refused at
+    #    boot rather than ignored, which is the whole point -- but it means
+    #    `email.py` growing a sender class is not sufficient on its own. Adding
+    #    `SendGridEmailSender` without this line would have raised a validation
+    #    error before the application could start.
+    email_provider: Literal["logging", "resend", "sendgrid"] = Field(
         default="logging", validation_alias="EMAIL_PROVIDER"
     )
     resend_api_key: str = Field(default="", validation_alias="RESEND_API_KEY")
+    sendgrid_api_key: str = Field(default="", validation_alias="SENDGRID_API_KEY")
     email_from: str = Field(default="", validation_alias="EMAIL_FROM")
     app_base_url: str = Field(default="http://localhost:3000", validation_alias="APP_BASE_URL")
 
@@ -271,8 +290,12 @@ class Settings(BaseSettings):
                 "links and 2FA codes would be written to the log and never sent, "
                 "so nobody could complete sign-up."
             )
-        if self.email_provider == "resend" and not self.email_from:
-            raise ValueError("EMAIL_PROVIDER=resend requires EMAIL_FROM to be set.")
+        # Every real provider needs a sender address; only `logging` does not.
+        # One membership test rather than one `if` per provider, so adding a
+        # fourth is an edit here and in the Literal above — not a third branch
+        # somebody forgets to write.
+        if self.email_provider in _PROVIDERS_NEEDING_SENDER and not self.email_from:
+            raise ValueError(f"EMAIL_PROVIDER={self.email_provider} requires EMAIL_FROM to be set.")
         # Finding D11. `app_base_url` is what every verification and reset link
         # is built from. Left at its localhost default in production it mails
         # links nobody can open; set to `http://` it puts single-use credentials

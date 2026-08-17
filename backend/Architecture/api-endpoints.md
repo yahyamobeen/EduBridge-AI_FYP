@@ -219,16 +219,24 @@ arbitrary address exists.
 three outcomes are distinguishable: zero rows → `400 INVALID_TOKEN`; `verified` → `409
 GUARDIAN_ALREADY_LINKED`; `pending` → `200`.
 
-> **Known defect A10 — deferred by the user.** The guardian invitation email is **never sent**.
-> `guardian_invite` (`service.py:1210`) issues the token but makes no `_queue_email` call, and
-> `guardian_invite_email` (`app/auth/email_templates.py:118`) has **no caller**. The flow is
-> therefore unreachable end to end in the current build.
+> **A10 — CLOSED** (KAN-21, merged 2026-08-17). `guardian_invite` (`service.py:1539`) builds the
+> confirm URL, renders `guardian_invite_email` (`app/auth/email_templates.py:183`) and queues it to
+> the parent through `send_after_commit`, so the message is released only if the transaction that
+> minted the token commits. The flow is reachable end to end and **the Class 9–10 journey is no
+> longer blocked**. Covered by `test_guardian_flow.py`, which captures at the provider seam rather
+> than by replacing `_queue_email` — a stub there defines the signature it is testing against, which
+> is how a 500 once shipped with a green test.
 >
-> **Known defect C3 — latent because of A10.** `student_name` is interpolated unescaped into that
-> template: HTML injection into a parent's inbox from a verified sending domain.
+> **C3 — CLOSED in the same change**, because wiring A10 is what made it reachable. `student_name` is
+> `app_user.full_name`: length-bounded, character-unrestricted, and editable at any time through
+> `PATCH /auth/me`. Escaping is structural — `_wrap` escapes the document title, the body escapes
+> text content, and the subject **header** is flattened instead (a newline there forges a header;
+> an HTML entity there is just noise a parent has to read). `tests/unit/test_email_template_escaping.py`.
 >
-> **Known defect D3.** Card 1.6's own failure criterion (`user-stories.md:172`) — "a student
-> satisfies their own gate by registering a throwaway parent account" — is satisfiable today.
+> **Known defect D3 — STILL OPEN.** Closing A10 does not close it. Card 1.6's own failure criterion
+> (`user-stories.md:172`) — "a student satisfies their own gate by registering a throwaway parent
+> account" — remains satisfiable: the student supplies the address, and nothing checks that the
+> account on the other end is a real guardian.
 
 ### 2.7 FR-A8 — manage own account
 

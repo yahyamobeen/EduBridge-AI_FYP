@@ -742,15 +742,28 @@ flowchart TB
       <code>app.confirm_guardian_link</code> <span class="ln">service.py:1357</span>, which returns the status
       <em>before</em> the transition so the three outcomes can be told apart.</p>
 
+      <div class="callout">
+        <span class="t">A10 and C3 — closed (KAN-21, merged 2026-08-17)</span>
+        <strong>The guardian invitation email is now delivered.</strong> <code>guardian_invite</code>
+        <span class="ln">service.py:1539</span> builds the confirm URL, renders
+        <code>guardian_invite_email</code> <span class="ln">auth/email_templates.py:183</span> and queues it to the
+        parent through <code>send_after_commit</code>, so the message is released only if the transaction that minted
+        the token commits. <strong>The Class 9–10 journey is no longer blocked.</strong>
+        <br><br>
+        C3 closed in the same change, because wiring A10 is what made it reachable:
+        <code>student_name</code> is <code>app_user.full_name</code>, which is length-bounded,
+        character-unrestricted and editable at any time through <code>PATCH /auth/me</code>. Escaping is structural —
+        <code>_wrap</code> escapes the document title, the body escapes text content, and the subject
+        <em>header</em> is flattened rather than entity-escaped, because a newline there forges a header while an
+        entity there is only noise a parent has to read.
+      </div>
+
       <div class="callout danger">
-        <span class="t">Known defects A10, C3 and D3</span>
-        <strong>The guardian invitation email is never sent.</strong> <code>guardian_invite</code>
-        <span class="ln">service.py:1210</span> issues the token but makes no <code>_queue_email</code> call, and
-        <code>guardian_invite_email</code> <span class="ln">auth/email_templates.py:118</span> has no caller.
-        <strong>Deferred by the user.</strong> C3 is latent only because of that: <code>student_name</code> is
-        interpolated unescaped into that template, which would be HTML injection into a parent's inbox from a verified
-        sending domain. And Card 1.6's own failure criterion <span class="ln">user-stories.md:172</span> — "a student
-        satisfies their own gate by registering a throwaway parent account" — is satisfiable today.
+        <span class="t">Known defect D3 — still open</span>
+        Closing A10 did <em>not</em> close it. Card 1.6's own failure criterion
+        <span class="ln">user-stories.md:172</span> — "a student satisfies their own gate by registering a throwaway
+        parent account" — remains satisfiable: the student supplies the address, and nothing checks that the account
+        on the other end is a real guardian. Either add something the student cannot self-serve, or amend the card.
       </div>
     </section>
 
@@ -758,16 +771,27 @@ flowchart TB
       <h2>Cross-cutting mechanisms</h2>
 
       <h3>The email seam <span class="ln">app/auth/email.py</span></h3>
-      <p>A <code>Protocol</code> with one method <span class="ln">email.py:33-36</span> and two implementations —
-      <code>LoggingEmailSender</code> <span class="ln">email.py:54</span>, which writes the message
-      <strong>including the one-time code or link</strong> to the logger, and <code>ResendEmailSender</code>
-      <span class="ln">email.py:79</span>, whose SDK is an optional extra. <code>get_email_sender</code>
-      <span class="ln">email.py:113</span> picks on <code>settings.email_provider</code>. Logging the body is deliberate
+      <p>A <code>Protocol</code> with one method <span class="ln">email.py:36-39</span> and three implementations —
+      <code>LoggingEmailSender</code>, which writes the message <strong>including the one-time code or link</strong> to
+      the logger; <code>SendGridEmailSender</code>, <strong>the chosen provider</strong> since KAN-21; and
+      <code>ResendEmailSender</code>, still supported but unused, whose unverified free tier delivers only to the
+      account owner's own address and so could never reach a real parent. Both real senders import their SDK inside
+      <code>send</code> and ship in one optional extra. <code>get_email_sender</code> picks on
+      <code>settings.email_provider</code>. Logging the body is deliberate
       <span class="ln">email.py:58-67</span>: the OTP is stored as an HMAC hash, so a code that is neither delivered nor
       logged cannot be recovered by anyone, and 2FA enrolment by email simply could not be completed on a developer
       machine. The safety of that decision rests <em>entirely</em> on
       <code>_production_is_actually_hardened</code> <span class="ln">config.py:166-171</span> refusing to start with
       <code>EMAIL_PROVIDER=logging</code> in production.</p>
+      <div class="callout warn">
+        <span class="t">Adding a provider is two edits, not one</span>
+        A sender class alone is not enough. <code>email_provider</code> is a <code>Literal</code> in
+        <code>core/config.py</code>, and a value missing from it is <strong>refused at boot</strong> — finding A3's
+        fix working as intended. The class and the Literal must therefore land together, and they did not when
+        KAN-21 merged: git reported no conflict because they are different lines in different files, and the
+        application simply would not start until the Literal was widened.
+        <code>test_config_hardening.py</code> now pins both halves.
+      </div>
       <p><strong>Dispatch is asynchronous, and that is a security control, not a performance one.</strong>
       <code>send_async</code> <span class="ln">email.py:167</span> submits to a two-worker
       <code>ThreadPoolExecutor</code>. The comment at <code>email.py:127-137</code> explains:

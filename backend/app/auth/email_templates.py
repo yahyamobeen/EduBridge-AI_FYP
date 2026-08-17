@@ -22,6 +22,9 @@ still lands on an Urdu page.
 
 from __future__ import annotations
 
+import html
+import re
+
 from app.core.config import get_settings
 
 # BCP-47 as the web uses it. `language_code` in the database is en | ur |
@@ -52,8 +55,64 @@ def web_locale(language_pref: str | None) -> str:
     return _DB_TO_WEB_LOCALE.get(str(language_pref), _DEFAULT_LOCALE)
 
 
+# ---------------------------------------------------------------------------
+# Finding C3 — user-supplied text in a template is HTML until it is escaped.
+#
+# Exactly one interpolation in this module carries user input: `student_name` in
+# `guardian_invite_email`, which is `app_user.full_name` — bounded in LENGTH and
+# unrestricted in CHARACTERS. Everything else here is a generated code, an
+# opaque token, a validated locale or a literal.
+#
+# It was latent while the guardian invite had no caller. Wiring the invite
+# (KAN-21, finding A10) makes it live, and this branch's `PATCH /auth/me` lets a
+# student rewrite their own name at any time — so the payload is not merely
+# attacker-supplied, it is attacker-EDITABLE, and it is delivered to a parent
+# from a verified sending domain. That is a phishing anchor with the project's
+# own reputation behind it.
+# ---------------------------------------------------------------------------
+
+
+def _text(value: str) -> str:
+    """
+    Escape user-supplied text for HTML **text content**.
+
+    ⚠️ `quote=False` ON PURPOSE. Everything escaped here lands between tags —
+    `<strong>{name}</strong>`, `<title>{title}</title>` — never inside an
+    attribute, so quotes need no escaping. The default `quote=True` would render
+    a real parent's *O'Brien* as `O&#x27;Brien`. Over-escaping is its own defect:
+    it teaches readers the escaping is cosmetic and invites its removal.
+
+    ⚠️ If any caller ever puts this INTO an attribute, this is the wrong helper.
+    """
+    return html.escape(value, quote=False)
+
+
+def _header_safe(value: str) -> str:
+    """
+    Flatten a value going into a mail HEADER (the subject line).
+
+    A different defect from the HTML one, and `html.escape` does nothing about
+    it: a CR or LF in a header ends it and begins another, which is how a name
+    becomes an extra `Bcc:`. `full_name` is a free-text field with no character
+    restriction, so it can carry both.
+
+    Whitespace is collapsed rather than only stripped, because a tab or a run of
+    newlines in a subject is a rendering mess even when it is not an injection.
+    """
+    return re.sub(r"\s+", " ", value).strip()
+
+
 def _wrap(title: str, body_html: str, locale: str) -> str:
-    """Minimal HTML wrapper with inline styles for basic email rendering."""
+    """
+    Minimal HTML wrapper with inline styles for basic email rendering.
+
+    ⚠️ `title` IS ESCAPED HERE, not by callers. Every template passes its subject
+    as the title, and a subject can carry user text — so escaping in the one
+    place the title reaches HTML makes every present and future template safe by
+    default, rather than making each author remember. `body_html` is NOT escaped:
+    it is composed by this module and is HTML by contract.
+    """
+    title = _text(title)
     direction = "rtl" if locale in _RTL_LOCALES else "ltr"
     return f"""\
 <!DOCTYPE html>
@@ -125,15 +184,29 @@ def guardian_invite_email(
     url: str, student_name: str, locale: str = _DEFAULT_LOCALE
 ) -> tuple[str, str]:
     """
-    Guardian invite link.
+    Guardian invite link. Wired by `service.guardian_invite` (finding A10).
 
-    Wired by `service.guardian_invite` once both branches are merged; the
-    delivery seam is the missing half of that flow.
+    ⚠️ `student_name` IS THE ONLY USER-CONTROLLED VALUE IN THIS MODULE, and it
+    reaches THREE places with two different escaping rules — finding C3.
+
+    It is `app_user.full_name`: length-bounded, character-unrestricted, and
+    editable at will through `PATCH /auth/me`. The recipient is a parent, and the
+    sender is a domain this project has verified, so unescaped markup here is a
+    phishing link with the platform's own reputation attached.
+
+    * body — HTML text content, so `_text`.
+    * `<title>` — also HTML, escaped inside `_wrap`, which is why the raw subject
+      is safe to pass along.
+    * subject header — NOT HTML. Escaping it would show a real parent
+      `&lt;` where their child's name should be, so it gets `_header_safe`
+      instead, which removes the CR/LF that would actually let a name forge a
+      header.
     """
-    subject = f"{student_name} invited you to join EduBridge AI as a guardian"
+    display_name = _text(student_name)
+    subject = f"{_header_safe(student_name)} invited you to join EduBridge AI as a guardian"
     body = f"""\
 <h2>Guardian invitation</h2>
-<p><strong>{student_name}</strong> has invited you to link your account as their guardian on EduBridge AI.</p>
+<p><strong>{display_name}</strong> has invited you to link your account as their guardian on EduBridge AI.</p>
 {_button(url, "Accept Invitation")}
 <p style="font-size: 13px; color: #555;">You will need to create an EduBridge AI account (or sign in) before you can confirm the link.</p>"""
     return subject, _wrap(subject, body, locale)

@@ -13,8 +13,10 @@ from app.auth import gate
 from app.auth.backup_codes import generate_backup_codes, hash_backup_code, verify_backup_code
 from app.auth.email import send_after_commit as _queue_email
 from app.auth.email_templates import (
+    build_guardian_invite_url,
     build_password_reset_url,
     build_verification_url,
+    guardian_invite_email,
     password_reset_email,
     two_factor_otp_email,
     verification_email,
@@ -1548,7 +1550,18 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # whether an arbitrary address exists from this endpoint's response codes.
     student = (
         db.execute(
-            text("SELECT email FROM app_user WHERE id = :uid AND deleted_at IS NULL"),
+            text(
+                # `u.language_pref` since 20260816200000, NOT a LEFT JOIN onto
+                # `student_profile`. Both columns still exist and `app_user` is
+                # the source of truth: `PATCH /auth/me` and the settings screen
+                # write only that one, so reading the profile copy would build
+                # this invite in whatever language the student chose at
+                # REGISTRATION and ignore every change since -- silently, since
+                # a stale locale is a valid locale.
+                "SELECT u.email, u.full_name, u.language_pref "
+                "FROM app_user u "
+                "WHERE u.id = :uid AND u.deleted_at IS NULL"
+            ),
             {"uid": student_id},
         )
         .mappings()
@@ -1607,7 +1620,18 @@ def guardian_invite(db: Session, student_id: UUID, payload: GuardianInviteReques
     # email link cannot be redeemed after a resend. Both are owner-scoped writes
     # under RLS as the student.
     revoke_user_tokens(db, student_id, kind=TokenKind.guardian_invite.value)
-    issue_guardian_invite_token(db, student_id)
+    plain_token = issue_guardian_invite_token(db, student_id)
+
+    locale = web_locale(student["language_pref"])
+    url = build_guardian_invite_url(plain_token, locale)
+    student_name = str(student["full_name"] or "Student")
+    subject, html = guardian_invite_email(url, student_name, locale)
+    # `db` FIRST: this is `send_after_commit`, not `send_async` (finding D1). The
+    # invite is queued and released only if this transaction commits, so a
+    # failure after `issue_guardian_invite_token` cannot mail a parent a link
+    # for a token that was rolled back -- and a guardian invite is exactly the
+    # message a parent would act on.
+    _queue_email(db, parent_email, subject, html)
 
     return {
         "invite_sent": True,
