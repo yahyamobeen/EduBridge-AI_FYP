@@ -192,9 +192,23 @@ services:
         sync: false
 
       # The backend's public URL, set after its first deploy — then redeploy
-      # this service. NEXT_PUBLIC_* values are inlined at build time, so a
-      # changed env var needs a rebuild, not a restart.
-      #   https://edubridge-backend.onrender.com
+      # this service.
+      #   https://edubridge-backend-hntl.onrender.com
+      #
+      # ⚠️ REQUIRED, AND IT NOW HAS TWO READERS.
+      #   1. next.config.mjs builds the /api rewrite from it, at config load.
+      #   2. lib/api/client.ts resolves SERVER-side fetches with it, because
+      #      NEXT_PUBLIC_API_BASE_URL is the relative `/api` and Node has no
+      #      origin to resolve that against. Without this the student signup page
+      #      -- the only server component that calls the API -- degrades to
+      #      "Could not load the class and subject options" while teacher and
+      #      parent signup work, which reads like a page bug rather than config.
+      #
+      # ⚠️ MUST BE A BARE ORIGIN, EXACTLY ONE SCHEME. `https://https://host` was
+      #    live here and 500'd every API call: it satisfies a naive
+      #    `startsWith('https://')` check, and `new URL()` PARSES it rather than
+      #    throwing (hostname becomes "https"). client.ts now rejects it by
+      #    inspecting the hostname; next.config.mjs still does not.
       - key: BACKEND_INTERNAL_URL
         sync: false
 

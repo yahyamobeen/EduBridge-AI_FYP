@@ -23,9 +23,87 @@ import type { RefreshResponse } from './types'
  */
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
 
+/**
+ * Absolute origin for SERVER-side calls, so a relative `BASE_URL` still works
+ * there. Server-only — no `NEXT_PUBLIC_` prefix, so it is never sent to a
+ * browser, and it is the same variable `next.config.mjs` builds the rewrite
+ * from. The server therefore takes the same route to the backend the browser
+ * does, just without a proxy hop in the middle.
+ */
+const SERVER_ORIGIN = process.env.BACKEND_INTERNAL_URL?.trim().replace(/\/+$/, '') ?? ''
+
+/**
+ * Cheap prefix test, used only to ask "did someone configure a full URL here?".
+ * Deliberately NOT the validity check — see `isUsableOrigin`.
+ */
+const isAbsolute = (value: string): boolean => /^https?:\/\//i.test(value)
+
+/**
+ * Is this a *usable* absolute origin?
+ *
+ * ⚠️ NEITHER `startsWith('https://')` NOR `new URL()` IS ENOUGH ON ITS OWN, and
+ * a test proved it: `https://https://host` passes both. The WHATWG parser
+ * accepts it rather than throwing, yielding hostname `"https"` and pathname
+ * `"//host"`.
+ *
+ * That is not a hypothetical value. It was live on Render, and it broke every
+ * API call for hours precisely because `next.config.mjs` validates the rewrite
+ * destination with the same naive prefix test — the string starts with
+ * `https://`, so the build passed and each request 500'd at runtime instead.
+ *
+ * A scheme sitting in the hostname position is the tell, so that is what this
+ * looks for.
+ */
+function isUsableOrigin(value: string): boolean {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  return url.hostname !== 'http' && url.hostname !== 'https'
+}
+
 function resolve(path: string): string {
-  if (BASE_URL) return `${BASE_URL}${path}`
-  if (typeof window === 'undefined') {
+  const onServer = typeof window === 'undefined'
+
+  if (BASE_URL) {
+    if (!onServer || isAbsolute(BASE_URL)) return `${BASE_URL}${path}`
+
+    // ⚠️ RELATIVE BASE, ON THE SERVER — THE PRODUCTION-ONLY CASE.
+    //
+    // In production `NEXT_PUBLIC_API_BASE_URL` is `/api`, and it has to be:
+    // that is what routes the browser through the rewrite and keeps the refresh
+    // cookie same-site. Development sets an ABSOLUTE `http://localhost:8000/api`
+    // instead, so this branch never runs locally.
+    //
+    // The result was that a server component fetching `/api/...` threw
+    // `TypeError: Failed to parse URL` on Render and nowhere else. The signup
+    // page catches its enum load and degrades to "Could not load the class and
+    // subject options", so the real error never surfaced anywhere — the form
+    // was simply unreachable in production while every test and every local run
+    // was green.
+    if (SERVER_ORIGIN) {
+      if (!isUsableOrigin(SERVER_ORIGIN)) {
+        throw new Error(
+          `BACKEND_INTERNAL_URL must be an absolute http(s) URL; got ${JSON.stringify(SERVER_ORIGIN)}. ` +
+            'A doubled scheme ("https://https://…") is the usual cause and it also ' +
+            'breaks the /api rewrite in next.config.mjs.',
+        )
+      }
+      return `${SERVER_ORIGIN}${BASE_URL}${path}`
+    }
+
+    throw new Error(
+      `Cannot resolve a relative API base (${BASE_URL}) on the server: ` +
+        'BACKEND_INTERNAL_URL is not set. It is required wherever ' +
+        'NEXT_PUBLIC_API_BASE_URL is relative, because Node has no origin to ' +
+        'resolve against and fetch throws "Failed to parse URL".',
+    )
+  }
+
+  if (onServer) {
     throw new Error(
       'NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be ' +
         'resolved on the server. Set it in .env.local (see .env.example) and ' +

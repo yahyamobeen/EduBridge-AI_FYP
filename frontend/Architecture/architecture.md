@@ -292,12 +292,16 @@ from a configuration invariant into a structural one: there is no mock to select
 ```ts
 // lib/api/client.ts
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
+const SERVER_ORIGIN = process.env.BACKEND_INTERNAL_URL?.trim().replace(/\/+$/, '') ?? ''
 
 function resolve(path: string): string {
-  if (BASE_URL) return `${BASE_URL}${path}`
-  if (typeof window === 'undefined') {
-    throw new Error('NEXT_PUBLIC_API_BASE_URL is not set, and a relative API path cannot be…')
+  const onServer = typeof window === 'undefined'
+  if (BASE_URL) {
+    if (!onServer || isAbsolute(BASE_URL)) return `${BASE_URL}${path}`
+    if (SERVER_ORIGIN) return `${SERVER_ORIGIN}${BASE_URL}${path}` // + validity check
+    throw new Error('Cannot resolve a relative API base on the server: BACKEND_INTERNAL_URL…')
   }
+  if (onServer) throw new Error('NEXT_PUBLIC_API_BASE_URL is not set…')
   return path
 }
 ```
@@ -306,8 +310,29 @@ The mock default existed *because* an unset base URL produces a relative path No
 the server. **The empty string is still load-bearing in the browser**: relative `/api/...` goes
 through the `next.config.mjs` rewrite, and that rewrite is what keeps the refresh cookie same-site.
 Pointing `NEXT_PUBLIC_API_BASE_URL` at the backend's public address re-breaks it silently, in
-production only. So the fix is **server-side only**: no `window` and no base URL now throws a named
-error naming the variable to set, rather than failing three frames deep inside `fetch`.
+production only.
+
+> ⚠️ **A base that is SET but RELATIVE was the same hole, and the guard above did not cover it.**
+> The check asked "is it set?", not "can Node use it?" — so production, where the value is `/api`
+> **by design**, went straight past it. `app/[locale]/(site)/signup/student/page.tsx` is the only
+> **server** component that calls the API (it fetches board and class options so the academic step
+> has them on first paint), and there `fetch('/api/reference/enums')` threw
+> `TypeError: Failed to parse URL`. The page catches its own enum load and degrades, so the real
+> error surfaced **nowhere** — no log line, no console entry, no network request.
+>
+> It could not reproduce locally: development sets an **absolute** `http://localhost:8000/api`, so
+> the failing branch never ran. In production the symptom was that **student** signup showed "Could
+> not load the class and subject options" while **teacher and parent** signup worked perfectly —
+> because neither of those fetches on the server. That asymmetry is the diagnostic.
+>
+> A relative base is now resolved against `BACKEND_INTERNAL_URL` **on the server only**; the browser
+> path is untouched, and `resolveBaseUrl.test.ts` asserts that explicitly, because prefixing the
+> browser's URL would reintroduce the cross-site cookie bug this rewrite exists to prevent.
+>
+> ⚠️ The origin is validated with `new URL()` **plus a hostname check**, not a `startsWith('https://')`
+> test. `https://https://host` passes both a prefix test and the WHATWG parser — it yields hostname
+> `"https"` rather than an error. That exact value was live on Render and 500'd every API call,
+> because `next.config.mjs` validates the rewrite destination with the naive prefix test.
 
 What this costs, stated plainly: a developer with a clean checkout and no backend running no longer
 gets a working application. Pages that load data fail, and signup fails first, because
