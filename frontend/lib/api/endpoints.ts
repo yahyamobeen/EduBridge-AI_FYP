@@ -1,5 +1,6 @@
 import { apiFetch, endSession, rememberSession } from './client'
 import type {
+  BoardCode,
   EmailResendRequest,
   EmailVerifyRequest,
   EmailVerifyResponse,
@@ -9,6 +10,8 @@ import type {
   GuardianInviteRequest,
   GuardianInviteResponse,
   GuardianStatusResponse,
+  JoinCodeResponse,
+  JoinResponse,
   LoginRequest,
   LoginResponse,
   MeResponse,
@@ -16,8 +19,14 @@ import type {
   PasswordChangeRequest,
   PasswordForgotRequest,
   PasswordResetRequest,
+  PeopleResponse,
   RegisterRequest,
   RegisterResponse,
+  SpaceCreateRequest,
+  SpaceDetail,
+  SpaceListResponse,
+  SpaceUpdateRequest,
+  SubjectsResponse,
   TwoFactorConfirmRequest,
   TwoFactorConfirmResponse,
   TwoFactorEnrollRequest,
@@ -271,4 +280,64 @@ export async function logout(): Promise<void> {
     // outcome, especially on the shared devices prd.md §3.1 describes.
     endSession()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Classroom (tdd.md §3.6). All authenticated, so all client-only (see the note
+// at the top of this file). Ids are encoded because they arrive from the URL.
+// ---------------------------------------------------------------------------
+
+const seg = (id: string) => encodeURIComponent(id)
+const withSignal = (signal?: AbortSignal) => (signal ? { signal } : {})
+
+export function listSpaces(signal?: AbortSignal): Promise<SpaceListResponse> {
+  return apiFetch<SpaceListResponse>('/spaces', withSignal(signal))
+}
+
+export function createSpace(body: SpaceCreateRequest): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>('/spaces', { method: 'POST', body })
+}
+
+export function getSpace(id: string, signal?: AbortSignal): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>(`/spaces/${seg(id)}`, withSignal(signal))
+}
+
+export function updateSpace(id: string, body: SpaceUpdateRequest): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>(`/spaces/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function changeJoinCode(
+  id: string,
+  action: 'rotate' | 'disable',
+): Promise<JoinCodeResponse> {
+  return apiFetch<JoinCodeResponse>(`/spaces/${seg(id)}/join-code`, {
+    method: 'POST',
+    body: { action },
+  })
+}
+
+export function joinSpace(code: string): Promise<JoinResponse> {
+  return apiFetch<JoinResponse>('/spaces/join', { method: 'POST', body: { code } })
+}
+
+/** Idempotent: 204 whether or not the caller was a member. */
+export function leaveSpace(id: string): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(id)}/membership`, { method: 'DELETE' })
+}
+
+export function getPeople(id: string, signal?: AbortSignal): Promise<PeopleResponse> {
+  return apiFetch<PeopleResponse>(`/spaces/${seg(id)}/people`, withSignal(signal))
+}
+
+export function removeMember(id: string, studentId: string): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(id)}/members/${seg(studentId)}`, { method: 'DELETE' })
+}
+
+export function listSubjects(
+  board: BoardCode,
+  classLevel: number,
+  signal?: AbortSignal,
+): Promise<SubjectsResponse> {
+  const query = new URLSearchParams({ board, class_level: String(classLevel) })
+  return apiFetch<SubjectsResponse>(`/reference/subjects?${query}`, withSignal(signal))
 }

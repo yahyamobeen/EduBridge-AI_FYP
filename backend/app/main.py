@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.email import drain_pending_emails
 from app.auth.routes import router as auth_router
+from app.classroom.routes import router as classroom_router
 from app.core.config import get_settings
 from app.core.db import DatabaseUnreachableError, assert_backend_role_cannot_bypass_rls
 from app.core.errors import register_exception_handlers
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(auth_router, prefix=settings.api_base_path)
+    app.include_router(classroom_router, prefix=settings.api_base_path)
 
     @app.get("/health", tags=["system"])
     def health() -> dict:

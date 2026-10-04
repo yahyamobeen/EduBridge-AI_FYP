@@ -26,9 +26,9 @@ The single most load-bearing sentence in this whole folder follows from that spl
 ## At a glance
 
 - **Next.js 16 + React 19**, App Router, TypeScript, Tailwind CSS v3.
-- **22 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
-- **3 locales**: `en`, `ur`, `ur-Latn`, each with **429** leaf message keys, in identical order. `ur` is the only right-to-left locale.
-- **24 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
+- **27 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
+- **3 locales**: `en`, `ur`, `ur-Latn`, each with **562** leaf message keys, in identical order. `ur` is the only right-to-left locale.
+- **30 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
 - Access token in **memory only**; refresh token in an `httpOnly` cookie JavaScript cannot read.
 - One transport client with proactive refresh, single-flight refresh, and an error-code allow-list for retry.
 - **No mock layer.** It was deleted in phase 1b; `NEXT_PUBLIC_API_BASE_URL` is required and a backend must be running.
@@ -38,16 +38,16 @@ The single most load-bearing sentence in this whole folder follows from that spl
 Run from `frontend/`:
 
 ```bash
-find app -name "page.tsx" | wc -l                                   # 22
+find app -name "page.tsx" | wc -l                                   # 27
 find app -type d -name "(*)" | wc -l                                # 3
 find . -path ./node_modules -prune -o -path ./.next -prune -o \
-     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 24
+     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 30
 ls messages/                                                        # en.json  ur-Latn.json  ur.json
 node -e "const f=require('fs');const c=o=>Object.values(o).reduce((n,v)=>n+(v&&typeof v==='object'?c(v):1),0);for(const l of ['en','ur','ur-Latn'])console.log(l,c(JSON.parse(f.readFileSync('messages/'+l+'.json','utf8'))))"
-                                                                    # en 429 / ur 429 / ur-Latn 429
+                                                                    # en 562 / ur 562 / ur-Latn 562
 ```
 
-The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  24 passed (24)` · `Tests  283 passed (283)`** at this snapshot.
+The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  30 passed (30)` · `Tests  335 passed (335)`** (re-run 2026-10-04, classroom Phase 2; three consecutive full runs).
 
 ## Known defects, recorded rather than hidden
 
@@ -69,7 +69,7 @@ Seven findings from the Epic 1 review land in this application. They are documen
 Run from `frontend/`:
 
 ```bash
-npm test          # Vitest, 24 files
+npm test          # Vitest, 30 files
 npm run build     # includes the TypeScript check
 npm run lint      # ESLint
 npm run typecheck # tsc --noEmit

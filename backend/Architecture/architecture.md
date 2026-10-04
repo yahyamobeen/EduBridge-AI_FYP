@@ -23,12 +23,13 @@ Unified Configuration (a PostgreSQL runtime setting).
 
 ## 1. Overview
 
-The backend is a **single FastAPI application** with one router. All server logic lives under
-`backend/app/`, split into three packages:
+The backend is a **single FastAPI application** with two routers. All server logic lives under
+`backend/app/`, split into four packages:
 
 | Package | Contents |
 |---|---|
-| `app/auth/` | The only router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
+| `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phase 2), its role dependencies, request/response schemas, the service, and join-code generation (`codes.py`) — §2.8 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -45,14 +46,17 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **26** | `find backend/app -type f -name "*.py" \| wc -l` |
-| Routers | **1** (`app/auth/routes.py:79`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **17** | `grep -c "^@router\." backend/app/auth/routes.py` |
-| Routes specified in `tdd.md` §3.1 + §7.2 | **48** | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **31** | 48 − 17 |
-| Applied migrations | **11** | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **25** (10 unit, 15 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **24 distinct, 28 call sites** | `grep -rnE "SELECT (\*\|[a-z_, ]+) FROM app\.\|SELECT app\." backend/app --include=*.py` |
+| Python source files | **32** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:39`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **31** (21 + 10) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Routes specified in `tdd.md` v0.4.0 | **83** | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
+| Specified but **not** implemented | **52** | 83 − 31 |
+| Applied migrations | **27** | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **43** (19 unit, 24 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **37 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 35; `app.owns_space` and `app.owns_active_space` are selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`) that the grep cannot see |
+
+*Re-measured 2026-10-04 (classroom Phase 2); the rest of this page is the 2026-08-15 account unless a
+section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5.*
 
 ### Directories that are scaffolded, with no implementation
 
@@ -246,8 +250,34 @@ queries. The ORM declarations in `app/models/` exist for the few statements that
 (`revoke_user_tokens` at `auth/tokens.py:150` is the only ORM write in the request path) and as
 documentation of the schema; the schema itself is owned by the migrations.
 
-There is **no SQL string interpolation anywhere** — this was checked across the whole backend during
-the Epic 1 review and recorded as verified-correct in the findings register.
+There is **no SQL string interpolation of a value anywhere** — this was checked across the whole
+backend during the Epic 1 review and recorded as verified-correct in the findings register. Three
+places build a statement's *shape* from **fixed literals** chosen in code (a dynamic `SET` list or a
+choice between two function names) and mark it `# noqa: S608` with the reason: `auth/service.py`'s
+`update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
+bound parameter.
+
+### 2.8 The classroom router — `app/classroom/` (classroom Phase 2)
+
+Same layers as above, with one difference that matters: **the database decides which classroom a
+caller may touch.** The route's dependency decides only *who* may call
+(`classroom/dependencies.py` — `participant` and `gated_student` wrap `require_guardian_verified`;
+leaving uses `require_role('student')` alone, because leaving is a consent right). The service then
+calls an `app.*` function (`20261004120100`), which reads the actor from `app.current_user_id()`
+and **returns an outcome string instead of raising**; `service.py` maps each outcome to a
+catalogued error, so a refusal is never a 500.
+
+Three conventions in `classroom/service.py`:
+
+- **Existence never leaks.** An unknown id and someone else's id both raise `forbidden_scope()`,
+  byte-identical (pinned by `test_classroom_api.py`).
+- **Pre-check, then a backstop.** Writes call `require_owner` (`:71`) first; `rls_refusal_as_forbidden`
+  (`:55`) turns a SQLSTATE `42501` — the database catching a check the service missed — into a logged
+  403 rather than a 500.
+- **No `commit()`.** As everywhere: the binding is transaction-scoped and `authenticated` commits.
+
+Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`),
+all per user. Route table: [api-endpoints.md §2.8](api-endpoints.md).
 
 ---
 

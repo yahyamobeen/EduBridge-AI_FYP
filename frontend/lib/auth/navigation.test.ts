@@ -94,9 +94,13 @@ describe('the map itself', () => {
     //    `/settings` failed here naming the item, and the alternation was only
     //    widened afterwards. A route added to this regex before it exists is a
     //    404 this test then certifies as fine, so the order matters.
+    //
+    //    `classroom` joined the same way in classroom Phase 2 (2026-10-04): the
+    //    student's `/classroom` failed here first, naming `myClasses`. The
+    //    teacher's `/teacher/classroom` already matched the `teacher` prefix.
     for (const item of Object.values(NAV_BY_ROLE).flat()) {
       expect(item.href, item.key).toMatch(
-        /^\/(dashboard|teacher|parent|admin|settings|coming-soon\/)/,
+        /^\/(dashboard|teacher|parent|admin|settings|classroom|coming-soon\/)/,
       )
     }
   })

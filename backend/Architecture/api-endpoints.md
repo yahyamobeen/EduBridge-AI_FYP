@@ -21,19 +21,19 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **21** | `grep -c "^@router\." backend/app/auth/routes.py` |
-| Routers in the backend | **1** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **31** (21 auth + 10 classroom) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Routers in the backend | **2** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` — `app/auth/routes.py:90`, `app/classroom/routes.py:39` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 60 | §7.2 consolidates §3.1 plus Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Classroom (§3.6, `tdd.md:325-354` — **40 endpoints** since v0.4.0, counting each method/path pair in a combined row) and its own rows — where `GET /api/admin/rate-limits / PUT` is **two** endpoints |
 | **Total specified** | **83** | 23 + 3 + 6 + 40 + 11 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40) |
-| **Specified but missing** | **62** | 83 − 21 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built **none** — it is the database boundary they will stand on |
+| **Specified but missing** | **52** | 83 − 31 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40** (§2.8) |
 
-**All 21 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
-router. `GET /health` (`backend/app/main.py:86`) is defined on the application object rather than the
-router, sits outside `/api`, and is not one of the 49 — `tdd.md` does not specify it.
+**Two routers.** `backend/app/auth/routes.py` (21 routes) and, since classroom Phase 2,
+`backend/app/classroom/routes.py` (10 routes, §2.8). `GET /health` (`backend/app/main.py:119`) is
+defined on the application object rather than a router, sits outside `/api`, and is not one of the
+83 — `tdd.md` does not specify it.
 
-Everything is mounted under `settings.api_base_path`, default `/api` (`app/main.py:84`,
-`app/core/config.py:36`).
+Both routers are mounted under `settings.api_base_path`, default `/api` (`app/main.py:116-117`).
 
 ---
 
@@ -304,10 +304,10 @@ production actually calls, not through the ORM.
 
 | Route | Defined at | Auth | Limit | Specified? |
 |---|---|---|---|---|
-| `GET /health` | `app/main.py:86` | none | none | **not in `tdd.md`** |
+| `GET /health` | `app/main.py:119` | none | none | **not in `tdd.md`** |
 
 > **Known defect D16.** Unauthenticated, unrate-limited, and it reports `settings.environment` in the
-> body (`main.py:91`).
+> body (`main.py:124`).
 >
 > **A5 — FIXED, Phase 1 (2026-08-16).** `docs_url` and `redoc_url` gate only the two HTML *viewers*;
 > both are pages that fetch `/openapi.json`, which kept its default. Production therefore served the
@@ -315,17 +315,67 @@ production actually calls, not through the ORM.
 > returned 404 and looked closed. `main.py` now passes
 > `openapi_url=None if settings.is_production else "/openapi.json"`.
 
+### 2.8 Classroom — `app/classroom/routes.py` (classroom Phase 2, 2026-10-04)
+
+The second router, `APIRouter(tags=["classroom"])` at `routes.py:39`, mounted at `main.py:117`.
+Every route is one rate-limit call and one service call; **who** may call is the dependency, and
+**which classroom** they may touch is decided by the database (`app.*` functions from
+`20261004120100` — see [database.md](database.md#classroom--post-apispaces-functions)). An unknown
+id and a forbidden id get the same byte-identical `403 FORBIDDEN_SCOPE`.
+
+Guards (`app/classroom/dependencies.py`): **Participant** = `require_guardian_verified` then
+teacher-or-student (`:22`); **GatedStudent** = `require_guardian_verified` then student (`:35`);
+**Teacher** = `require_role('teacher')`; **AnyStudent** = `require_role('student')` — leaving is a
+consent right and is deliberately **not** guardian-gated.
+
+| Method | Path | Handler | Guard | Bucket | Service | `tdd.md` |
+|---|---|---|---|---|---|---|
+| `POST` | `/api/spaces/join` | `routes.py:56` | GatedStudent | `classroom_join` | `service.join_space` `:230` | `:330` |
+| `GET` | `/api/spaces` | `routes.py:63` | Participant | `classroom_read` | `service.list_spaces` `:104` | `:326` |
+| `POST` | `/api/spaces` | `routes.py:69` | Teacher | `classroom_write` | `service.create_space` `:148` | `:325` |
+| `GET` | `/api/spaces/{space_id}` | `routes.py:77` | Participant | `classroom_read` | `service.get_space` `:113` | `:327` |
+| `PATCH` | `/api/spaces/{space_id}` | `routes.py:83` | Teacher | `classroom_write` | `service.update_space` `:176` | `:328` |
+| `POST` | `/api/spaces/{space_id}/join-code` | `routes.py:91` | Teacher | `classroom_write` | `service.change_join_code` `:213` | `:329` |
+| `DELETE` | `/api/spaces/{space_id}/membership` | `routes.py:101` | AnyStudent | `classroom_write` | `service.leave_space` `:270` | `:331` |
+| `GET` | `/api/spaces/{space_id}/people` | `routes.py:107` | Participant | `classroom_read` | `service.people` `:276` | `:332` |
+| `DELETE` | `/api/spaces/{space_id}/members/{student_id}` | `routes.py:113` | Teacher | `classroom_write` | `service.remove_student` `:302` | `:333` |
+| `GET` | `/api/reference/subjects` | `routes.py:121` | `authenticated` | `classroom_read` | `service.list_subjects` `:316` | `:334` |
+
+Buckets (`app/core/ratelimit.py:105-107`), all per **user**: `classroom_read` 120/60 s,
+`classroom_write` 30/60 s, `classroom_join` **10/300 s** — the one brute-force surface, against a
+2⁴⁰ code space.
+
+Responses worth knowing:
+
+- **`POST /spaces/join`** answers `200 {space_id, already_member}`, or `400 VALIDATION_ERROR` with
+  `details.reason` ∈ `invalid_code` (also revoked, expired, archived and — deliberately — a
+  **removed** student), `class_mismatch` (plus `details.space` so the student can be told which
+  class it is for), `classroom_full`; or `403 GATE_PENDING`.
+- **`POST /spaces`** answers `201` with the classroom **and its first code** (one transaction:
+  `app.create_space` then `app.rotate_join_code`), or `400` with `fields.subject_id` /
+  `reason: classroom_limit`.
+- **`PATCH /spaces/{id}`** — an empty body is a `400`; **unarchiving** re-checks the 50-active cap in
+  the service (`service.py:181-197`), because the column grant would otherwise let a teacher create
+  50, archive them, create 50 more and unarchive everything.
+- **`DELETE …/membership`** is `204` whether or not the caller was a member, so it cannot probe
+  which classrooms exist.
+- **`GET /spaces/{id}`** carries `join_code` for a scoped owner only; the **database** returns
+  nothing to anyone else (`join_code_owner_read`), not a check in the service.
+
+Pinned by `tests/integration/test_classroom_api.py` (29 tests) over the database suite
+`test_classroom_rls.py` (44); `tests/unit/test_classroom_schemas.py` covers the request bounds.
+
 ---
 
 ## 3. Dependencies that exist but protect nothing yet
 
-Two RBAC (Role-Based Access Control) dependencies are implemented, tested, and **wired to no route**,
-because the routes they were written for are among the 62 missing (§4):
+Two RBAC (Role-Based Access Control) dependencies were written ahead of their routes. **One is now
+wired**; the other still protects nothing:
 
-| Dependency | file:line | Waiting on |
+| Dependency | file:line | Status |
 |---|---|---|
-| `require_subject_scope` | `app/auth/dependencies.py:206` (since 2026-10-04 it also requires `revoked_at IS NULL`, `:236-242`) | the classroom and quiz endpoints (§3.5, §3.6) |
-| `require_guardian_verified` | `app/auth/dependencies.py:248` | `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*`, and the student classroom routes (§4.4) |
+| `require_subject_scope` | `app/auth/dependencies.py:206` (since 2026-10-04 it also requires `revoked_at IS NULL`, `:236-242`) | **Still wired to no route.** The classroom routes do not need it — they take a `space_id`, not a `subject_id`, and the space's own scope is checked inside `app.owns_space`. Waits on the subject-report and quiz endpoints (§3.5, §3.6) |
+| `require_guardian_verified` | `app/auth/dependencies.py:248` | **Wired since classroom Phase 2**, through `participant` and `gated_student` (`app/classroom/dependencies.py:22`, `:35`) on every student classroom route except leaving (§2.8). Still waits on `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
 
 `tdd.md:198` specifies that the gate dependency blocks **every** student learning and assessment
 endpoint, and that an authorization-matrix test asserts it on each such route. That test exists
@@ -333,7 +383,7 @@ endpoint, and that an authorization-matrix test asserts it on each such route. T
 
 ---
 
-## 4. Specified but **not implemented** — all 31
+## 4. Specified but **not implemented** — all 52
 
 This is the honest build-state record. Each row cites the `tdd.md` line that specifies it. **None of
 these paths exists in `backend/app/`** — verified by `grep -rn "@router\." backend/app`, which returns
@@ -401,16 +451,18 @@ Relevant database findings, since these are the routes that would first exercise
 and mastery policies are `FOR ALL`, so every number a parent or teacher reads is student-writable).
 Implementing §3.5 against today's policies would land straight on all three.
 
-### 4.4 Spaces and classroom — 40 missing (§3.6)
+### 4.4 Spaces and classroom — 30 missing (§3.6; 10 of 40 built in classroom Phase 2)
 
-The six rows `tdd.md` specified through v0.3.9 keep their numbers:
+The six rows `tdd.md` specified through v0.3.9 keep their numbers. **Rows 15–18 were built in
+classroom Phase 2** and are now in §2.8; they stay here, struck through, so the numbering of every
+later row is stable:
 
 | # | Method | Path | Role | Purpose | `tdd.md` |
 |---|---|---|---|---|---|
-| 15 | `POST` | `/api/spaces` | Teacher (was "Teacher / Parent" — corrected in v0.4.0) | Create a space; a teacher declares the subject | `tdd.md:325` |
-| 16 | `POST` | `/api/spaces/{id}/join-code` | Owner | Rotate or disable a join code | `tdd.md:329` |
-| 17 | `POST` | `/api/spaces/join` | Student (gate-checked) | Join via code, with consent | `tdd.md:330` |
-| 18 | `DELETE` | `/api/spaces/{id}/membership` | Student (**not** gate-checked) | Leave a space at any time | `tdd.md:331` |
+| ~~15~~ | `POST` | `/api/spaces` | Teacher | **BUILT** — §2.8 | `tdd.md:325` |
+| ~~16~~ | `POST` | `/api/spaces/{id}/join-code` | Owner | **BUILT** — §2.8 | `tdd.md:329` |
+| ~~17~~ | `POST` | `/api/spaces/join` | Student (gate-checked) | **BUILT** — §2.8 | `tdd.md:330` |
+| ~~18~~ | `DELETE` | `/api/spaces/{id}/membership` | Student (**not** gate-checked) | **BUILT** — §2.8 | `tdd.md:331` |
 | 19 | `GET` | `/api/spaces/{id}/report` | Teacher (subject) / Parent (child) | Scoped weak-area report | `tdd.md:354` |
 | 20 | `POST` | `/api/spaces/{id}/announcements` | Owner | Post an announcement, now or scheduled | `tdd.md:336` |
 
@@ -419,7 +471,7 @@ not numbered here, so that the numbering of every later section stays stable:
 
 | Phase | Endpoints | Count |
 |---|---|---|
-| 2 — classrooms core | `GET /api/spaces` · `GET`/`PATCH /api/spaces/{id}` · `GET /api/spaces/{id}/people` · `DELETE /api/spaces/{id}/members/{student_id}` · `GET /api/reference/subjects` | 6 |
+| 2 — classrooms core | ~~`GET /api/spaces` · `GET`/`PATCH /api/spaces/{id}` · `GET /api/spaces/{id}/people` · `DELETE /api/spaces/{id}/members/{student_id}` · `GET /api/reference/subjects`~~ **BUILT** — §2.8 | 0 of 6 left |
 | 3 — stream | `GET /api/spaces/{id}/announcements` · `PATCH`/`DELETE /api/announcements/{id}` | 3 |
 | 4 — assignments | `GET`/`POST /api/spaces/{id}/assignments` · `GET`/`PATCH`/`DELETE /api/assignments/{id}` · `PUT …/submission` · `POST …/turn-in` · `POST …/unsubmit` · `GET …/submissions` · `GET …/submissions/{student_id}` · `PUT …/grades/{student_id}` · `GET /api/reference/subjects/{id}/chapters` | 12 |
 | 5 — calendar | `GET /api/calendar` | 1 |
@@ -428,7 +480,8 @@ not numbered here, so that the numbering of every later section stays stable:
 | 8 — parent | `GET /api/parent/classrooms` | 1 |
 
 **Findings B9, B10 and B11 are FIXED at the database layer** (`20261004120000`,
-`20261004120100`, pending the owner's apply), *before* any of these routes exists — the order
+`20261004120100`, applied 2026-10-04 and re-verified on the live database), *before* any of these
+routes existed — the order
 `backend/Architecture/database.md` argued for. Previously `enrollment_student_join` self-enrolled
 into *any* space, `classroom_space` had no role check, and `owns_space()` had no scope check. The
 routes in this group will call the classroom functions catalogued in
@@ -522,6 +575,6 @@ grep -n "^| \(GET\|POST\|PUT\|PATCH\|DELETE\) " tdd.md     # 47 rows; :1038 is t
 ---
 
 *Snapshot 2026-08-15, counts re-measured 2026-10-04 (classroom Phase 1). Implemented and specified
-are kept deliberately distinct: 21 of 83. Known
+are kept deliberately distinct: 31 of 83 (classroom Phase 2). Known
 defects are recorded here rather than deferred until fixed — see the Phase 0 findings register for
 the full 35.*

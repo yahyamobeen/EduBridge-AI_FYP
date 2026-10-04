@@ -13,9 +13,9 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**27 files** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04): **25 applied**, plus the two
-`20261004…` classroom files on branch `add-classroom`, dry-run on a shadow database and **pending
-the owner's apply**.
+**27 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04). The two `20261004…` classroom
+files were dry-run on a shadow database first, then applied by the owner with `supabase db push` on
+2026-10-04 and re-verified on the live database.
 
 | # | File | Contents |
 |---|---|---|
@@ -44,8 +44,8 @@ the owner's apply**.
 | 23 | `20260817130000_session_policy_functions.sql` | **Phase 4** (E2, E3, D2). `app.invalidate_sessions`, `app.insert_refresh_token`, `app.rotate_refresh_token` — rotation is one locked statement |
 | 24 | `20260817140000_purge_expired_auth_tokens.sql` | **Phase 4**. `app.purge_expired_auth_tokens` with a 30-day grace; scheduled only if `pg_cron` is installed |
 | 25 | `20260817150000_missing_updated_at_triggers.sql` | **Phase 5** (D14). The four missing `updated_at` triggers |
-| 26 | `20261004120000_classroom_membership_boundary.sql` | **Classroom Phase 1** (B9, B10, B11). All direct writes to `enrollment` and `join_code`, and INSERT/DELETE on `classroom_space`, revoked; `owns_space` gains the subject-scope check; revocable self-declared `teacher_subject_scope`; join-code format and one-live-code index; set-returning RLS helpers. **Reverses the `join_code_owner` decision** (`database.md`). *Pending apply* |
-| 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Pending apply* |
+| 26 | `20261004120000_classroom_membership_boundary.sql` | **Classroom Phase 1** (B9, B10, B11). All direct writes to `enrollment` and `join_code`, and INSERT/DELETE on `classroom_space`, revoked; `owns_space` gains the subject-scope check; revocable self-declared `teacher_subject_scope`; join-code format and one-live-code index; set-returning RLS helpers. **Reverses the `join_code_owner` decision** (`database.md`). *Applied 2026-10-04* |
+| 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Applied 2026-10-04* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.

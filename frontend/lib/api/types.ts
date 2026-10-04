@@ -299,3 +299,71 @@ export type SubscriptionResponse = {
   trial_ends_at: string | null
   current_period_end: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Classroom (tdd.md §3.6) — mirrors backend/app/classroom/schemas.py
+// ---------------------------------------------------------------------------
+
+export type SpaceStatus = 'active' | 'archived'
+
+export type SubjectRef = { id: string; name: string; board: BoardCode; class_level: number }
+
+export type SpaceSummary = {
+  id: string
+  title: string
+  status: SpaceStatus
+  subject: SubjectRef
+  owner_name: string | null
+  /** Decided by the SERVER. Owner-only controls render from this, never from the role alone. */
+  viewer_role: 'owner' | 'member'
+  /** False for an owner whose subject scope an administrator revoked. */
+  can_manage: boolean
+  /** Owner only; null for members. */
+  member_count: number | null
+  /** Member only; null for the owner. */
+  joined_at: string | null
+}
+
+export type SpaceDetail = SpaceSummary & {
+  /** The live join code — the database returns it to a scoped owner only. */
+  join_code: string | null
+}
+
+export type SpaceListResponse = { spaces: SpaceSummary[] }
+
+export type SpaceCreateRequest = { title: string; subject_id: string }
+
+export type SpaceUpdateRequest = { title?: string; status?: SpaceStatus }
+
+export type JoinCodeResponse = { join_code: string | null }
+
+export type JoinResponse = { space_id: string; already_member: boolean }
+
+/**
+ * `details.reason` on a 400 VALIDATION_ERROR from POST /spaces/join (tdd.md
+ * §7.3). Branch on this, never on `message`. A removed student deliberately
+ * receives `invalid_code`.
+ */
+export type JoinFailureReason = 'invalid_code' | 'class_mismatch' | 'classroom_full'
+
+/** `details.space` on a `class_mismatch` refusal — the student holds the code, so naming the class is not a leak. */
+export type JoinMismatchSpace = {
+  title: string
+  subject_name: string
+  board: BoardCode
+  class_level: number
+}
+
+export type Person = { user_id: string; full_name: string | null }
+
+export type Member = Person & {
+  joined_at: string
+  /** Owner's view only; null for members. */
+  muted: boolean | null
+}
+
+export type PeopleResponse = { owner: Person; members: Member[] }
+
+export type SubjectOption = { id: string; name: string; groups: StudentGroup[] }
+
+export type SubjectsResponse = { subjects: SubjectOption[] }

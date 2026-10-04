@@ -25,11 +25,9 @@
       "progress": "Progress",
       "myClasses": "My Classes",
       "planner": "Study Planner",
-      "mySpaces": "My Spaces",
+      "mySpaces": "My Classrooms",
       "reports": "Reports",
-      "roster": "Class Roster",
       "slo": "SLO Mapping",
-      "announcements": "Announcements",
       "myChild": "My Child",
       "howToHelp": "How to Help",
       "curriculum": "Curriculum",
@@ -470,7 +468,7 @@
       "quizzesBody": "Practice sets drawn from your board and class.",
       "myClassesTitle": "My classes",
       "myClassesBody": "See who can view your progress, and leave any class at any time.",
-      "spacesTitle": "My spaces",
+      "spacesTitle": "My classrooms",
       "spacesBody": "The classes you teach and how each is progressing.",
       "rosterTitle": "Class roster",
       "rosterBody": "Who is enrolled, and who has not joined yet.",
@@ -547,6 +545,125 @@
       "status_verified": "Your parent has confirmed the link.",
       "status_revoked": "This link was removed.",
       "readOnly": "Manage this from the parental consent screen."
+    }
+  },
+  "classroom": {
+    "title": "Classroom",
+    "loading": "Loading…",
+    "student": {
+      "title": "My Classes",
+      "subtitle": "Student Dashboard",
+      "intro": "Classes you have joined. You can see who can view you, and leave any class at any time.",
+      "empty": "You have not joined a class yet. Ask your teacher for the class code."
+    },
+    "teacher": {
+      "title": "My Classrooms",
+      "subtitle": "Teacher Dashboard",
+      "intro": "Create a classroom for a subject you teach and share its code with your students.",
+      "empty": "You have not created a classroom yet."
+    },
+    "list": {
+      "heading": "Classrooms",
+      "loadFailed": "Your classrooms could not be loaded. Refresh the page to try again."
+    },
+    "card": {
+      "subjectLine": "{subject} · Class {classLevel} · {board}",
+      "members": "{count, plural, one {# student} other {# students}}",
+      "teacher": "Teacher: {name}",
+      "unnamedTeacher": "Your teacher",
+      "archived": "Archived"
+    },
+    "join": {
+      "heading": "Join a class",
+      "label": "Class code",
+      "hint": "Eight letters and numbers, from your teacher.",
+      "submit": "Join",
+      "joining": "Joining…",
+      "invalid": "That class code is not valid. Check it with your teacher.",
+      "mismatch": "This class is for Class {classLevel} ({board}) students, so you cannot join it.",
+      "full": "This class is full. Ask your teacher.",
+      "gatePending": "A parent needs to confirm your account before you can join classes.",
+      "rateLimited": "Too many attempts. Wait a few minutes and try again.",
+      "failed": "Could not join the class. Try again."
+    },
+    "create": {
+      "heading": "Create a classroom",
+      "boardLabel": "Board",
+      "classLabel": "Class",
+      "classOption": "Class {level}",
+      "subjectLabel": "Subject you teach",
+      "subjectNeedsClass": "Choose a board and class first",
+      "subjectsLoading": "Loading subjects…",
+      "subjectsFailed": "Subjects could not be loaded. Change the class to try again.",
+      "subjectInvalid": "Choose a subject from the list.",
+      "titleLabel": "Classroom name",
+      "titlePlaceholder": "e.g. Physics 9-A",
+      "titleInvalid": "Enter a name for the classroom.",
+      "choose": "Choose…",
+      "submit": "Create classroom",
+      "creating": "Creating…",
+      "limit": "You have reached the limit of active classrooms. Archive one first.",
+      "forbidden": "You cannot create a classroom for this subject.",
+      "failed": "The classroom could not be created. Try again."
+    },
+    "detail": {
+      "back": "All classrooms",
+      "unavailable": "This classroom is not available.",
+      "archivedNotice": "This classroom is archived. Nobody can join it, and it is read-only.",
+      "revokedNotice": "Your access to this subject has been withdrawn by an administrator, so you can no longer manage this classroom."
+    },
+    "people": {
+      "heading": "People",
+      "loading": "Loading…",
+      "unavailable": "The class list could not be loaded.",
+      "teacher": "Teacher",
+      "students": "{count, plural, one {# student} other {# students}}",
+      "empty": "No students have joined yet.",
+      "unnamed": "Unnamed",
+      "joined": "Joined {date}",
+      "remove": "Remove",
+      "removeConfirm": "Remove {name}? They will not be able to rejoin with the class code.",
+      "removeFailed": "The student could not be removed. Try again."
+    },
+    "code": {
+      "heading": "Class code",
+      "codeLabel": "Class code",
+      "hint": "Share this code with your students so they can join.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copying is not available here. Select the code and copy it yourself.",
+      "rotate": "New code",
+      "rotateConfirm": "Replace the code? The current one will stop working. Students who have already joined stay in the class.",
+      "disable": "Turn off joining",
+      "disableConfirm": "Turn off joining? Nobody can join until you create a new code.",
+      "off": "Joining is turned off.",
+      "archivedOff": "Archived classrooms cannot be joined.",
+      "enable": "Create a code",
+      "failed": "The code could not be changed. Try again."
+    },
+    "manage": {
+      "heading": "Manage",
+      "titleLabel": "Classroom name",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "archive": "Archive",
+      "archiveHint": "Archiving makes the classroom read-only and stops anyone joining. You can restore it later.",
+      "archiveConfirm": "Archive this classroom?",
+      "unarchive": "Restore",
+      "unarchiveHint": "This classroom is archived.",
+      "limit": "You have reached the limit of active classrooms. Archive another one first.",
+      "failed": "The change could not be saved. Try again."
+    },
+    "leave": {
+      "heading": "Leave class",
+      "body": "Leaving ends your teacher’s view of you in this class. You can join again with the code.",
+      "button": "Leave class",
+      "confirm": "Leave {title}?",
+      "failed": "Could not leave the class. Try again."
+    },
+    "confirm": {
+      "cancel": "Cancel"
     }
   },
   "plan": {

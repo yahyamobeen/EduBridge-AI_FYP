@@ -64,7 +64,7 @@ export function StudentDashboard() {
               span={4}
               title={tc('myClassesTitle')}
               body={tc('myClassesBody')}
-              href="/coming-soon/my-classes"
+              href="/classroom"
             />
           </div>
         </DashboardShell>
@@ -89,7 +89,12 @@ export function TeacherDashboard() {
           </header>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
-            <PlaceholderCard span={8} title={tc('spacesTitle')} body={tc('spacesBody')} />
+            <PlaceholderCard
+              span={8}
+              title={tc('spacesTitle')}
+              body={tc('spacesBody')}
+              href="/teacher/classroom"
+            />
             <PlaceholderCard span={4} title={tc('rosterTitle')} body={tc('rosterBody')} />
             {/* Subject-scoped only: there is no teacher-wide weekly report. */}
             <PlaceholderCard span={6} title={tc('reportsTitle')} body={tc('reportsBody')} />

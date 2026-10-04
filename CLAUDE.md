@@ -152,9 +152,9 @@ surface the conflict and ask — never resolve it quietly.
 
 | | |
 |---|---|
-| Backend | **21 routes, all authentication or reference** (`grep -c '^@router\.' backend/app/auth/routes.py`). One router (`app/auth/routes.py`). `tdd.md` v0.4.0 specifies **83 endpoints — 62 do not exist**; 40 of them are the classroom surface added on 2026-10-04 (branch `add-classroom`), whose database boundary is built and whose routes are not. |
+| Backend | **31 routes** (`grep -c '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py`) in **two routers**: 21 authentication or reference in `app/auth/routes.py`, 10 classroom in `app/classroom/routes.py` (classroom Phase 2). `tdd.md` v0.4.0 specifies **83 endpoints — 52 do not exist**; 30 of those are the rest of the classroom surface, built phase by phase on branch `add-classroom`. |
 | Frontend | 23 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales. Auth and onboarding journeys complete. |
-| Database | 27 migration files (25 applied + 2 classroom files pending the owner's apply), 50 `app.*` functions, 77 Row-Level Security policies — the last two measured on a shadow database built from all 27 files (`backend/Architecture/database.md`, "At a glance"). |
+| Database | 27 migration files (all applied — the 2 classroom files on 2026-10-04 via `supabase db push`), 50 `app.*` functions, 77 Row-Level Security policies — the last two measured on a shadow database built from all 27 files (`backend/Architecture/database.md`, "At a glance"). |
 | `ml/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 
 Against the 38 user-story cards: **Epic 1 (identity, authentication, consent) is roughly 80%
@@ -165,8 +165,8 @@ layer the proposal calls the distinctive contribution.
 today.** The most important structural one: `user-stories.md` card 1.5 promises every request is
 checked by the application **and again by the database**, and the Row-Level Security audit shows
 the database would **not** catch a missed check on most tables. The application layer is currently
-holding alone. *(2026-10-04: the classroom findings B9–B11 are closed at the database layer on
-branch `add-classroom`, pending the owner's apply.)* The full register and its remediation plan live outside this repository; the
+holding alone. *(2026-10-04: the classroom findings B9–B11 are closed at the database layer —
+migrations applied to the live database and re-verified there.)* The full register and its remediation plan live outside this repository; the
 database-layer findings are recorded in
 [`backend/Architecture/database.md`](backend/Architecture/database.md).
 

@@ -13,11 +13,13 @@ Every count here has the command that produced it beside it. Run from `frontend/
 
 | Measure | Value | Command |
 |---|---|---|
-| Pages | **22** | `find app -name "page.tsx" \| wc -l` |
+| Pages | **27** (4 added by classroom Phase 2) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **24** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **30** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **429**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **562**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+
+*Re-measured 2026-10-04 (classroom Phase 2).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -117,6 +119,35 @@ Three pages, one per role that has a dashboard:
 **`/admin` was built in phase 1b**, which closes defect **A6**. Administrators reach it after signing
 in at an unlisted path served by `(auth)/admin-login/page.tsx` — see *The unlisted administrator
 login* below.
+
+**The classroom pages (classroom Phase 2, 2026-10-04).** Four more `(app)` pages, each a thin server
+page (`setRequestLocale`, the `settings/page.tsx` pattern) rendering a client component with an
+**exact** `allow` list — one route per role, so the RBAC boundary is a route boundary:
+
+| Route | File | Component | `allow` |
+|---|---|---|---|
+| `/classroom` | `(app)/classroom/page.tsx` | `StudentClassrooms` — list + join form | `['student']` |
+| `/classroom/[spaceId]` | `(app)/classroom/[spaceId]/page.tsx` | `StudentClassroom` | `['student']` |
+| `/teacher/classroom` | `(app)/teacher/classroom/page.tsx` | `TeacherClassrooms` — list + create form | `['teacher']` |
+| `/teacher/classroom/[spaceId]` | `(app)/teacher/classroom/[spaceId]/page.tsx` | `TeacherClassroom` | `['teacher']` |
+
+The two list pages prerender in all three locales; the two `[spaceId]` pages have no
+`generateStaticParams` and render on demand, because the id is per user and the data is fetched in
+the browser (the access token lives only in client memory). The client refuses a non-UUID id without
+making a request. Components live in `components/classroom/`:
+
+- **`ClassroomView.tsx`** — one classroom for both roles. ⚠️ **Owner controls (join code, rename,
+  archive, remove) render from the server's `viewer_role === 'owner' && can_manage`, never from the
+  session role.** A teacher whose subject scope was revoked is still `owner` but gets no controls and
+  is told why. Not the security boundary — the database is — but `prd.md` §4.2 forbids rendering a
+  control the caller cannot use.
+- **`JoinClassForm.tsx`** — branches on `details.reason` (`invalid_code`, `class_mismatch` with the
+  class named, `classroom_full`) and on `GATE_PENDING` / `RATE_LIMITED`; never on `message`.
+- **`CreateClassForm.tsx`** — board → class → subject from `/reference/enums` and
+  `/reference/subjects`; changing board or class discards the chosen subject.
+- **`ConfirmInline.tsx`** — the second step before remove, leave, archive and turning joining off.
+  Inline rather than a `<dialog>`: jsdom implements no `showModal`, so a dialog could not be tested.
+- **`styles.ts`** — the card and button class strings `Settings.tsx` uses, shared by the four files.
 
 The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
 
@@ -248,6 +279,15 @@ Three decisions it encodes, each of which a shared component tree makes easy to 
 **(b) The teacher surface has no tutor entry.** `:56-66`. The requirements once granted teachers tutor access "for own testing" while `POST /api/tutor/ask` has always been scoped to gate-verified students. The technical design document won.
 
 **(c) The student surface must expose My Classes.** `:52`. Students are guaranteed the right to see who can view them and to leave any space at any time. No mockup had an entry for it, and a right with no route to it is not a right.
+
+**Classroom Phase 2 (2026-10-04)** moved the four things the comment at `navigation.ts:40-45` says
+move together: student `myClasses` → `/classroom`, teacher `mySpaces` → `/teacher/classroom`
+(relabelled "My Classrooms"); the teacher's `roster` and `announcements` entries were **removed**,
+not repointed — both now live inside a classroom; `my-classes`, `spaces`, `roster` and
+`announcements` left the coming-soon `SLUGS`; and the route-prefix regex in `navigation.test.ts`
+gained `classroom` — **after** it had failed naming `myClasses`, the order its own comment demands.
+`Dashboards.tsx` card links were repointed in the same change (`/coming-soon/my-classes` would have
+become a silent 404).
 
 `lib/auth/navigation.test.ts` is described in its own header (`:8-18`) as *the highest-value regression test in the frontend*. `:19-34` asserts the parent navigation contains no href and no key matching `/tutor/`, `/session|replay|play/`, `/planner/`, `/practice/`, `/quiz/` or `/subject|curriculum/`. `:36-46` asserts the teacher surface has no tutor entry. `:48-54` asserts the student surface has My Classes. `:67-81` asserts every key has a translated label in all three locales.
 
@@ -621,7 +661,15 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-24 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+30 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+
+The four classroom test files (`components/classroom/*.test.tsx`, classroom Phase 2) give their
+**first** wait after `SessionGuard` resolves an explicit 5 s timeout (`LOADED`): Testing Library's
+1 s default measured machine load inside the full suite rather than the code — the same class of
+false failure `vitest.config.mts` records raising `testTimeout` for. Their date assertions pass
+`timeZone="Asia/Karachi"` as `PlanSelection.test.tsx` does, because **the app configures no global
+next-intl time zone** (pre-existing; dates render in the browser's zone, which is correct for
+client-only rendering, but a server-rendered date would mismatch).
 
 The suite is not uniform — three files do something other than test a component:
 
@@ -809,6 +857,14 @@ Development only, exactly like the original — which is what makes it costly. T
 Two of the three `pendingOnboardingRoute` call sites are accidentally safe — `VerifyEmail.tsx:61` and `TwoFactorEnrollment.tsx:136` both use `?? '/dashboard'`, and nullish coalescing catches `undefined` as well as `null`. `TwoFactorChallenge.tsx:176` uses an explicit `!== null` and is not.
 
 The trigger is a backend that adds a sixth onboarding state, or renames one. Today the two sides agree; the register also notes that `onboarding_state` is a `Literal` on `MeResponse` and a plain string on four other backend responses (register **D13**), which is the drift channel.
+
+### The sidebar marks the first item as the current page, everywhere (recorded 2026-10-04)
+
+`DashboardShell.tsx` sets `aria-current="page"` and the highlight on `index === 0` rather than on
+the route being shown, so "Dashboard" is announced and drawn as current on every page — Settings
+and, since classroom Phase 2, the four classroom pages included. Pre-existing and recorded, not
+fixed in that phase: deriving it from `usePathname()` is a small change to a shared component that
+every role's sidebar uses, and it should be made on its own.
 
 ### D17 — `error.tsx` logs the error object it refuses to render
 

@@ -133,9 +133,10 @@
 
     <section class="prose">
       <h2>Overview</h2>
-      <p>The backend is a <strong>single FastAPI application with one router</strong>. All server logic lives under
-      <code>backend/app/</code>: <code>app/auth/</code> (the router, the service layer, dependencies, tokens, the gate,
-      the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/core/</code> (configuration, the
+      <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
+      <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
+      the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
+      router, its role dependencies, schemas, service and join-code generation — classroom Phase 2), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -145,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">26</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">1</div><div class="l">router · <code>app/auth/routes.py</code> <span class="ln">:79</span></div></div>
-        <div class="stat"><div class="n">17</div><div class="l">implemented routes · <code>grep -c "^@router\." backend/app/auth/routes.py</code></div></div>
-        <div class="stat"><div class="n">31</div><div class="l">specified but missing · 48 in <code>tdd.md</code> §3.1 + §7.2, minus 17</div></div>
-        <div class="stat"><div class="n">11</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">25</div><div class="l">test files · 10 unit + 15 integration</div></div>
+        <div class="stat"><div class="n">32</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:39</span></div></div>
+        <div class="stat"><div class="n">31</div><div class="l">implemented routes · 21 auth + 10 classroom</div></div>
+        <div class="stat"><div class="n">52</div><div class="l">specified but missing · 83 in <code>tdd.md</code> v0.4.0, minus 31</div></div>
+        <div class="stat"><div class="n">27</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">43</div><div class="l">test files · 19 unit + 24 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -333,8 +334,22 @@ flowchart TB
       <p>Queries are SQL strings passed to <code>sqlalchemy.text()</code> with <strong>bound parameters</strong>. The ORM
       declarations exist for the few statements that use them (<code>revoke_user_tokens</code>
       <span class="ln">auth/tokens.py:150</span> is the only ORM write in a request path) and as documentation of a
-      schema the migrations own. There is <strong>no SQL string interpolation anywhere</strong> in the backend —
-      checked across the whole codebase during the Epic 1 review and recorded as verified-correct.</p>
+      schema the migrations own. There is <strong>no SQL string interpolation of a value anywhere</strong> in the backend —
+      checked across the whole codebase during the Epic 1 review and recorded as verified-correct. Three places build a
+      statement's <em>shape</em> from fixed literals and mark it <code># noqa: S608</code>: <code>auth/service.py</code>
+      <code>update_me</code>, and <code>classroom/service.py</code> <code>require_owner</code> and <code>update_space</code>.</p>
+
+      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phase 2)</h3>
+      <p>Same layers, one difference: <strong>the database decides which classroom a caller may touch.</strong> The
+      dependency decides only <em>who</em> may call — <code>participant</code> and <code>gated_student</code> wrap
+      <code>require_guardian_verified</code>; leaving uses <code>require_role('student')</code> alone, because leaving is a
+      consent right. The service calls an <code>app.*</code> function that reads the actor from
+      <code>app.current_user_id()</code> and <strong>returns an outcome instead of raising</strong>, so every refusal maps
+      to a catalogued error rather than a 500. An unknown id and someone else's id get the same byte-identical
+      <code>403 FORBIDDEN_SCOPE</code>; a SQLSTATE <code>42501</code> reaching the service is logged and answered as 403
+      (<code>rls_refusal_as_forbidden</code>, <span class="ln">classroom/service.py:55</span>). Buckets
+      <code>classroom_read</code>, <code>classroom_write</code> and <code>classroom_join</code> (10 per 5 minutes), all per user.
+      Route table: <a href="api-endpoints.md">api-endpoints.md §2.8</a>.</p>
     </section>
 
     <section class="prose">

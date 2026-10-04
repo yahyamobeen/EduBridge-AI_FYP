@@ -97,6 +97,15 @@ TWO_FA_CONFIRM_USER_LIMIT = Limit(max_requests=5, window_seconds=300)
 TWO_FA_VERIFY_USER_LIMIT = Limit(max_requests=10, window_seconds=300)
 TWO_FA_RESEND_USER_LIMIT = Limit(max_requests=3, window_seconds=300)
 
+# Classroom (tdd.md §3.6). All keyed on the USER (`subject=`), never the address:
+# a school lab is one IP. Reads and writes are loose — they exist so a runaway
+# client loop cannot hammer the database, not to bound an attack. JOIN is the
+# one brute-force surface: 32^8 codes at 10 guesses per 5 minutes per account
+# makes guessing a live code hopeless.
+CLASSROOM_READ_LIMIT = Limit(max_requests=120, window_seconds=60)
+CLASSROOM_WRITE_LIMIT = Limit(max_requests=30, window_seconds=60)
+CLASSROOM_JOIN_LIMIT = Limit(max_requests=10, window_seconds=300)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 

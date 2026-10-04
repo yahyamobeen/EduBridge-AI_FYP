@@ -55,19 +55,22 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { key: 'practice', href: '/coming-soon/practice' },
     { key: 'quizzes', href: '/coming-soon/quizzes' },
     { key: 'progress', href: '/coming-soon/progress' },
-    { key: 'myClasses', href: '/coming-soon/my-classes' },
+    // Built in classroom Phase 2 (2026-10-04): the list, join form and the
+    // Leave control behind (c) above.
+    { key: 'myClasses', href: '/classroom' },
     { key: 'planner', href: '/coming-soon/planner' },
     ...SETTINGS,
   ],
   teacher: [
     { key: 'dashboard', href: '/teacher' },
-    { key: 'mySpaces', href: '/coming-soon/spaces' },
+    // Built in classroom Phase 2. The former `roster` and `announcements`
+    // entries were removed rather than repointed: both live INSIDE a classroom
+    // (its People and Stream), so a top-level link would have to pick a class.
+    { key: 'mySpaces', href: '/teacher/classroom' },
     { key: 'quizzes', href: '/coming-soon/quizzes' },
     // Subject-scoped only: there is no /api/reports/weekly for teachers.
     { key: 'reports', href: '/coming-soon/reports' },
-    { key: 'roster', href: '/coming-soon/roster' },
     { key: 'slo', href: '/coming-soon/slo' },
-    { key: 'announcements', href: '/coming-soon/announcements' },
     ...SETTINGS,
   ],
   parent: [

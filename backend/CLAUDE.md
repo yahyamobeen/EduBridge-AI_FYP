@@ -15,9 +15,11 @@ PostgreSQL on Supabase. Authentication is **application-managed** — this servi
 JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberately unused, so
 `app_user` holds `password_hash` itself.
 
-**One router today**: `app/auth/routes.py`, 21 routes, all authentication, guardian or reference.
-`tdd.md` v0.4.0 specifies **83 endpoints — 62 do not exist** (`Architecture/api-endpoints.md` §1).
-`app/classroom/` holds only `codes.py` (join-code generation) until classroom Phase 2 adds its router.
+**Two routers**: `app/auth/routes.py` (21 routes — authentication, guardian, reference) and
+`app/classroom/routes.py` (10 routes — classroom Phase 2). `tdd.md` v0.4.0 specifies **83
+endpoints — 52 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
+`app.*` functions only; never grant `app_backend` a write on `enrollment` or `join_code` to make a
+route easier (`Architecture/database.md`, invariant 9).
 `app/workers/` is scaffolded with a `.gitkeep` and nothing else.
 
 Full picture: [`Architecture/README.md`](Architecture/README.md).
@@ -99,8 +101,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20260817150000_missing_updated_at_triggers.sql`; `20261004120000` and `20261004120100`
-  (classroom boundary) are written and dry-run on branch `add-classroom`, pending the owner's apply.
+  `20261004120100_classroom_space_functions.sql` (2026-10-04, with `supabase db push`).
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
