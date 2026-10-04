@@ -43,6 +43,8 @@ vi.mock('@/lib/api/endpoints', () => ({
   removeMember: (...a: unknown[]) => removeMember(...a),
   changeJoinCode: (...a: unknown[]) => changeJoinCode(...a),
   updateSpace: vi.fn(),
+  // The Stream is the default tab (Phase 3); these tests are about People.
+  listAnnouncements: () => Promise.resolve({ items: [], next_cursor: null }),
 }))
 
 function identity(role: 'student' | 'teacher'): MeResponse {
@@ -93,8 +95,13 @@ function wrap(node: React.ReactNode) {
   )
 }
 
-/** The People card — the signed-in student's own name is also in the sidebar. */
+/**
+ * The People card — behind its tab since Phase 3 (the Stream is the default).
+ * Scoped, because the signed-in student's own name is also in the sidebar.
+ */
 async function peopleSection() {
+  const tab = await screen.findByRole('tab', { name: en.classroom.tabs.people }, LOADED)
+  if (tab.getAttribute('aria-selected') !== 'true') await userEvent.click(tab)
   const heading = await screen.findByRole(
     'heading',
     { name: en.classroom.people.heading },
@@ -159,8 +166,9 @@ describe('the owner', () => {
     expect(
       screen.getByRole('button', { name: en.classroom.manage.archive }),
     ).toBeInTheDocument()
+    const people = await peopleSection()
     expect(
-      await screen.findByRole('button', { name: en.classroom.people.remove }, LOADED),
+      await within(people).findByRole('button', { name: en.classroom.people.remove }, LOADED),
     ).toBeInTheDocument()
   })
 
@@ -168,7 +176,11 @@ describe('the owner', () => {
     removeMember.mockResolvedValue(undefined)
     wrap(<TeacherClassroom spaceId={SPACE_ID} />)
     await userEvent.click(
-      await screen.findByRole('button', { name: en.classroom.people.remove }, LOADED),
+      await within(await peopleSection()).findByRole(
+        'button',
+        { name: en.classroom.people.remove },
+        LOADED,
+      ),
     )
     expect(removeMember).not.toHaveBeenCalled()
     const dialog = screen.getByRole('alertdialog')

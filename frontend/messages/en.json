@@ -612,6 +612,38 @@
       "archivedNotice": "This classroom is archived. Nobody can join it, and it is read-only.",
       "revokedNotice": "Your access to this subject has been withdrawn by an administrator, so you can no longer manage this classroom."
     },
+    "tabs": {
+      "label": "Classroom sections",
+      "stream": "Stream",
+      "people": "People"
+    },
+    "stream": {
+      "loading": "Loading…",
+      "loadFailed": "The stream could not be loaded. Refresh the page to try again.",
+      "empty": "Nothing has been posted yet.",
+      "loadOlder": "Load older posts",
+      "composerLabel": "New announcement",
+      "placeholder": "Share something with your class…",
+      "when": "When",
+      "postNow": "Post now",
+      "scheduleLater": "Schedule for later",
+      "scheduleLabel": "Publish at",
+      "post": "Post",
+      "scheduleButton": "Schedule",
+      "posting": "Posting…",
+      "scheduleInvalid": "Choose a future time within the next year.",
+      "postFailed": "The announcement could not be posted. Try again.",
+      "scheduledFor": "Scheduled for {date}",
+      "edited": "edited",
+      "edit": "Edit",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this announcement? This cannot be undone.",
+      "actionFailed": "That change could not be saved. Try again.",
+      "archivedNoPosting": "This classroom is archived, so nothing new can be posted."
+    },
     "people": {
       "heading": "People",
       "loading": "Loading…",

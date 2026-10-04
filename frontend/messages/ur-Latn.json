@@ -612,6 +612,38 @@
       "archivedNotice": "Yeh classroom archive hai. Is mein koi shamil nahin ho sakta, aur yeh sirf parhne ke liye hai.",
       "revokedNotice": "Administrator ne is mazmoon tak aap ki rasai wapas le li hai, is liye ab aap yeh classroom nahin sambhal sakte."
     },
+    "tabs": {
+      "label": "Classroom ke hisse",
+      "stream": "Sargarmiyan",
+      "people": "Afraad"
+    },
+    "stream": {
+      "loading": "Load ho raha hai…",
+      "loadFailed": "Sargarmiyan load nahin ho sakeen. Dobara koshish ke liye page refresh karen.",
+      "empty": "Abhi kuch post nahin kiya gaya.",
+      "loadOlder": "Purani posts dekhein",
+      "composerLabel": "Naya elaan",
+      "placeholder": "Apni class ke saath kuch share karen…",
+      "when": "Kab",
+      "postNow": "Abhi post karen",
+      "scheduleLater": "Baad ke liye schedule karen",
+      "scheduleLabel": "Shaya hone ka waqt",
+      "post": "Post karen",
+      "scheduleButton": "Schedule karen",
+      "posting": "Post ho raha hai…",
+      "scheduleInvalid": "Agle aik saal ke andar aane wala koi waqt muntakhib karen.",
+      "postFailed": "Elaan post nahin ho saka. Dobara koshish karen.",
+      "scheduledFor": "{date} ke liye schedule",
+      "edited": "tarmeem shuda",
+      "edit": "Tarmeem karen",
+      "save": "Mehfooz karen",
+      "saving": "Mehfooz ho raha hai…",
+      "cancel": "Mansookh karen",
+      "delete": "Hazf karen",
+      "deleteConfirm": "Yeh elaan hazf karen? Ise wapas nahin laya ja sakega.",
+      "actionFailed": "Yeh tabdeeli mehfooz nahin ho saki. Dobara koshish karen.",
+      "archivedNoPosting": "Yeh classroom archive hai, is liye is mein kuch naya post nahin kiya ja sakta."
+    },
     "people": {
       "heading": "Afraad",
       "loading": "Load ho raha hai…",

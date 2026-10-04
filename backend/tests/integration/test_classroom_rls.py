@@ -632,3 +632,128 @@ class TestScopeIsSelfDeclaredAndRevocable:
         assert (
             _count(db, "SELECT count(*) FROM classroom_space WHERE id = :s", {"s": space_id}) == 1
         )
+
+
+# ── Phase 3: announcements (20261004130000) ─────────────────────────────────
+
+
+def _post(db, teacher_id: str, space_id: UUID, *, body="Notice", in_future=False) -> UUID:
+    _as(db, teacher_id)
+    return db.execute(
+        text(
+            "INSERT INTO announcement (space_id, author_id, body, publish_at) "
+            "VALUES (:s, :a, :b, CASE WHEN :future THEN now() + interval '1 hour' ELSE now() END) "
+            "RETURNING id"
+        ),
+        {"s": space_id, "a": teacher_id, "b": body, "future": in_future},
+    ).scalar_one()
+
+
+class TestAnnouncementBoundary:
+    def test_a_student_cannot_post(self, db, classroom):
+        space_id, code = classroom
+        student = _user(db, role="student")
+        assert _join(db, student, code) == "joined"
+        message = _refused(
+            db,
+            "INSERT INTO announcement (space_id, author_id, body) VALUES (:s, :u, 'hi')",
+            {"s": space_id, "u": student},
+        )
+        assert "row-level security" in message
+
+    def test_an_owner_cannot_post_as_someone_else(self, db, teacher, classroom):
+        space_id, _ = classroom
+        other = _user(db, role="teacher")
+        _as(db, teacher)
+        message = _refused(
+            db,
+            "INSERT INTO announcement (space_id, author_id, body) VALUES (:s, :u, 'forged')",
+            {"s": space_id, "u": other},
+        )
+        assert "row-level security" in message
+
+    def test_an_archived_classroom_is_read_only_for_its_owner(self, db, teacher, classroom):
+        space_id, _ = classroom
+        _as(db, teacher)
+        db.execute(
+            text("UPDATE classroom_space SET status = 'archived' WHERE id = :s"), {"s": space_id}
+        )
+        message = _refused(
+            db,
+            "INSERT INTO announcement (space_id, author_id, body) VALUES (:s, :u, 'late')",
+            {"s": space_id, "u": teacher},
+        )
+        assert "row-level security" in message
+
+    def test_a_scheduled_post_is_invisible_to_members_but_not_the_owner(
+        self, db, teacher, classroom
+    ):
+        space_id, code = classroom
+        student = _user(db, role="student")
+        assert _join(db, student, code) == "joined"
+        _post(db, teacher, space_id, body="now")
+        _post(db, teacher, space_id, body="later", in_future=True)
+
+        _as(db, teacher)
+        owner_sees = (
+            db.execute(
+                text("SELECT body FROM announcement WHERE space_id = :s ORDER BY body"),
+                {"s": space_id},
+            )
+            .scalars()
+            .all()
+        )
+        assert owner_sees == ["later", "now"]
+
+        _as(db, student)
+        member_sees = (
+            db.execute(text("SELECT body FROM announcement WHERE space_id = :s"), {"s": space_id})
+            .scalars()
+            .all()
+        )
+        assert member_sees == ["now"]
+
+    def test_an_outsider_sees_nothing(self, db, teacher, classroom):
+        space_id, _ = classroom
+        _post(db, teacher, space_id)
+        _as(db, _user(db, role="student"))
+        assert (
+            _count(db, "SELECT count(*) FROM announcement WHERE space_id = :s", {"s": space_id})
+            == 0
+        )
+
+    def test_a_member_cannot_edit_or_delete(self, db, teacher, classroom):
+        space_id, code = classroom
+        student = _user(db, role="student")
+        assert _join(db, student, code) == "joined"
+        post = _post(db, teacher, space_id)
+        _as(db, student)
+        edited = db.execute(
+            text("UPDATE announcement SET body = 'defaced' WHERE id = :p"), {"p": post}
+        ).rowcount
+        deleted = db.execute(text("DELETE FROM announcement WHERE id = :p"), {"p": post}).rowcount
+        assert (edited, deleted) == (0, 0)
+
+    def test_authorship_and_history_cannot_be_rewritten(self, db, teacher, classroom):
+        space_id, _ = classroom
+        post = _post(db, teacher, space_id)
+        _as(db, teacher)
+        message = _refused(
+            db,
+            "UPDATE announcement SET created_at = now() - interval '1 year' WHERE id = :p",
+            {"p": post},
+        )
+        assert "permission denied" in message
+
+    def test_the_author_can_edit_and_delete(self, db, teacher, classroom):
+        """The control: a policy refusing everything would pass the tests above."""
+        space_id, _ = classroom
+        post = _post(db, teacher, space_id)
+        _as(db, teacher)
+        assert (
+            db.execute(
+                text("UPDATE announcement SET body = 'fixed' WHERE id = :p"), {"p": post}
+            ).rowcount
+            == 1
+        )
+        assert db.execute(text("DELETE FROM announcement WHERE id = :p"), {"p": post}).rowcount == 1

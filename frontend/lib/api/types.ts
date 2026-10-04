@@ -367,3 +367,28 @@ export type PeopleResponse = { owner: Person; members: Member[] }
 export type SubjectOption = { id: string; name: string; groups: StudentGroup[] }
 
 export type SubjectsResponse = { subjects: SubjectOption[] }
+
+// Phase 3 — the stream
+
+export type Announcement = {
+  id: string
+  body: string
+  author_id: string
+  /** When members may see it. A future value means scheduled. */
+  publish_at: string
+  /** Only ever true in the owner's view: the database hides scheduled posts from members. */
+  scheduled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type AnnouncementPage = {
+  items: Announcement[]
+  /** Opaque keyset cursor for the next, older page; null at the end. */
+  next_cursor: string | null
+}
+
+/** `publish_at` must be an ISO instant WITH an offset; omit it to post now. */
+export type AnnouncementCreateRequest = { body: string; publish_at?: string }
+
+export type AnnouncementUpdateRequest = { body?: string; publish_at?: string }

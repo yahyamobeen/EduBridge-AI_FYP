@@ -15,11 +15,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 |---|---|---|
 | Pages | **27** (4 added by classroom Phase 2) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **30** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **33** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **562**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **590**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-04 (classroom Phase 2).*
+*Re-measured 2026-10-04 (classroom Phase 3).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -140,14 +140,39 @@ making a request. Components live in `components/classroom/`:
   archive, remove) render from the server's `viewer_role === 'owner' && can_manage`, never from the
   session role.** A teacher whose subject scope was revoked is still `owner` but gets no controls and
   is told why. Not the security boundary — the database is — but `prd.md` §4.2 forbids rendering a
-  control the caller cannot use.
+  control the caller cannot use. Since classroom Phase 3 its sections are tabs — **Stream** (the
+  default) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
+  `TABS` constant.
+- **`StreamTab.tsx`** (classroom Phase 3) — announcements, newest first. **Nothing here filters
+  scheduled posts**: a member never receives one, because the database withholds it
+  (`announcement_member_read`), so the owner alone sees the "Scheduled for" badge. Bodies render as
+  plain text in `whitespace-pre-wrap` — never HTML, never auto-linked. The composer and the edit form
+  offer *post now* or *schedule* (a `datetime-local` whose `min` is now); a published post can be
+  edited but not rescheduled, matching the API. "Load older" follows `next_cursor` and **merges by
+  id**, because a post published between two requests can appear on both pages. Posting is offered
+  only for the owner of a non-archived classroom (`canPost`); errors branch on `ApiError.code` and
+  `details.fields`, never on `message`.
 - **`JoinClassForm.tsx`** — branches on `details.reason` (`invalid_code`, `class_mismatch` with the
   class named, `classroom_full`) and on `GATE_PENDING` / `RATE_LIMITED`; never on `message`.
 - **`CreateClassForm.tsx`** — board → class → subject from `/reference/enums` and
   `/reference/subjects`; changing board or class discards the chosen subject.
 - **`ConfirmInline.tsx`** — the second step before remove, leave, archive and turning joining off.
   Inline rather than a `<dialog>`: jsdom implements no `showModal`, so a dialog could not be tested.
-- **`styles.ts`** — the card and button class strings `Settings.tsx` uses, shared by the four files.
+- **`styles.ts`** — the card and button class strings `Settings.tsx` uses, shared by the classroom
+  components.
+
+Two shared pieces arrived with the stream:
+
+- **`components/ui/Tabs.tsx`** — a WAI-ARIA tablist with automatic activation: one tab in the Tab
+  order, arrows move, Home/End jump. ⚠️ **The arrow keys follow the screen, not the source order**:
+  under `dir="rtl"` the first tab is drawn on the right, so ArrowRight moves towards the *start* of
+  the list. Direction is read from the element's computed style rather than the locale, so the
+  component is correct wherever it is mounted. Callers give each panel `id={tabPanelId(key)}`,
+  `role="tabpanel"` and `aria-labelledby={tabId(key)}`.
+- **`lib/datetime.ts`** — the only bridge between `<input type="datetime-local">` (wall-clock time,
+  no offset) and the API (ISO instants **with** an offset; the backend refuses a naive one).
+  ECMAScript parses an offset-less date-time as local time, so the conversion the backend will not
+  guess is made in the browser, where the user's zone is actually known.
 
 The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
 
@@ -494,7 +519,7 @@ The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot rea
 
 The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:130-131`) on every call.
 
-`endpoints.ts:175-177` is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:274-276`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -520,7 +545,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **429 leaf keys each, identical across all three**, and in the same order — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2 and 3 added the `classroom` namespace (562, then 590).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -661,15 +686,18 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-30 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+33 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
 
-The four classroom test files (`components/classroom/*.test.tsx`, classroom Phase 2) give their
-**first** wait after `SessionGuard` resolves an explicit 5 s timeout (`LOADED`): Testing Library's
-1 s default measured machine load inside the full suite rather than the code — the same class of
-false failure `vitest.config.mts` records raising `testTimeout` for. Their date assertions pass
-`timeZone="Asia/Karachi"` as `PlanSelection.test.tsx` does, because **the app configures no global
-next-intl time zone** (pre-existing; dates render in the browser's zone, which is correct for
-client-only rendering, but a server-rendered date would mismatch).
+The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
+give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured
+machine load inside the full suite rather than the code — the same class of false failure
+`vitest.config.mts` records raising `testTimeout` for. The ones that render dates
+(`ClassroomView.test.tsx`, `StreamTab.test.tsx`) pass `timeZone="Asia/Karachi"` as
+`PlanSelection.test.tsx` does, because **the app configures no global next-intl time zone**
+(pre-existing; dates render in the browser's zone, which is correct for client-only rendering, but a
+server-rendered date would mismatch). `StreamTab.test.tsx` also renders in `ur` and `ur-Latn` with an
+`onError` that fails on any missing key, and `components/ui/Tabs.test.tsx` pins the reversed arrows
+under `dir="rtl"`.
 
 The suite is not uniform — three files do something other than test a component:
 
@@ -776,7 +804,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:179-188`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:186`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:278-287`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:285`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

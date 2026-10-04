@@ -1,5 +1,9 @@
 import { apiFetch, endSession, rememberSession } from './client'
 import type {
+  Announcement,
+  AnnouncementCreateRequest,
+  AnnouncementPage,
+  AnnouncementUpdateRequest,
   BoardCode,
   EmailResendRequest,
   EmailVerifyRequest,
@@ -340,4 +344,39 @@ export function listSubjects(
 ): Promise<SubjectsResponse> {
   const query = new URLSearchParams({ board, class_level: String(classLevel) })
   return apiFetch<SubjectsResponse>(`/reference/subjects?${query}`, withSignal(signal))
+}
+
+// Phase 3 — the stream
+
+export function listAnnouncements(
+  spaceId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<AnnouncementPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+  return apiFetch<AnnouncementPage>(
+    `/spaces/${seg(spaceId)}/announcements${query}`,
+    withSignal(signal),
+  )
+}
+
+export function createAnnouncement(
+  spaceId: string,
+  body: AnnouncementCreateRequest,
+): Promise<Announcement> {
+  return apiFetch<Announcement>(`/spaces/${seg(spaceId)}/announcements`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateAnnouncement(
+  id: string,
+  body: AnnouncementUpdateRequest,
+): Promise<Announcement> {
+  return apiFetch<Announcement>(`/announcements/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function deleteAnnouncement(id: string): Promise<void> {
+  return apiFetch<void>(`/announcements/${seg(id)}`, { method: 'DELETE' })
 }

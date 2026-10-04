@@ -46,3 +46,32 @@ class TestJoinRequest:
     def test_code_is_bounded(self):
         with pytest.raises(ValidationError):
             JoinRequest(code="A" * 33)
+
+
+class TestAnnouncementRequests:
+    def test_body_is_stripped_and_blank_refused(self):
+        from app.classroom.schemas import AnnouncementCreateRequest
+
+        assert AnnouncementCreateRequest(body="  Test tomorrow  ").body == "Test tomorrow"
+        with pytest.raises(ValidationError):
+            AnnouncementCreateRequest(body="   ")
+
+    def test_a_schedule_without_a_time_zone_is_refused(self):
+        # "14:30" alone is ambiguous between the browser's zone and the server's.
+        from app.classroom.schemas import AnnouncementCreateRequest
+
+        with pytest.raises(ValidationError):
+            AnnouncementCreateRequest(body="x", publish_at="2026-10-05T14:30:00")
+        AnnouncementCreateRequest(body="x", publish_at="2026-10-05T14:30:00+05:00")
+
+    def test_body_is_bounded_like_the_check_constraint(self):
+        from app.classroom.schemas import AnnouncementCreateRequest
+
+        with pytest.raises(ValidationError):
+            AnnouncementCreateRequest(body="x" * 5001)
+
+    def test_empty_update_is_refused(self):
+        from app.classroom.schemas import AnnouncementUpdateRequest
+
+        with pytest.raises(AppError):
+            AnnouncementUpdateRequest().validate_at_least_one_field()

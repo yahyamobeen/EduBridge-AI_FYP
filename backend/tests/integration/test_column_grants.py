@@ -386,6 +386,11 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
         #    attempt at this list put `auth_token` before `app_user` and failed
         #    on the ordering rather than on the contents. Keep it sorted.
         assert actual == [
+            # 20261004130000 (classroom Phase 3) — an author may edit the text
+            # and reschedule; `author_id`, `space_id` and `created_at` are not
+            # writable, so a post can never be re-attributed or moved.
+            ("announcement", "body", "UPDATE"),
+            ("announcement", "publish_at", "UPDATE"),
             # 20260816160000 (B2, B3, B4) — the only self-editable fields.
             ("app_user", "full_name", "UPDATE"),
             # 20260816200000 (FR-A8) — the stored preference that governs

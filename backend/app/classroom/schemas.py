@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 from app.core.errors import validation_error
 from app.models.enums import BoardCode, SpaceStatus
@@ -124,3 +124,55 @@ class SubjectOption(BaseModel):
 
 class SubjectsResponse(BaseModel):
     subjects: list[SubjectOption]
+
+
+# ── Phase 3: announcements ──────────────────────────────────────────────────
+
+
+class AnnouncementCreateRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    # None = publish now. A value must carry a time zone (AwareDatetime): a
+    # naive "14:30" is ambiguous between the browser's zone and the server's.
+    # The service checks it is in the future and at most a year ahead, against
+    # the DATABASE clock.
+    publish_at: AwareDatetime | None = None
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str) -> str:
+        return _strip_nonempty(value)
+
+
+class AnnouncementUpdateRequest(BaseModel):
+    body: str | None = Field(default=None, min_length=1, max_length=5000)
+    publish_at: AwareDatetime | None = None
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str | None) -> str | None:
+        return None if value is None else _strip_nonempty(value)
+
+    def validate_at_least_one_field(self) -> None:
+        if self.body is None and self.publish_at is None:
+            raise validation_error(
+                message="Provide at least one field to update.",
+                details={"fields": {"body": "Provide this or publish_at."}},
+            )
+
+
+class Announcement(BaseModel):
+    id: UUID
+    body: str
+    author_id: UUID
+    publish_at: datetime
+    # True only in the owner's view: a member can never read a scheduled post
+    # (announcement_member_read), so for them this is always False.
+    scheduled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class AnnouncementPage(BaseModel):
+    items: list[Announcement]
+    # Opaque; pass back as ?cursor= for the next (older) page. None at the end.
+    next_cursor: str | None

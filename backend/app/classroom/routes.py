@@ -15,9 +15,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.auth.dependencies import AuthContext, authenticated
-from app.classroom import service
+from app.classroom import announcements, service
 from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
 from app.classroom.schemas import (
+    Announcement,
+    AnnouncementCreateRequest,
+    AnnouncementPage,
+    AnnouncementUpdateRequest,
     JoinCodeRequest,
     JoinCodeResponse,
     JoinRequest,
@@ -129,3 +133,45 @@ def subjects_endpoint(
 ) -> SubjectsResponse:
     _read(request, ctx)
     return SubjectsResponse(**service.list_subjects(ctx.session, board, class_level))
+
+
+# ── Phase 3: the stream ─────────────────────────────────────────────────────
+
+
+@router.get("/spaces/{space_id}/announcements", response_model=AnnouncementPage)
+def list_announcements_endpoint(
+    request: Request,
+    space_id: UUID,
+    ctx: Participant,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> AnnouncementPage:
+    _read(request, ctx)
+    return AnnouncementPage(**announcements.list_announcements(ctx.session, space_id, cursor))
+
+
+@router.post(
+    "/spaces/{space_id}/announcements",
+    response_model=Announcement,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_announcement_endpoint(
+    request: Request, space_id: UUID, payload: AnnouncementCreateRequest, ctx: Teacher
+) -> Announcement:
+    _write(request, ctx)
+    return Announcement(
+        **announcements.create_announcement(ctx.session, ctx.user_id, space_id, payload)
+    )
+
+
+@router.patch("/announcements/{announcement_id}", response_model=Announcement)
+def update_announcement_endpoint(
+    request: Request, announcement_id: UUID, payload: AnnouncementUpdateRequest, ctx: Teacher
+) -> Announcement:
+    _write(request, ctx)
+    return Announcement(**announcements.update_announcement(ctx.session, announcement_id, payload))
+
+
+@router.delete("/announcements/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_announcement_endpoint(request: Request, announcement_id: UUID, ctx: Teacher) -> None:
+    _write(request, ctx)
+    announcements.delete_announcement(ctx.session, ctx.user_id, announcement_id)

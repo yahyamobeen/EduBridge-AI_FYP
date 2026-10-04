@@ -6,6 +6,7 @@ import { DashboardShell } from '@/components/app/DashboardShell'
 import { SessionGuard } from '@/components/app/SessionGuard'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowLeftIcon, CheckCircleIcon, KeyIcon, UsersIcon } from '@/components/ui/Icon'
+import { tabId, tabPanelId, Tabs } from '@/components/ui/Tabs'
 import { Link, useRouter } from '@/i18n/navigation'
 import {
   changeJoinCode,
@@ -18,6 +19,7 @@ import {
 import { ApiError } from '@/lib/api/errors'
 import type { MeResponse, PeopleResponse, SpaceDetail } from '@/lib/api/types'
 import { ConfirmInline } from './ConfirmInline'
+import { StreamTab } from './StreamTab'
 import {
   CARD,
   CARD_HEADING,
@@ -28,6 +30,10 @@ import {
   SECONDARY_BUTTON,
   UUID_RE,
 } from './styles'
+
+/** Stream first: it is what changes. Classwork and Chat join in later phases. */
+const TABS = ['stream', 'people'] as const
+type ClassroomTab = (typeof TABS)[number]
 
 /**
  * One classroom — `/classroom/[spaceId]` (student) and
@@ -84,6 +90,7 @@ export function ClassroomView({
     return () => controller.abort()
   }, [spaceId, validId])
 
+  const [tab, setTab] = useState<ClassroomTab>('stream')
   const isOwner = space?.viewer_role === 'owner' && space.can_manage
   const role = me.role === 'teacher' ? 'teacher' : 'student'
 
@@ -135,17 +142,36 @@ export function ClassroomView({
           <div className="grid grid-cols-1 gap-gutter lg:grid-cols-3">
             <div className="lg:col-span-2">
               {(space.viewer_role === 'member' || isOwner) && (
-                <PeopleSection
-                  spaceId={space.id}
-                  isOwner={isOwner}
-                  onMemberRemoved={() =>
-                    setSpace((s) =>
-                      s && s.member_count !== null
-                        ? { ...s, member_count: Math.max(0, s.member_count - 1) }
-                        : s,
-                    )
-                  }
-                />
+                <>
+                  <Tabs
+                    label={t('tabs.label')}
+                    value={tab}
+                    onChange={setTab}
+                    items={TABS.map((key) => ({ key, label: t(`tabs.${key}`) }))}
+                  />
+                  <div role="tabpanel" id={tabPanelId(tab)} aria-labelledby={tabId(tab)}>
+                    {tab === 'stream' ? (
+                      <StreamTab
+                        spaceId={space.id}
+                        isOwner={isOwner}
+                        canPost={isOwner && space.status === 'active'}
+                        authorName={space.owner_name ?? t('card.unnamedTeacher')}
+                      />
+                    ) : (
+                      <PeopleSection
+                        spaceId={space.id}
+                        isOwner={isOwner}
+                        onMemberRemoved={() =>
+                          setSpace((s) =>
+                            s && s.member_count !== null
+                              ? { ...s, member_count: Math.max(0, s.member_count - 1) }
+                              : s,
+                          )
+                        }
+                      />
+                    )}
+                  </div>
+                </>
               )}
             </div>
             <div className="space-y-gutter">
