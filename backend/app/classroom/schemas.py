@@ -163,6 +163,17 @@ class AnnouncementUpdateRequest(BaseModel):
             )
 
 
+class FileMeta(BaseModel):
+    """A stored file (classroom Phase 6). The object key never leaves the server."""
+
+    id: UUID
+    # Sanitised, with the extension forced to the detected type (files.py).
+    filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+
+
 class Announcement(BaseModel):
     id: UUID
     body: str
@@ -173,6 +184,8 @@ class Announcement(BaseModel):
     scheduled: bool
     created_at: datetime
     updated_at: datetime
+    # Teacher attachments (Phase 6); a member sees them once the post is live.
+    attachments: list[FileMeta] = []
 
 
 class AnnouncementPage(BaseModel):
@@ -269,6 +282,8 @@ class MySubmission(BaseModel):
     grade: float | None
     feedback: str | None
     returned_at: datetime | None
+    # The student's own uploaded files (Phase 6).
+    files: list[FileMeta] = []
 
 
 class AssignmentSummary(BaseModel):
@@ -299,6 +314,8 @@ class AssignmentDetail(AssignmentSummary):
     updated_at: datetime
     # Member view only.
     my_submission: MySubmission | None = None
+    # Teacher attachments (Phase 6).
+    attachments: list[FileMeta] = []
 
 
 class SubmissionDraftRequest(BaseModel):
@@ -358,6 +375,8 @@ class StudentWork(SubmissionRow):
     body: str | None
     link_url: str | None
     feedback: str
+    # Empty until turned in, for the same reason (subfile_teacher_read).
+    files: list[FileMeta] = []
 
 
 # ── Phase 5: the calendar ───────────────────────────────────────────────────

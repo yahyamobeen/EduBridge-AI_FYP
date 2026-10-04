@@ -241,7 +241,11 @@ describe('a link to an assignment (from the calendar)', () => {
     wrap(<StudentClassroom spaceId={SPACE_ID} assignmentId={ASSIGNMENT_ID} />)
     const tab = await screen.findByRole('tab', { name: en.classroom.tabs.classwork }, LOADED)
     expect(tab).toHaveAttribute('aria-selected', 'true')
-    expect(getAssignment).toHaveBeenCalledWith(ASSIGNMENT_ID, expect.any(AbortSignal))
+    // The fetch runs in AssignmentView's effect, which can land a moment after the tab
+    // appears under full-suite load: wait for it rather than assert at once.
+    await waitFor(() =>
+      expect(getAssignment).toHaveBeenCalledWith(ASSIGNMENT_ID, expect.any(AbortSignal)),
+    )
   })
 
   it('ignores an id that is not a UUID and opens the Stream', async () => {

@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.classroom import file_service, storage
 from app.classroom.pagination import decode_cursor, encode_cursor
 from app.classroom.scheduling import check_schedule
 from app.classroom.schemas import AnnouncementCreateRequest, AnnouncementUpdateRequest
@@ -65,6 +66,9 @@ def list_announcements(db: Session, space_id: UUID, cursor: str | None) -> dict:
     # Row-Level Security has already removed scheduled posts from a member's
     # result, so this is the same query for both roles.
     items = [dict(r) for r in rows[:PAGE_SIZE]]
+    files = file_service.attachments_for_announcements(db, [i["id"] for i in items])
+    for item in items:
+        item["attachments"] = files.get(item["id"], [])
     has_more = len(rows) > PAGE_SIZE
     next_cursor = encode_cursor(items[-1]["publish_at"], items[-1]["id"]) if has_more else None
     return {"items": items, "next_cursor": next_cursor}
@@ -138,10 +142,14 @@ def update_announcement(
         )
     if row is None:  # authored by someone else: the policy matched no row
         raise forbidden_scope()
-    return dict(row)
+    files = file_service.attachments_for_announcements(db, [row["id"]])
+    return {**row, "attachments": files.get(row["id"], [])}
 
 
 def delete_announcement(db: Session, user_id: UUID, announcement_id: UUID) -> None:
+    # Read the attachment keys FIRST: the cascade removes their rows, never the
+    # stored objects (classroom Phase 6).
+    keys = file_service.material_keys_of_announcement(db, announcement_id)
     with rls_refusal_as_forbidden():
         space_id = db.execute(
             text("DELETE FROM announcement WHERE id = :id RETURNING space_id"),
@@ -149,6 +157,7 @@ def delete_announcement(db: Session, user_id: UUID, announcement_id: UUID) -> No
         ).scalar_one_or_none()
     if space_id is None:  # not the author, archived, or no such post — one answer
         raise forbidden_scope()
+    storage.delete_after_commit(db, keys)
     audit(
         db,
         user_id,

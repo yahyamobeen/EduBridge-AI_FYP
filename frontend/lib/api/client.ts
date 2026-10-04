@@ -195,6 +195,17 @@ async function performRefresh(): Promise<boolean> {
 export type ApiRequestInit = {
   method?: string
   body?: unknown
+  /**
+   * Sent as-is instead of a JSON body — a file upload (classroom Phase 6). The
+   * caller sets its Content-Type. A Blob can be sent twice, so refresh-and-retry
+   * stays safe; a one-shot stream could not be.
+   */
+  rawBody?: Blob
+  /**
+   * 'blob' returns a SUCCESSFUL body as a Blob — a file download. An error is
+   * still parsed as the JSON envelope, so a refused download is an ApiError.
+   */
+  responseType?: 'json' | 'blob'
   /** Sent instead of the session token, for short-lived challenge credentials. */
   bearer?: string
   /**
@@ -212,20 +223,27 @@ export type ApiRequestInit = {
 
 async function rawRequest<T>(path: string, init: ApiRequestInit): Promise<T> {
   const token = init.bearer ?? getAccessToken()
+  const raw = init.rawBody !== undefined
   const response = await fetch(resolve(path), {
     method: init.method ?? 'GET',
     // Carries the httpOnly refresh cookie.
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      // A raw body carries its own type, set by the caller.
+      ...(raw ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
-    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    ...(raw
+      ? { body: init.rawBody }
+      : init.body === undefined
+        ? {}
+        : { body: JSON.stringify(init.body) }),
     ...(init.signal ? { signal: init.signal } : {}),
   })
 
   if (response.status === 204) return undefined as T
+  if (init.responseType === 'blob' && response.ok) return (await response.blob()) as T
 
   const payload = await response.json().catch(() => null)
   if (!response.ok) throw toApiError(response.status, payload)

@@ -7,13 +7,17 @@ import { CalendarIcon } from '@/components/ui/Icon'
 import {
   createAnnouncement,
   deleteAnnouncement,
+  deleteAttachment,
+  downloadAttachment,
   listAnnouncements,
   updateAnnouncement,
+  uploadAnnouncementAttachment,
 } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { Announcement, AnnouncementUpdateRequest } from '@/lib/api/types'
 import { isoToLocalInput, localInputToIso, nowLocalInput } from '@/lib/datetime'
 import { ConfirmInline } from './ConfirmInline'
+import { FileSection } from './Files'
 import { CARD, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
 /**
@@ -267,6 +271,7 @@ function Post({
   onDeleted: (id: string) => void
 }) {
   const t = useTranslations('classroom.stream')
+  const tf = useTranslations('classroom.files')
   const format = useFormatter()
   const [editing, setEditing] = useState(false)
   const [body, setBody] = useState(a.body)
@@ -391,6 +396,14 @@ function Post({
       ) : (
         <p className="whitespace-pre-wrap break-words text-body-md text-on-surface">{a.body}</p>
       )}
+      <FileSection
+        heading={tf('attachments')}
+        files={a.attachments}
+        download={(f) => downloadAttachment(f.id)}
+        upload={canManage ? (file) => uploadAnnouncementAttachment(a.id, file) : undefined}
+        remove={canManage ? (f) => deleteAttachment(f.id) : undefined}
+        onChange={(attachments) => onChanged({ ...a, attachments })}
+      />
 
       {canManage && !editing && !confirmDelete && (
         <div className="mt-4 flex flex-wrap gap-3">

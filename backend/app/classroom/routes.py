@@ -1,7 +1,7 @@
 """
 Classroom routes — `tdd.md` §3.6: spaces, codes and membership (Phase 2), the
-stream (Phase 3), assignments, submissions and grades (Phase 4), and the
-calendar (Phase 5).
+stream (Phase 3), assignments, submissions and grades (Phase 4), the calendar
+(Phase 5), and files (Phase 6).
 
 Thin by design: rate limit first, then one service call. Who may call is
 decided by the dependency on each route (app/classroom/dependencies.py); which
@@ -14,12 +14,15 @@ endpoint appears to need it, add a narrow `app.*` function instead.
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
+from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import AuthContext, authenticated
-from app.classroom import announcements, assignments, calendar, service
+from app.classroom import announcements, assignments, calendar, file_service, service, storage
 from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
+from app.classroom.files import download_headers, read_bounded_body
 from app.classroom.schemas import (
     Announcement,
     AnnouncementCreateRequest,
@@ -31,6 +34,7 @@ from app.classroom.schemas import (
     AssignmentUpdateRequest,
     CalendarResponse,
     ChaptersResponse,
+    FileMeta,
     GradeRequest,
     JoinCodeRequest,
     JoinCodeResponse,
@@ -47,10 +51,13 @@ from app.classroom.schemas import (
     SubmissionDraftRequest,
     SubmissionsResponse,
 )
+from app.core.config import get_settings
 from app.core.ratelimit import (
     CLASSROOM_JOIN_LIMIT,
     CLASSROOM_READ_LIMIT,
     CLASSROOM_WRITE_LIMIT,
+    FILE_DOWNLOAD_LIMIT,
+    FILE_UPLOAD_LIMIT,
     enforce,
 )
 
@@ -316,3 +323,117 @@ def calendar_endpoint(
     return CalendarResponse(
         **calendar.items_between(ctx.session, ctx.user_id, ctx.role, start, end)
     )
+
+
+# ── Phase 6: files ──────────────────────────────────────────────────────────
+#
+# Uploads are a RAW body, never multipart: Starlette's multipart parser puts no
+# cap on a file part. The bytes are counted against Content-Length
+# (files.read_bounded_body) after a cheap authorization check, so an outsider
+# never gets to send 5 MB. The handlers are `async` only to read that stream;
+# every database step runs in the threadpool, as the sync routes above do.
+
+UploadName = Annotated[str, Header(alias="X-Upload-Filename", max_length=1024)]
+
+
+def _upload_limit(request: Request, ctx: AuthContext) -> None:
+    enforce(request, bucket="file_upload", limit=FILE_UPLOAD_LIMIT, subject=str(ctx.user_id))
+
+
+def _download(request: Request, ctx: AuthContext, kind: str, file_id: UUID) -> StreamingResponse:
+    enforce(request, bucket="file_download", limit=FILE_DOWNLOAD_LIMIT, subject=str(ctx.user_id))
+    meta = file_service.readable_file(ctx.session, kind, file_id)  # RLS decides
+    return StreamingResponse(
+        storage.get_object_storage().open(meta["object_key"]),
+        media_type=meta["content_type"],
+        headers=download_headers(meta["filename"], meta["size_bytes"]),
+    )
+
+
+@router.post(
+    "/assignments/{assignment_id}/submission/files",
+    response_model=FileMeta,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_submission_file_endpoint(
+    request: Request, assignment_id: UUID, ctx: GatedStudent, filename: UploadName
+) -> FileMeta:
+    _upload_limit(request, ctx)
+    space_id = await run_in_threadpool(
+        file_service.submission_upload_space, ctx.session, assignment_id
+    )
+    data = await read_bounded_body(request, get_settings().max_upload_bytes)
+    return FileMeta(
+        **await run_in_threadpool(
+            file_service.store_submission_file,
+            ctx.session,
+            ctx.user_id,
+            assignment_id,
+            space_id,
+            data,
+            filename,
+        )
+    )
+
+
+async def _upload_material(
+    request: Request, ctx: AuthContext, parent: str, parent_id: UUID, filename: str
+) -> FileMeta:
+    _upload_limit(request, ctx)
+    space_id = await run_in_threadpool(
+        file_service.material_upload_space, ctx.session, parent, parent_id
+    )
+    data = await read_bounded_body(request, get_settings().max_upload_bytes)
+    return FileMeta(
+        **await run_in_threadpool(
+            file_service.store_material, ctx.session, parent, parent_id, space_id, data, filename
+        )
+    )
+
+
+@router.post(
+    "/assignments/{assignment_id}/attachments",
+    response_model=FileMeta,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_assignment_attachment_endpoint(
+    request: Request, assignment_id: UUID, ctx: Teacher, filename: UploadName
+) -> FileMeta:
+    return await _upload_material(request, ctx, "assignment", assignment_id, filename)
+
+
+@router.post(
+    "/announcements/{announcement_id}/attachments",
+    response_model=FileMeta,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_announcement_attachment_endpoint(
+    request: Request, announcement_id: UUID, ctx: Teacher, filename: UploadName
+) -> FileMeta:
+    return await _upload_material(request, ctx, "announcement", announcement_id, filename)
+
+
+@router.get("/submission-files/{file_id}/content", response_class=StreamingResponse)
+def download_submission_file_endpoint(
+    request: Request, file_id: UUID, ctx: Participant
+) -> StreamingResponse:
+    return _download(request, ctx, "submission", file_id)
+
+
+@router.get("/attachments/{file_id}/content", response_class=StreamingResponse)
+def download_attachment_endpoint(
+    request: Request, file_id: UUID, ctx: Participant
+) -> StreamingResponse:
+    return _download(request, ctx, "material", file_id)
+
+
+@router.delete("/submission-files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_submission_file_endpoint(request: Request, file_id: UUID, ctx: GatedStudent) -> None:
+    _write(request, ctx)
+    file_service.remove_submission_file(ctx.session, file_id)
+
+
+@router.delete("/attachments/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attachment_endpoint(request: Request, file_id: UUID, ctx: Teacher) -> None:
+    _write(request, ctx)
+    file_service.remove_material(ctx.session, file_id)

@@ -15,6 +15,7 @@ import type {
   EmailVerifyRequest,
   EmailVerifyResponse,
   EnumsResponse,
+  FileMeta,
   GradeRequest,
   GuardianConfirmRequest,
   GuardianConfirmResponse,
@@ -503,4 +504,53 @@ export function getCalendar(
 ): Promise<CalendarResponse> {
   const query = new URLSearchParams({ from, to })
   return apiFetch<CalendarResponse>(`/calendar?${query}`, withSignal(signal))
+}
+
+// Phase 6 — files. Uploads are a raw body, never multipart; the server counts
+// it against Content-Length and reads the type from the bytes. Downloads come
+// back as a Blob, so the access token never has to appear in a URL.
+
+function upload(path: string, file: File): Promise<FileMeta> {
+  return apiFetch<FileMeta>(path, {
+    method: 'POST',
+    rawBody: file,
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Upload-Filename': encodeURIComponent(file.name),
+    },
+  })
+}
+
+export function uploadSubmissionFile(assignmentId: string, file: File): Promise<FileMeta> {
+  return upload(`/assignments/${seg(assignmentId)}/submission/files`, file)
+}
+
+export function uploadAssignmentAttachment(
+  assignmentId: string,
+  file: File,
+): Promise<FileMeta> {
+  return upload(`/assignments/${seg(assignmentId)}/attachments`, file)
+}
+
+export function uploadAnnouncementAttachment(
+  announcementId: string,
+  file: File,
+): Promise<FileMeta> {
+  return upload(`/announcements/${seg(announcementId)}/attachments`, file)
+}
+
+export function downloadSubmissionFile(fileId: string): Promise<Blob> {
+  return apiFetch<Blob>(`/submission-files/${seg(fileId)}/content`, { responseType: 'blob' })
+}
+
+export function downloadAttachment(fileId: string): Promise<Blob> {
+  return apiFetch<Blob>(`/attachments/${seg(fileId)}/content`, { responseType: 'blob' })
+}
+
+export function deleteSubmissionFile(fileId: string): Promise<void> {
+  return apiFetch<void>(`/submission-files/${seg(fileId)}`, { method: 'DELETE' })
+}
+
+export function deleteAttachment(fileId: string): Promise<void> {
+  return apiFetch<void>(`/attachments/${seg(fileId)}`, { method: 'DELETE' })
 }

@@ -4,10 +4,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { UsersIcon } from '@/components/ui/Icon'
-import { getStudentWork, listSubmissions, saveGrade } from '@/lib/api/endpoints'
+import {
+  downloadSubmissionFile,
+  getStudentWork,
+  listSubmissions,
+  saveGrade,
+} from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { AssignmentDetail, StudentWork, SubmissionRow } from '@/lib/api/types'
 import { StatusChip } from './AssignmentParts'
+import { FileSection } from './Files'
 import { SubmittedLink } from './SubmissionPanel'
 import { CARD, CARD_HEADING, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
@@ -142,6 +148,7 @@ function StudentWorkPanel({
   onSaved: (work: StudentWork) => void
 }) {
   const t = useTranslations('classroom.grading')
+  const tf = useTranslations('classroom.files')
   const format = useFormatter()
   const [work, setWork] = useState<StudentWork | null>(null)
   const [failed, setFailed] = useState(false)
@@ -236,6 +243,11 @@ function StudentWorkPanel({
                   <SubmittedLink href={work.link_url} />
                 </div>
               )}
+              <FileSection
+                heading={tf('studentFiles')}
+                files={work.files}
+                download={(f) => downloadSubmissionFile(f.id)}
+              />
             </>
           )}
 

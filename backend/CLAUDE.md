@@ -16,8 +16,8 @@ JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberatel
 `app_user` holds `password_hash` itself.
 
 **Two routers**: `app/auth/routes.py` (21 routes — authentication, guardian, reference) and
-`app/classroom/routes.py` (27 routes — classroom Phases 2–5). `tdd.md` v0.4.0 specifies **83
-endpoints — 35 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
+`app/classroom/routes.py` (34 routes — classroom Phases 2–6). `tdd.md` v0.4.0 specifies **83
+endpoints — 28 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
 `app.*` functions only; never grant `app_backend` a write on `enrollment` or `join_code` to make a
 route easier (`Architecture/database.md`, invariant 9).
 `app/workers/` is scaffolded with a `.gitkeep` and nothing else.
@@ -93,6 +93,14 @@ status code **or timing**. That is why `login()` verifies against a dummy argon2
 unknown-address branch, why the captcha runs *before* the lookup, and why outgoing mail is
 dispatched off the request thread.
 
+**Stored files follow the transaction, and every caller goes through
+`storage.get_object_storage()`.** Classroom files (Phase 6) are stored **before** their row and
+deleted only **after** the deleting transaction commits (`app/classroom/storage.py`:
+`track_upload`, `delete_after_commit`), so a rollback can orphan an object but never a row. Never
+import an implementation by name: `tests/integration/conftest.py` swaps the factory for an
+in-memory store per test, and a captured reference would reach real storage. A download reads
+the file's row under RLS before opening the object — do not add a path that skips it.
+
 **Revocation writes commit before the exception is raised.** A lockout or a family revocation that
 is written and not committed is undone by the very response that reports it, because the exception
 unwinds through `get_db`, which rolls back. Both call sites commit deliberately, then raise.
@@ -101,7 +109,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20261004140000_assignments_and_grading.sql` (2026-10-04, with `supabase db push`).
+  `20261004150000_classroom_files.sql` (2026-10-05, with `supabase db push`).
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
@@ -116,7 +124,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 ## 5. Testing
 
-48 test files: **21 in `tests/unit`**, **27 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-04).
+50 test files: **22 in `tests/unit`**, **28 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-05).
 
 `tests/unit` must stay runnable with **no connection string, no engine and no live project** —
 that is why `tests/conftest.py` has no fixtures and why `gate.py` and `onboarding.py` avoid

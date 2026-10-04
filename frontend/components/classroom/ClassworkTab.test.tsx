@@ -56,6 +56,7 @@ function detail(overrides: Partial<AssignmentDetail> = {}): AssignmentDetail {
     created_at: '2026-10-04T09:00:00Z',
     updated_at: '2026-10-04T09:00:00Z',
     my_submission: null,
+    attachments: [],
     ...overrides,
   }
 }
@@ -116,6 +117,7 @@ describe('a member', () => {
           grade: null,
           feedback: null,
           returned_at: null,
+          files: [],
         },
       }),
     )

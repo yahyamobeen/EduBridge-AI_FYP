@@ -42,6 +42,7 @@ const ASSIGNMENT: AssignmentDetail = {
   created_at: '2026-10-04T09:00:00Z',
   updated_at: '2026-10-04T09:00:00Z',
   my_submission: null,
+  attachments: [],
 }
 
 function row(overrides: Partial<SubmissionRow> = {}): SubmissionRow {
@@ -58,7 +59,7 @@ function row(overrides: Partial<SubmissionRow> = {}): SubmissionRow {
 }
 
 function work(overrides: Partial<StudentWork> = {}): StudentWork {
-  return { ...row(), body: 'g = 9.8', link_url: null, feedback: '', ...overrides }
+  return { ...row(), body: 'g = 9.8', link_url: null, feedback: '', files: [], ...overrides }
 }
 
 function renderTable(canGrade = true, locale = 'en', messages: typeof en = en) {

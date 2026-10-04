@@ -13,9 +13,10 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**29 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04). The four `20261004…`
+**30 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-05). The five `20261004…`
 classroom files were dry-run on a shadow database first, then applied by the owner with
-`supabase db push` on 2026-10-04 and re-verified on the live database.
+`supabase db push` — four on 2026-10-04, `20261004150000` on 2026-10-05 — and re-verified on the
+live database.
 
 | # | File | Contents |
 |---|---|---|
@@ -48,6 +49,7 @@ classroom files were dry-run on a shadow database first, then applied by the own
 | 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Applied 2026-10-04* |
 | 28 | `20261004130000_announcement_ownership_and_scheduling.sql` | **Classroom Phase 3** (B27). Announcement insert/update/delete require `author_id` = caller **and** an active owned classroom; `UPDATE` narrowed to `(body, publish_at)`; `publish_at` schedules a post, hidden from members by the read policy until then (no job); `updated_at` trigger, body check, feed and author indexes. *Applied 2026-10-04* |
 | 29 | `20261004140000_assignments_and_grading.sql` | **Classroom Phase 4**. `assignment` (owner content, scheduled by `publish_at`, chapter tag held to the subject by a composite foreign key), `assignment_submission` and `submission_grade` — the grade is its own table because all users share one database role. No write grant on either: five functions (draft, turn in, unsubmit, grade, delete) are the only writers, under one advisory lock per (assignment, student). Teachers see turned-in work of active members only; students see a grade once returned; any grade locks the work. *Applied 2026-10-04* |
+| 30 | `20261004150000_classroom_files.sql` | **Classroom Phase 6**. `material_attachment` (a teacher's file on one announcement or assignment) and `submission_file` (a student's file on their submission) — metadata only; the bytes live in the private `classroom-files` bucket, which this file also creates (skipped on a plain PostgreSQL shadow; a **WARNING**, not an error, if the role lacks the privilege — then create it by hand: private, 9 MB, PDF/PNG/JPEG/DOCX/PPTX). CHECK constraints hold every object key to its owner's prefix. Five policies: a member sees an attachment once its post is live; a teacher sees a student's file once turned in and while the student is a member. Three writing functions with quotas (5 files and 20 MiB per submission, 10 per post, 2 GiB per classroom) under one advisory lock per classroom; `app.delete_assignment` now returns every stored key. *Applied 2026-10-05; the migration created the bucket* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.
@@ -162,8 +164,8 @@ Verbatim at `backend/app/core/db.py:33-59`. Two things there are load-bearing:
 If the variable is never set, `app.current_user_id()` returns `NULL` and owner-scoped policies deny
 — fail-closed by design. Endpoints that run *before* a session exists (login, refresh, email
 verification, password reset, two-factor, the guardian flow) therefore cannot use a plain query;
-they call one of the narrow `SECURITY DEFINER` functions instead. All 59 live `app.*` functions
-(measured 2026-10-04 on a shadow database built from all 29 files) are catalogued, with their call
+they call one of the narrow `SECURITY DEFINER` functions instead. All 65 `app.*` functions
+(measured 2026-10-05 on a shadow database built from all 30 files, and on the live database) are catalogued, with their call
 sites, in
 [`../backend/Architecture/database.md`](../backend/Architecture/database.md#the-app-privileged-functions).
 

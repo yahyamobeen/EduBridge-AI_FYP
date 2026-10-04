@@ -27,8 +27,8 @@ The single most load-bearing sentence in this whole folder follows from that spl
 
 - **Next.js 16 + React 19**, App Router, TypeScript, Tailwind CSS v3.
 - **29 pages** across **3 route groups** — `(site)`, `(auth)`, `(app)` — all under one `[locale]` segment.
-- **3 locales**: `en`, `ur`, `ur-Latn`, each with **696** leaf message keys, in identical order. `ur` is the only right-to-left locale.
-- **38 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
+- **3 locales**: `en`, `ur`, `ur-Latn`, each with **719** leaf message keys, in identical order. `ur` is the only right-to-left locale.
+- **39 test files** (Vitest), including a lint-style test that fails the build on a physical Tailwind class, and a regression guard on `proxy.ts` — the file that routes every page.
 - Access token in **memory only**; refresh token in an `httpOnly` cookie JavaScript cannot read.
 - One transport client with proactive refresh, single-flight refresh, and an error-code allow-list for retry.
 - **No mock layer.** It was deleted in phase 1b; `NEXT_PUBLIC_API_BASE_URL` is required and a backend must be running.
@@ -41,13 +41,13 @@ Run from `frontend/`:
 find app -name "page.tsx" | wc -l                                   # 29
 find app -type d -name "(*)" | wc -l                                # 3
 find . -path ./node_modules -prune -o -path ./.next -prune -o \
-     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 38
+     \( -name "*.test.ts" -o -name "*.test.tsx" \) -print | wc -l   # 39
 ls messages/                                                        # en.json  ur-Latn.json  ur.json
 node -e "const f=require('fs');const c=o=>Object.values(o).reduce((n,v)=>n+(v&&typeof v==='object'?c(v):1),0);for(const l of ['en','ur','ur-Latn'])console.log(l,c(JSON.parse(f.readFileSync('messages/'+l+'.json','utf8'))))"
-                                                                    # en 696 / ur 696 / ur-Latn 696
+                                                                    # en 719 / ur 719 / ur-Latn 719
 ```
 
-The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  38 passed (38)` · `Tests  399 passed (399)`** (re-run 2026-10-04, classroom Phase 5; two consecutive full runs).
+The test-file count is confirmed independently by the runner: `npm test` reports **`Test Files  39 passed (39)` · `Tests  413 passed (413)`** (re-run 2026-10-05, classroom Phase 6; two consecutive full runs).
 
 ## Known defects, recorded rather than hidden
 
@@ -69,7 +69,7 @@ Seven findings from the Epic 1 review land in this application. They are documen
 Run from `frontend/`:
 
 ```bash
-npm test          # Vitest, 38 files
+npm test          # Vitest, 39 files
 npm run build     # includes the TypeScript check
 npm run lint      # ESLint
 npm run typecheck # tsc --noEmit

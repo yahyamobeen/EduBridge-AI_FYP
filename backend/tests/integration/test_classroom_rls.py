@@ -984,3 +984,148 @@ class TestAssignmentBoundary:
             text("UPDATE assignment SET title = 'Lab 1 (revised)' WHERE id = :a"), {"a": lab}
         )
         assert edited.rowcount == 1
+
+
+# ── Phase 6: files (20261004150000) ─────────────────────────────────────────
+
+_SHA = "0" * 64
+
+
+def _sub_key(space_id: UUID, student: str) -> str:
+    return f"u/{space_id}/{student}/{uuid4().hex}"
+
+
+def _add_file(db, student: str, assignment: UUID, key: str) -> str:
+    _as(db, student)
+    return db.execute(
+        text(
+            "SELECT outcome FROM app.add_submission_file("
+            "  :a, :k, 'lab.pdf', 'application/pdf', 100, :h)"
+        ),
+        {"a": assignment, "k": key, "h": _SHA},
+    ).scalar_one()
+
+
+def _attach(db, teacher: str, space_id: UUID, assignment: UUID) -> str:
+    _as(db, teacher)
+    return db.execute(
+        text(
+            "SELECT outcome FROM app.add_material_attachment("
+            "  NULL, :a, :k, 'sheet.pdf', 'application/pdf', 100, :h)"
+        ),
+        {"a": assignment, "k": f"s/{space_id}/{uuid4().hex}", "h": _SHA},
+    ).scalar_one()
+
+
+class TestFileBoundary:
+    def test_nobody_writes_a_file_row_directly(self, db, classroom, member, lab):
+        _as(db, member)
+        message = _refused(
+            db,
+            "INSERT INTO material_attachment (space_id, assignment_id, uploaded_by, object_key, "
+            "  filename, content_type, size_bytes, sha256) "
+            "VALUES (:s, :a, :u, :k, 'x.pdf', 'application/pdf', 1, :h)",
+            {
+                "s": classroom[0],
+                "a": lab,
+                "u": member,
+                "k": f"s/{classroom[0]}/{'a' * 32}",
+                "h": _SHA,
+            },
+        )
+        assert "permission denied" in message
+
+    def test_a_key_under_another_students_prefix_is_refused(self, db, classroom, member, lab):
+        other = _user(db, role="student")
+        _as(db, member)
+        message = _refused(
+            db,
+            "SELECT * FROM app.add_submission_file(:a, :k, 'x.pdf', 'application/pdf', 1, :h)",
+            {"a": lab, "k": _sub_key(classroom[0], other), "h": _SHA},
+        )
+        assert "ck_subfile_key" in message
+
+    def test_a_teacher_sees_a_file_only_once_turned_in_and_while_the_student_stays(
+        self, db, teacher, classroom, member, lab
+    ):
+        def teacher_sees() -> int:
+            _as(db, teacher)
+            return _count(db, "SELECT count(*) FROM submission_file", {})
+
+        assert _add_file(db, member, lab, _sub_key(classroom[0], member)) == "added"
+        assert teacher_sees() == 0  # a draft's files are the student's own
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert teacher_sees() == 1
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": classroom[0]})
+        assert teacher_sees() == 0
+
+    def test_a_classmate_sees_nothing(self, db, classroom, member, lab):
+        _add_file(db, member, lab, _sub_key(classroom[0], member))
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        classmate = _user(db, role="student")
+        assert _join(db, classmate, classroom[1]) == "joined"
+        _as(db, classmate)
+        assert _count(db, "SELECT count(*) FROM submission_file", {}) == 0
+
+    def test_a_scheduled_posts_attachment_is_hidden_from_members(
+        self, db, teacher, classroom, member, lab
+    ):
+        later = _assign(db, teacher, classroom[0], scheduled=True)
+        assert _attach(db, teacher, classroom[0], later) == "added"
+        assert _attach(db, teacher, classroom[0], lab) == "added"
+        _as(db, teacher)
+        assert _count(db, "SELECT count(*) FROM material_attachment", {}) == 2
+        _as(db, member)
+        visible = _count(
+            db, "SELECT count(*) FROM material_attachment WHERE assignment_id = :a", {"a": lab}
+        )
+        hidden = _count(
+            db, "SELECT count(*) FROM material_attachment WHERE assignment_id = :a", {"a": later}
+        )
+        assert (visible, hidden) == (1, 0)
+
+    def test_only_the_owner_deletes_an_attachment(self, db, teacher, classroom, member, lab):
+        _attach(db, teacher, classroom[0], lab)
+        _as(db, member)
+        assert db.execute(text("DELETE FROM material_attachment")).rowcount == 0
+        _as(db, teacher)
+        assert db.execute(text("DELETE FROM material_attachment")).rowcount == 1
+
+    def test_the_sixth_file_is_refused(self, db, classroom, member, lab):
+        outcomes = [_add_file(db, member, lab, _sub_key(classroom[0], member)) for _ in range(6)]
+        assert outcomes == ["added"] * 5 + ["too_many_files"]
+
+    def test_turned_in_work_takes_no_new_file_and_graded_work_none_at_all(
+        self, db, teacher, classroom, member, lab
+    ):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert _add_file(db, member, lab, _sub_key(classroom[0], member)) == "turned_in"
+        _call(db, teacher, "SELECT app.save_grade(:a, :u, 5, '', false)", {"a": lab, "u": member})
+        assert _add_file(db, member, lab, _sub_key(classroom[0], member)) == "graded"
+
+    def test_internal_helpers_are_not_callable(self, db, classroom, member):
+        _as(db, member)
+        for statement in (
+            "SELECT app.space_storage_bytes(:s)",
+            "SELECT app.lock_space_files(:s)",
+        ):
+            assert "permission denied" in _refused(db, statement, {"s": classroom[0]})
+
+    def test_deleting_an_assignment_returns_every_key_even_of_a_student_who_left(
+        self, db, teacher, classroom, member, lab
+    ):
+        student_key = _sub_key(classroom[0], member)
+        _add_file(db, member, lab, student_key)
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": classroom[0]})
+        _attach(db, teacher, classroom[0], lab)
+        _as(db, teacher)
+        row = (
+            db.execute(
+                text("SELECT deleted, object_keys FROM app.delete_assignment(:a)"), {"a": lab}
+            )
+            .mappings()
+            .one()
+        )
+        assert row["deleted"] is True
+        assert student_key in row["object_keys"]
+        assert len(row["object_keys"]) == 2

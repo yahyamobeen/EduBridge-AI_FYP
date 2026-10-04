@@ -15,11 +15,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 |---|---|---|
 | Pages | **29** (4 added by classroom Phase 2, 2 by Phase 5) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **38** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **39** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **696**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **719**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-04 (classroom Phase 5).*
+*Re-measured 2026-10-05 (classroom Phase 6).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -216,6 +216,22 @@ The calendar (classroom Phase 5):
   instants at the grid's edges — always within the API's 62 days), `dayKey`, `addMonths`. All local:
   the grid is the user's wall calendar, never UTC's. `lib/calendar.test.ts` asserts with local
   getters, so it holds in any time zone.
+
+Files (classroom Phase 6):
+
+- **`components/classroom/Files.tsx`** — `FileSection`, one list used in four places: a
+  teacher's attachments on a stream post (`StreamTab.tsx`) and on an assignment
+  (`AssignmentView.tsx`), each with add and remove for the owner; the student's own files
+  (`SubmissionPanel.tsx`), editable only while the work is being edited; and the teacher's
+  read-only view of a student's work (`GradingTable.tsx`). Add and remove appear only when the
+  caller passes `upload` / `remove`. **The server is the check** — it reads the type from the bytes
+  and enforces every limit; the client refuses only what is certain to fail (a wrong extension, an
+  empty file, over 5 MB) so nobody waits on a doomed upload. A refusal is explained by
+  `details.reason` through `REASON_KEY` (`Files.tsx:28`), never by `message`; removing asks first
+  (`ConfirmInline`).
+- **`lib/download.ts`** — `saveBlob`: a download is always **saved, never opened** inside the
+  application (`prd.md` CL-8). The `BackupCodes.tsx` technique — a temporary object URL on a
+  temporary link, revoked on the next tick — in one place for the classroom.
 
 The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
 
@@ -516,6 +532,25 @@ burned attempt. On `/auth/login` a 401 means the password was wrong, so refreshi
 
 ⚠️ **`changePassword` is the subtle one, added in Phase 3.** `POST /auth/password/change` returns `401 UNAUTHENTICATED` for a wrong *current* password — the contract forbids a bespoke code — and `UNAUTHENTICATED` is necessarily on `REFRESHABLE_401_CODES`, because it normally means an expired token. It is therefore the **only** route where both meanings of that 401 are live at once. The `init.bearer === undefined` guard does **not** shield it: unlike `/2fa/confirm`, its credential travels in the body, not as `bearer`. Without `noRetry` every mistyped password would silently fire a token refresh and replay the request.
 
+### File transfer — raw bodies and blobs (classroom Phase 6)
+
+Two options on `ApiRequestInit` (`client.ts:195`), used only by the file wrappers in
+`endpoints.ts:512-556`:
+
+- **`rawBody`** (`:203`) sends a `Blob` — a `File` — **as-is**: no JSON encoding and no JSON
+  `Content-Type`; the caller sets the type (`:226-242`). Uploads are never multipart, because the
+  backend counts the raw body against `Content-Length`. The file name travels in an
+  `X-Upload-Filename` header, URL-encoded. A `Blob` can be sent twice, so refresh-and-retry
+  stays safe; a one-shot stream could not be.
+- **`responseType: 'blob'`** (`:208`) returns a **successful** body as a `Blob` (`:246`). An
+  error is still parsed as the JSON envelope, so a refused download is an ordinary `ApiError`. The
+  download goes through `fetch` with the access token in the header — never a URL carrying a
+  credential — and `saveBlob` (`lib/download.ts`) hands it to the browser as a saved file.
+
+`client.test.ts` pins all four behaviours: the raw body sent untouched with no JSON type, a blob
+returned on success, a JSON error still thrown as `ApiError`, and a refresh-and-retry that resends
+the same file.
+
 ### Transport-level onboarding redirects
 
 `GATE_PENDING` and `SUBSCRIPTION_REQUIRED` are both 403s that mean "authenticated, but an onboarding precondition is unmet". Neither is an error to show; both are a signal to move the user. `client.ts:182-198`:
@@ -560,9 +595,9 @@ Three kinds of credential, three storage rules, all of them narrower than the ob
 
 The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot read it at all, which is the property that makes it safe to persist when the access token is not.
 
-The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:130-131`) on every call.
+The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:230`) on every call.
 
-`startSession` (`endpoints.ts:285-287`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:286-288`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -588,7 +623,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–5 added the `classroom` namespace (562, then 590, 682 and 696).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **719 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–6 added the `classroom` namespace (562, then 590, 682, 696 and 719).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -729,7 +764,7 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-38 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+39 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
 
 The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
 give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured
@@ -849,7 +884,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:289-298`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:296`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:290-299`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:297`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

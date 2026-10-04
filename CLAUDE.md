@@ -42,7 +42,7 @@ EduBridge-AI_FYP/
 │   └── Architecture/      ← architecture, database, api-endpoints
 ├── frontend/              ← Next.js App Router + React + TypeScript. See frontend/CLAUDE.md
 │   └── Architecture/      ← architecture
-├── supabase/migrations/   ← 29 SQL migrations (`ls supabase/migrations/*.sql | wc -l`). Never edit an applied one.
+├── supabase/migrations/   ← 30 SQL migrations (`ls supabase/migrations/*.sql | wc -l`). Never edit an applied one.
 ├── prd.md · tdd.md        ← the contract (user stories and sprint plan live outside the repo — §1)
 ├── ml/ · mcp-servers/ · infra/    ← scaffolded, no implementation (.gitkeep only)
 └── render.yaml            ← Render blueprint for both services
@@ -108,9 +108,9 @@ State a brief plan up front, then verify each step:
 2. [Step] → verify: [check]
 ```
 
-**Verification here IS tests — this repository has them.** 48 backend test files (21 in
-`backend/tests/unit`, 27 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-04)
-and 38 frontend test files. Report the
+**Verification here IS tests — this repository has them.** 50 backend test files (22 in
+`backend/tests/unit`, 28 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-05)
+and 39 frontend test files. Report the
 real result before saying done; never "should pass".
 
 | Change touches | Verify with |
@@ -152,9 +152,9 @@ surface the conflict and ask — never resolve it quietly.
 
 | | |
 |---|---|
-| Backend | **48 routes** (`grep -c '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py`) in **two routers**: 21 authentication or reference in `app/auth/routes.py`, 27 classroom in `app/classroom/routes.py` (classroom Phases 2–5). `tdd.md` v0.4.0 specifies **83 endpoints — 35 do not exist**; 13 of those are the rest of the classroom surface, built phase by phase on branch `add-classroom`. |
-| Frontend | 29 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales. Auth and onboarding journeys complete; classroom list, detail, people, stream, classwork with submissions and grading, and a calendar built for students and teachers. |
-| Database | 29 migration files (all applied — the 4 classroom files on 2026-10-04 via `supabase db push`), 59 `app.*` functions, 88 Row-Level Security policies — the last two measured on a shadow database built from all 29 files and matched on the live database (`backend/Architecture/database.md`, "At a glance"). |
+| Backend | **55 routes** (`grep -c '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py`) in **two routers**: 21 authentication or reference in `app/auth/routes.py`, 34 classroom in `app/classroom/routes.py` (classroom Phases 2–6). `tdd.md` v0.4.0 specifies **83 endpoints — 28 do not exist**; 6 of those are the rest of the classroom surface, built phase by phase on branch `add-classroom`. Classroom files live in a private Supabase Storage bucket reached only by the backend (`STORAGE_PROVIDER=s3`, storage-only keys). |
+| Frontend | 29 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales. Auth and onboarding journeys complete; classroom list, detail, people, stream, classwork with submissions and grading, a calendar, and file attachments built for students and teachers. |
+| Database | 30 migration files (all applied — the 5 classroom files on 2026-10-04 and 2026-10-05 via `supabase db push`), 65 `app.*` functions, 93 Row-Level Security policies — the last two measured on a shadow database built from all 30 files and matched on the live database (`backend/Architecture/database.md`, "At a glance"). |
 | `ml/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 
 Against the 38 user-story cards: **Epic 1 (identity, authentication, consent) is roughly 80%

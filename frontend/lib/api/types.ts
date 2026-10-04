@@ -380,6 +380,8 @@ export type Announcement = {
   scheduled: boolean
   created_at: string
   updated_at: string
+  /** Teacher attachments (Phase 6); a member sees them once the post is live. */
+  attachments: FileMeta[]
 }
 
 export type AnnouncementPage = {
@@ -429,6 +431,8 @@ export type MySubmission = {
   grade: number | null
   feedback: string | null
   returned_at: string | null
+  /** The student's own uploaded files (Phase 6). */
+  files: FileMeta[]
 }
 
 export type AssignmentDetail = AssignmentSummary & {
@@ -438,6 +442,8 @@ export type AssignmentDetail = AssignmentSummary & {
   updated_at: string
   /** Member view only. */
   my_submission: MySubmission | null
+  /** Teacher attachments (Phase 6). */
+  attachments: FileMeta[]
 }
 
 /** Times are ISO instants WITH an offset (lib/datetime.ts). */
@@ -493,6 +499,8 @@ export type StudentWork = SubmissionRow & {
   body: string | null
   link_url: string | null
   feedback: string
+  /** Empty until the work is turned in, like `body`. */
+  files: FileMeta[]
 }
 
 // Phase 5 — the calendar
@@ -514,3 +522,32 @@ export type CalendarItem = {
 
 /** `truncated` is true when the range held more than the 500-entry cap. */
 export type CalendarResponse = { items: CalendarItem[]; truncated: boolean }
+
+// Phase 6 — files
+
+/** A stored file. Its storage key never leaves the server. */
+export type FileMeta = {
+  id: string
+  /** Sanitised by the server, with the extension forced to the detected type. */
+  filename: string
+  content_type: string
+  size_bytes: number
+  created_at: string
+}
+
+/**
+ * `details.reason` on a 400 from the upload and delete endpoints. Branch on
+ * this, never on `message`. `graded` and `turned_in` match the submission
+ * refusals.
+ */
+export type FileRefusalReason =
+  | 'unsupported_type'
+  | 'too_large'
+  | 'empty'
+  | 'length_required'
+  | 'length_mismatch'
+  | 'too_many_files'
+  | 'submission_quota'
+  | 'classroom_quota'
+  | 'graded'
+  | 'turned_in'

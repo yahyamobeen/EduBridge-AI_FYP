@@ -4,11 +4,18 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowLeftIcon } from '@/components/ui/Icon'
-import { deleteAssignment, getAssignment } from '@/lib/api/endpoints'
+import {
+  deleteAssignment,
+  deleteAttachment,
+  downloadAttachment,
+  getAssignment,
+  uploadAssignmentAttachment,
+} from '@/lib/api/endpoints'
 import type { AssignmentDetail, MySubmission } from '@/lib/api/types'
 import { AssignmentForm } from './AssignmentForm'
 import { AssignmentMeta, StatusChip } from './AssignmentParts'
 import { ConfirmInline } from './ConfirmInline'
+import { FileSection } from './Files'
 import { GradingTable } from './GradingTable'
 import { SubmissionPanel } from './SubmissionPanel'
 import { CARD, DANGER_BUTTON, SECONDARY_BUTTON } from './styles'
@@ -38,6 +45,7 @@ export function AssignmentView({
   onDeleted: (id: string) => void
 }) {
   const t = useTranslations('classroom.assignment')
+  const tf = useTranslations('classroom.files')
   const [assignment, setAssignment] = useState<AssignmentDetail | null>(null)
   const [failed, setFailed] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -113,6 +121,18 @@ export function AssignmentView({
             <p className="mt-4 whitespace-pre-wrap break-words text-body-md text-on-surface">
               {assignment.instructions || t('noInstructions')}
             </p>
+            <FileSection
+              heading={tf('attachments')}
+              files={assignment.attachments}
+              download={(f) => downloadAttachment(f.id)}
+              upload={
+                isOwner && canManage
+                  ? (file) => uploadAssignmentAttachment(assignment.id, file)
+                  : undefined
+              }
+              remove={isOwner && canManage ? (f) => deleteAttachment(f.id) : undefined}
+              onChange={(attachments) => changed({ ...assignment, attachments })}
+            />
 
             {isOwner && canManage && !confirmDelete && (
               <div className="mt-4 flex flex-wrap gap-3">

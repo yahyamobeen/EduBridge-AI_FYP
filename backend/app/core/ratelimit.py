@@ -105,6 +105,11 @@ TWO_FA_RESEND_USER_LIMIT = Limit(max_requests=3, window_seconds=300)
 CLASSROOM_READ_LIMIT = Limit(max_requests=120, window_seconds=60)
 CLASSROOM_WRITE_LIMIT = Limit(max_requests=30, window_seconds=60)
 CLASSROOM_JOIN_LIMIT = Limit(max_requests=10, window_seconds=300)
+# Classroom files (Phase 6), also per user. An upload is up to 5 MiB and a
+# storage write, so it is metered by the hour; a download streams from storage,
+# so it is metered more tightly than an ordinary read.
+FILE_UPLOAD_LIMIT = Limit(max_requests=30, window_seconds=3600)
+FILE_DOWNLOAD_LIMIT = Limit(max_requests=60, window_seconds=60)
 
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)

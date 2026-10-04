@@ -4,10 +4,18 @@ import { useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { CheckCircleIcon } from '@/components/ui/Icon'
-import { saveSubmission, turnInSubmission, unsubmitSubmission } from '@/lib/api/endpoints'
+import {
+  deleteSubmissionFile,
+  downloadSubmissionFile,
+  saveSubmission,
+  turnInSubmission,
+  unsubmitSubmission,
+  uploadSubmissionFile,
+} from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { AssignmentDetail, MySubmission } from '@/lib/api/types'
 import { StatusChip } from './AssignmentParts'
+import { FileSection } from './Files'
 import { CARD, CARD_HEADING, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
 /**
@@ -30,6 +38,7 @@ export function SubmissionPanel({
   onChange: (s: MySubmission) => void
 }) {
   const t = useTranslations('classroom.submission')
+  const tf = useTranslations('classroom.files')
   const format = useFormatter()
   const sub = assignment.my_submission
   const [body, setBody] = useState(sub.body)
@@ -120,6 +129,11 @@ export function SubmissionPanel({
             </p>
           )}
           <SubmittedLink href={sub.link_url} />
+          <FileSection
+            heading={tf('yourFiles')}
+            files={sub.files}
+            download={(f) => downloadSubmissionFile(f.id)}
+          />
           {sub.returned_at === null && (
             <>
               <p className="mt-4 text-body-sm text-on-surface-variant">{t('unsubmitHint')}</p>
@@ -178,6 +192,14 @@ export function SubmissionPanel({
               {t('linkHint')}
             </p>
           </div>
+          <FileSection
+            heading={tf('yourFiles')}
+            files={sub.files}
+            download={(f) => downloadSubmissionFile(f.id)}
+            upload={(file) => uploadSubmissionFile(assignment.id, file)}
+            remove={(f) => deleteSubmissionFile(f.id)}
+            onChange={(files) => onChange({ ...sub, files })}
+          />
           <div className="flex flex-wrap items-center justify-end gap-3">
             {saved && !dirty && (
               <span

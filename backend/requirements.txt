@@ -13,6 +13,12 @@ argon2-cffi==25.1.0
     # via edubridge-backend
 argon2-cffi-bindings==25.1.0
     # via argon2-cffi
+boto3==1.43.108
+    # via edubridge-backend
+botocore==1.43.108
+    # via
+    #   boto3
+    #   s3transfer
 certifi==2026.7.22
     # via
     #   httpcore
@@ -58,6 +64,10 @@ idna==3.18
     #   email-validator
     #   httpx
     #   requests
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
 markupsafe==3.0.3
     # via werkzeug
 pillow==12.3.0
@@ -81,6 +91,8 @@ pyjwt==2.13.0
     # via edubridge-backend
 pyotp==2.10.0
     # via edubridge-backend
+python-dateutil==2.9.0.post0
+    # via botocore
 python-dotenv==1.2.2
     # via
     #   pydantic-settings
@@ -95,8 +107,12 @@ requests==2.34.2
     # via resend
 resend==2.35.0
     # via edubridge-backend
+s3transfer==0.19.2
+    # via boto3
 sendgrid==6.12.5
     # via edubridge-backend
+six==1.17.0
+    # via python-dateutil
 sqlalchemy==2.0.51
     # via edubridge-backend
 starlette==1.3.1
@@ -120,7 +136,9 @@ typing-inspection==0.4.2
 tzdata==2026.3 ; sys_platform == 'win32'
     # via psycopg
 urllib3==2.7.0
-    # via requests
+    # via
+    #   botocore
+    #   requests
 uvicorn==0.52.1
     # via edubridge-backend
 uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'

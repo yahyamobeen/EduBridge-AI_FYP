@@ -102,6 +102,27 @@ def never_send_real_email(monkeypatch):
     email_module.drain_pending_emails()
 
 
+@pytest.fixture(autouse=True)
+def object_store(monkeypatch):
+    """
+    THE SUITE MUST NOT TALK TO REAL FILE STORAGE (classroom Phase 6) — the same
+    rule, and the same reason, as `never_send_real_email` above: a developer
+    `.env` will carry real S3 keys, and an upload test would otherwise write
+    into the live bucket and leave objects behind that no rollback can remove.
+
+    A fresh in-memory store per test, patched at the factory every call site
+    goes through. Yielded, so a test can assert what is (and is no longer)
+    stored. Deletions run after the response, so the queue is drained before
+    the test's assertions and again afterwards.
+    """
+    import app.classroom.storage as storage_module
+
+    store = storage_module.InMemoryObjectStorage()
+    monkeypatch.setattr(storage_module, "get_object_storage", lambda: store)
+    yield store
+    storage_module.drain_storage_cleanup()
+
+
 class _Recorder:
     """Stands in for the mail provider and remembers what it was asked to send."""
 

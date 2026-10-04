@@ -35,6 +35,7 @@ function mine(overrides: Partial<MySubmission> = {}): MySubmission {
     grade: null,
     feedback: null,
     returned_at: null,
+    files: [],
     ...overrides,
   }
 }
@@ -56,6 +57,7 @@ function assignment(sub: MySubmission): AssignmentDetail & { my_submission: MySu
     created_at: '2026-10-04T09:00:00Z',
     updated_at: '2026-10-04T09:00:00Z',
     my_submission: sub,
+    attachments: [],
   }
 }
 

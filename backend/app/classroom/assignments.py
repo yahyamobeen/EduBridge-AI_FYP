@@ -20,6 +20,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.classroom import file_service, storage
 from app.classroom.pagination import decode_cursor, encode_cursor
 from app.classroom.scheduling import check_schedule, db_now
 from app.classroom.schemas import (
@@ -160,7 +161,15 @@ def get_assignment(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
         instructions=row["instructions"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        my_submission=_my_submission(row) if role == "member" else None,
+        my_submission=(
+            {
+                **_my_submission(row),
+                "files": file_service.files_for_submission(db, assignment_id, user_id),
+            }
+            if role == "member"
+            else None
+        ),
+        attachments=file_service.attachments_for_assignment(db, assignment_id),
     )
     return detail
 
@@ -304,6 +313,9 @@ def delete_assignment(db: Session, user_id: UUID, assignment_id: UUID) -> None:
     )
     if not row["deleted"]:  # not the owner, archived, or no such assignment — one answer
         raise forbidden_scope()
+    # Every stored object the cascade just orphaned — including files of
+    # students who left, which the teacher could not even see (Phase 6).
+    storage.delete_after_commit(db, list(row["object_keys"]))
     audit(db, user_id, "classroom.assignment_deleted", f"assignment/{assignment_id}")
 
 
@@ -342,7 +354,10 @@ def my_submission(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
     )
     if row is None:
         raise forbidden_scope()
-    return _my_submission(row)
+    return {
+        **_my_submission(row),
+        "files": file_service.files_for_submission(db, assignment_id, user_id),
+    }
 
 
 def save_draft(
@@ -449,6 +464,8 @@ def student_work(db: Session, assignment_id: UUID, student_id: UUID) -> dict:
         "body": r["body"],
         "link_url": r["link_url"],
         "feedback": r["feedback"] or "",
+        # RLS returns nothing until the work is turned in, like the body.
+        "files": file_service.files_for_submission(db, assignment_id, student_id),
     }
 
 
