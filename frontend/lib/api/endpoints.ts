@@ -9,6 +9,7 @@ import type {
   AssignmentPage,
   AssignmentUpdateRequest,
   BoardCode,
+  CalendarResponse,
   ChaptersResponse,
   EmailResendRequest,
   EmailVerifyRequest,
@@ -490,4 +491,16 @@ export function listChapters(
     `/reference/subjects/${seg(subjectId)}/chapters`,
     withSignal(signal),
   )
+}
+
+// Phase 5 — the calendar
+
+/** `from` and `to` are ISO instants with an offset, at most 62 days apart (half-open). */
+export function getCalendar(
+  from: string,
+  to: string,
+  signal?: AbortSignal,
+): Promise<CalendarResponse> {
+  const query = new URLSearchParams({ from, to })
+  return apiFetch<CalendarResponse>(`/calendar?${query}`, withSignal(signal))
 }

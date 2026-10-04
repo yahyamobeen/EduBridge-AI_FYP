@@ -40,7 +40,7 @@ Run from the repository root.
 | `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **61** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
 | `GRANT EXECUTE … TO app_backend` | **61** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
 | `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
-| Implemented HTTP endpoints | **47** (21 auth + 26 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Implemented HTTP endpoints | **48** (21 auth + 27 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
 
 **Measured from the catalogue (shadow database built from all 29 files, 2026-10-04): 58 of the 59 live `app.*` functions
 carry `search_path`.** The exception is `app.set_updated_at()`

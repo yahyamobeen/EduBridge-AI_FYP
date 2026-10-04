@@ -318,7 +318,7 @@ Routing is driven by the subject's **`content_strategy`** column (four values), 
 
 **Responsibilities:** spaces, revocable join codes, enrollment (consent), subject-scoped teacher views, announcements (with scheduling), assignments, submissions, grading, file attachments, a calendar, a class-public chat with moderation, the parent's read-only classroom overview, and quiz report exposure. *(Expanded in v0.4.0 — `prd.md` §15 CL-1…CL-10.)*
 
-**Endpoints.** "Phase" is the classroom build phase that delivers the route. Phase 1 (2026-10-04) is the database boundary only; **the Phase 2, 3 and 4 routes are built** (10, 4 and 12) (`backend/app/classroom/routes.py`, 2026-10-04) and the rest are not yet. Unknown and forbidden ids answer the same byte-identical `403 FORBIDDEN_SCOPE`, so existence never leaks. Guards: *Teacher* = `require_role('teacher')`; *Participant* = `require_guardian_verified` then teacher-or-student; *Student✓* = `require_guardian_verified` then student.
+**Endpoints.** "Phase" is the classroom build phase that delivers the route. Phase 1 (2026-10-04) is the database boundary only; **the Phase 2, 3, 4 and 5 routes are built** (10, 4, 12 and 1) (`backend/app/classroom/routes.py`, 2026-10-04) and the rest are not yet. Unknown and forbidden ids answer the same byte-identical `403 FORBIDDEN_SCOPE`, so existence never leaks. Guards: *Teacher* = `require_role('teacher')`; *Participant* = `require_guardian_verified` then teacher-or-student; *Student✓* = `require_guardian_verified` then student.
 
 | Method | Path | Auth | Role | Purpose | Phase |
 |--------|------|------|------|---------|-------|

@@ -358,3 +358,26 @@ class StudentWork(SubmissionRow):
     body: str | None
     link_url: str | None
     feedback: str
+
+
+# ── Phase 5: the calendar ───────────────────────────────────────────────────
+
+
+class CalendarItem(BaseModel):
+    kind: Literal["due", "scheduled_assignment", "scheduled_announcement"]
+    # The deadline for `due`; the moment it goes live for a scheduled post.
+    at: datetime
+    space_id: UUID
+    space_title: str
+    # The assignment or announcement this entry is about.
+    ref_id: UUID
+    # An announcement's first 80 characters, whitespace collapsed.
+    title: str
+    # A student's own derived status, on `due` entries only.
+    my_status: WorkStatus | None = None
+
+
+class CalendarResponse(BaseModel):
+    items: list[CalendarItem]
+    # True when the range held more than the 500-entry cap.
+    truncated: bool

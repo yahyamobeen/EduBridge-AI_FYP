@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { DashboardShell } from '@/components/app/DashboardShell'
 import { SessionGuard } from '@/components/app/SessionGuard'
 import { FormBanner } from '@/components/ui/FormFeedback'
-import { ArrowIcon, BookIcon } from '@/components/ui/Icon'
+import { ArrowIcon, BookIcon, CalendarIcon } from '@/components/ui/Icon'
 import { Link } from '@/i18n/navigation'
 import { listSpaces } from '@/lib/api/endpoints'
 import type { MeResponse, SpaceSummary } from '@/lib/api/types'
@@ -71,12 +71,21 @@ function ClassroomsBody({
 
       <div className="grid grid-cols-1 gap-gutter lg:grid-cols-3">
         <section aria-labelledby="classroom-list-heading" className="space-y-4 lg:col-span-2">
-          <h2
-            id="classroom-list-heading"
-            className="font-headline text-headline-md text-on-surface"
-          >
-            {t('list.heading')}
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2
+              id="classroom-list-heading"
+              className="font-headline text-headline-md text-on-surface"
+            >
+              {t('list.heading')}
+            </h2>
+            <Link
+              href={`${basePath}/calendar`}
+              className="inline-flex items-center gap-2 text-body-sm font-semibold text-primary hover:underline"
+            >
+              <CalendarIcon className="h-4 w-4" />
+              {t('calendar.open')}
+            </Link>
+          </div>
           {failed ? (
             <FormBanner>{t('list.loadFailed')}</FormBanner>
           ) : spaces === null ? (

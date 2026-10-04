@@ -1,6 +1,7 @@
 """
 Classroom routes — `tdd.md` §3.6: spaces, codes and membership (Phase 2), the
-stream (Phase 3), and assignments, submissions and grades (Phase 4).
+stream (Phase 3), assignments, submissions and grades (Phase 4), and the
+calendar (Phase 5).
 
 Thin by design: rate limit first, then one service call. Who may call is
 decided by the dependency on each route (app/classroom/dependencies.py); which
@@ -14,9 +15,10 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from pydantic import AwareDatetime
 
 from app.auth.dependencies import AuthContext, authenticated
-from app.classroom import announcements, assignments, service
+from app.classroom import announcements, assignments, calendar, service
 from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
 from app.classroom.schemas import (
     Announcement,
@@ -27,6 +29,7 @@ from app.classroom.schemas import (
     AssignmentDetail,
     AssignmentPage,
     AssignmentUpdateRequest,
+    CalendarResponse,
     ChaptersResponse,
     GradeRequest,
     JoinCodeRequest,
@@ -296,3 +299,20 @@ def save_grade_endpoint(
 def chapters_endpoint(request: Request, subject_id: UUID, ctx: Teacher) -> ChaptersResponse:
     _read(request, ctx)
     return ChaptersResponse(**assignments.list_chapters(ctx.session, subject_id))
+
+
+# ── Phase 5: the calendar ───────────────────────────────────────────────────
+
+
+# Not under /spaces: it spans every classroom the caller is in.
+@router.get("/calendar", response_model=CalendarResponse)
+def calendar_endpoint(
+    request: Request,
+    ctx: Participant,
+    start: Annotated[AwareDatetime, Query(alias="from")],
+    end: Annotated[AwareDatetime, Query(alias="to")],
+) -> CalendarResponse:
+    _read(request, ctx)
+    return CalendarResponse(
+        **calendar.items_between(ctx.session, ctx.user_id, ctx.role, start, end)
+    )

@@ -13,13 +13,13 @@ Every count here has the command that produced it beside it. Run from `frontend/
 
 | Measure | Value | Command |
 |---|---|---|
-| Pages | **27** (4 added by classroom Phase 2) | `find app -name "page.tsx" \| wc -l` |
+| Pages | **29** (4 added by classroom Phase 2, 2 by Phase 5) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **36** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **38** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **682**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **696**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-04 (classroom Phase 4).*
+*Re-measured 2026-10-04 (classroom Phase 5).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -130,11 +130,17 @@ page (`setRequestLocale`, the `settings/page.tsx` pattern) rendering a client co
 | `/classroom/[spaceId]` | `(app)/classroom/[spaceId]/page.tsx` | `StudentClassroom` | `['student']` |
 | `/teacher/classroom` | `(app)/teacher/classroom/page.tsx` | `TeacherClassrooms` — list + create form | `['teacher']` |
 | `/teacher/classroom/[spaceId]` | `(app)/teacher/classroom/[spaceId]/page.tsx` | `TeacherClassroom` | `['teacher']` |
+| `/classroom/calendar` | `(app)/classroom/calendar/page.tsx` | `StudentCalendar` (classroom Phase 5) | `['student']` |
+| `/teacher/classroom/calendar` | `(app)/teacher/classroom/calendar/page.tsx` | `TeacherCalendar` (classroom Phase 5) | `['teacher']` |
 
 The two list pages prerender in all three locales; the two `[spaceId]` pages have no
 `generateStaticParams` and render on demand, because the id is per user and the data is fetched in
 the browser (the access token lives only in client memory). The client refuses a non-UUID id without
-making a request. Components live in `components/classroom/`:
+making a request. Since classroom Phase 5 they also read `?assignment=<id>` from `searchParams` (on
+the server, so no `useSearchParams` and no Suspense boundary) and open Classwork on that assignment —
+the calendar's links; a non-UUID value is ignored. The two `calendar` pages are a static segment, so
+they win over the sibling `[spaceId]`, and prerender like the list pages; there is no new navigation
+entry — each list page links to its calendar. Components live in `components/classroom/`:
 
 - **`ClassroomView.tsx`** — one classroom for both roles. ⚠️ **Owner controls (join code, rename,
   archive, remove) render from the server's `viewer_role === 'owner' && can_manage`, never from the
@@ -195,6 +201,21 @@ Two shared pieces arrived with the stream:
   no offset) and the API (ISO instants **with** an offset; the backend refuses a naive one).
   ECMAScript parses an offset-less date-time as local time, so the conversion the backend will not
   guess is made in the browser, where the user's zone is actually known.
+
+The calendar (classroom Phase 5):
+
+- **`components/classroom/Calendar.tsx`** — `StudentCalendar` / `TeacherCalendar` (exact `allow`),
+  `CalendarView` (month navigation and loading) and `CalendarMonth` (the grid). It decides nothing
+  about visibility: `GET /calendar` returns only what the caller could already see. Loading is
+  derived from the month the data belongs to rather than set inside the effect, so changing month
+  never calls `setState` synchronously in an effect. **One DOM, two layouts**: seven columns from
+  `md` up; below that, only the days that have entries, as a list. Each day carries its full date in
+  `sr-only` text, so a screen reader never hears a bare number. Entries link back into the
+  classroom — an assignment to `?assignment=` (Classwork), an announcement to the classroom itself.
+- **`lib/calendar.ts`** — `monthGrid` (6 × 7 local days, weeks from Monday), `gridRange` (the
+  instants at the grid's edges — always within the API's 62 days), `dayKey`, `addMonths`. All local:
+  the grid is the user's wall calendar, never UTC's. `lib/calendar.test.ts` asserts with local
+  getters, so it holds in any time zone.
 
 The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
 
@@ -541,7 +562,7 @@ The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot rea
 
 The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:130-131`) on every call.
 
-`startSession` (`endpoints.ts:284-286`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:285-287`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -567,7 +588,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2, 3 and 4 added the `classroom` namespace (562, then 590, then 682).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–5 added the `classroom` namespace (562, then 590, 682 and 696).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -708,7 +729,7 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-36 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+38 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
 
 The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
 give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured
@@ -828,7 +849,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:288-297`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:295`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:289-298`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:296`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

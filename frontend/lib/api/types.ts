@@ -494,3 +494,23 @@ export type StudentWork = SubmissionRow & {
   link_url: string | null
   feedback: string
 }
+
+// Phase 5 — the calendar
+
+export type CalendarItemKind = 'due' | 'scheduled_assignment' | 'scheduled_announcement'
+
+export type CalendarItem = {
+  kind: CalendarItemKind
+  /** The deadline for `due`; the moment it goes live for a scheduled post. */
+  at: string
+  space_id: string
+  space_title: string
+  /** The assignment or announcement this entry is about. */
+  ref_id: string
+  title: string
+  /** A student's own derived status, on `due` entries only. */
+  my_status: WorkStatus | null
+}
+
+/** `truncated` is true when the range held more than the 500-entry cap. */
+export type CalendarResponse = { items: CalendarItem[]; truncated: boolean }

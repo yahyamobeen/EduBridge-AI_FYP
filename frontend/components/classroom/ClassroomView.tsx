@@ -48,18 +48,38 @@ type ClassroomTab = (typeof TABS)[number]
  *    database is (database.md invariant 9) — but prd.md §4.2 also forbids
  *    rendering a control the caller cannot use, even disabled.
  */
-export function StudentClassroom({ spaceId }: { spaceId: string }) {
+type ClassroomRouteProps = {
+  spaceId: string
+  /** From `?assignment=` — opens Classwork on that assignment. Ignored unless a UUID. */
+  assignmentId?: string
+}
+
+export function StudentClassroom({ spaceId, assignmentId }: ClassroomRouteProps) {
   return (
     <SessionGuard allow={['student']}>
-      {(me) => <ClassroomView me={me} spaceId={spaceId} listPath="/classroom" />}
+      {(me) => (
+        <ClassroomView
+          me={me}
+          spaceId={spaceId}
+          listPath="/classroom"
+          assignmentId={assignmentId}
+        />
+      )}
     </SessionGuard>
   )
 }
 
-export function TeacherClassroom({ spaceId }: { spaceId: string }) {
+export function TeacherClassroom({ spaceId, assignmentId }: ClassroomRouteProps) {
   return (
     <SessionGuard allow={['teacher']}>
-      {(me) => <ClassroomView me={me} spaceId={spaceId} listPath="/teacher/classroom" />}
+      {(me) => (
+        <ClassroomView
+          me={me}
+          spaceId={spaceId}
+          listPath="/teacher/classroom"
+          assignmentId={assignmentId}
+        />
+      )}
     </SessionGuard>
   )
 }
@@ -68,10 +88,12 @@ export function ClassroomView({
   me,
   spaceId,
   listPath,
+  assignmentId,
 }: {
   me: MeResponse
   spaceId: string
   listPath: string
+  assignmentId?: string
 }) {
   const t = useTranslations('classroom')
   const validId = UUID_RE.test(spaceId)
@@ -91,7 +113,8 @@ export function ClassroomView({
     return () => controller.abort()
   }, [spaceId, validId])
 
-  const [tab, setTab] = useState<ClassroomTab>('stream')
+  const openAssignment = assignmentId && UUID_RE.test(assignmentId) ? assignmentId : undefined
+  const [tab, setTab] = useState<ClassroomTab>(openAssignment ? 'classwork' : 'stream')
   const isOwner = space?.viewer_role === 'owner' && space.can_manage
   const role = me.role === 'teacher' ? 'teacher' : 'student'
 
@@ -164,6 +187,7 @@ export function ClassroomView({
                         subjectId={space.subject.id}
                         isOwner={isOwner}
                         canPost={isOwner && space.status === 'active'}
+                        initialOpenId={openAssignment}
                       />
                     ) : (
                       <PeopleSection

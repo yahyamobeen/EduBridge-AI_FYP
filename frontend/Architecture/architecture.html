@@ -109,10 +109,10 @@
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 (branch fix-epic-1) · Source of truth: the code. Update in the same change (see /CLAUDE.md).</p>
 
     <div class="grid">
-      <div class="stat"><div class="n">27</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-04)</div></div>
+      <div class="stat"><div class="n">29</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-04)</div></div>
       <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
-      <div class="stat"><div class="n">36</div><div class="l">test files (Vitest)</div></div>
-      <div class="stat"><div class="n">3 × 682</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">38</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 696</div><div class="l">locales × leaf message keys</div></div>
       <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
     </div>
 
@@ -213,7 +213,7 @@ flowchart TB
     </section>
 
     <section class="prose">
-      <h2>Routes — 27 pages</h2>
+      <h2>Routes — 29 pages</h2>
       <p>A route group adds <strong>no path segment</strong>. <code>/login</code> is <code>/login</code>
         whether or not it sits inside <code>(auth)</code>. The split exists purely so the three surfaces can
         have different chrome.</p>
@@ -239,6 +239,7 @@ flowchart TB
           <tr><td><code>(app)</code></td><td><code>/classroom/[spaceId]</code></td><td><code>StudentClassroom</code> — on demand; owner controls render from the server's <code>viewer_role</code>, never the session role</td></tr>
           <tr><td><code>(app)</code></td><td><code>/teacher/classroom</code></td><td><code>TeacherClassrooms</code> — list + create form, <code>allow={['teacher']}</code></td></tr>
           <tr><td><code>(app)</code></td><td><code>/teacher/classroom/[spaceId]</code></td><td><code>TeacherClassroom</code> — join code, rename/archive, people with remove (each behind <code>ConfirmInline</code>); Stream and People tabs since Phase 3, Classwork (assignments, submissions, grading) since Phase 4</td></tr>
+          <tr><td><code>(app)</code></td><td><code>/classroom/calendar</code>, <code>/teacher/classroom/calendar</code></td><td><code>StudentCalendar</code> / <code>TeacherCalendar</code> — month grid of deadlines and (teacher) scheduled posts; entries link back with <code>?assignment=</code>. Classroom Phase 5</td></tr>
           <tr><td><code>(auth)</code></td><td><code>/admin-login</code></td><td>Reachable ONLY through the <code>proxy.ts</code> rewrite from the unlisted <code>ADMIN_LOGIN_PATH</code>; the ordinary path answers 404</td></tr>
         </tbody>
       </table>
@@ -559,8 +560,8 @@ function resolve(path: string): string {
         <code>rawRequest</code> directly so there is no loop.
         <span class="ln">client.test.ts:96-105</span> asserts the original path is hit exactly twice and then
         gives up. <code>noRetry</code> <span class="ln">:105-113</span> has four call sites —
-        <code>login</code> <span class="ln">endpoints.ts:86</span>, <code>adminLogin</code> <span class="ln">:102</span>,
-        <code>twoFactorConfirm</code> <span class="ln">:172</span> and <code>changePassword</code> <span class="ln">:270</span> —
+        <code>login</code> <span class="ln">endpoints.ts:87</span>, <code>adminLogin</code> <span class="ln">:103</span>,
+        <code>twoFactorConfirm</code> <span class="ln">:173</span> and <code>changePassword</code> <span class="ln">:271</span> —
         because on each a 401 can mean a wrong credential, and refreshing would fire a guaranteed-to-fail request on
         every typo. <a href="architecture.md">architecture.md</a> gives the reason for each.</p>
 
@@ -645,7 +646,7 @@ function resolve(path: string): string {
     <section class="prose">
       <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
       <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
-        <code>ur-Latn</code> — with <strong>682 leaf message keys each (2026-10-04), identical across all three</strong>, and in the same order.
+        <code>ur-Latn</code> — with <strong>696 leaf message keys each (2026-10-04), identical across all three</strong>, and in the same order.
         <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
         <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
         — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had
@@ -863,7 +864,7 @@ export function dirFor(locale) { return isRtl(locale) ? 'rtl' : 'ltr' }  // :78-
           public site and nothing more; the endpoint's role check is the lock.
           <code>proxy.test.ts</code> covers all three branches — including that ordinary locale routing is
           unchanged, which is the assertion worth having, because a middleware that stops calling next-intl
-          takes down all 27 pages at once.</p>
+          takes down all 29 pages at once.</p>
       </div>
 
       <div class="card">
@@ -892,8 +893,8 @@ URL.revokeObjectURL(url)     // :50 — synchronous, immediately after</pre>
   router.replace('/login')
 }                            // DashboardShell.tsx:45-48</pre>
         <p>No <code>try</code>/<code>catch</code>. <code>logout()</code>
-          <span class="ln">endpoints.ts:288-297</span> uses <code>try</code>/<strong><code>finally</code></strong>,
-          not <code>catch</code> — the local session is dropped at <span class="ln">:295</span>, but the error
+          <span class="ln">endpoints.ts:289-298</span> uses <code>try</code>/<strong><code>finally</code></strong>,
+          not <code>catch</code> — the local session is dropped at <span class="ln">:296</span>, but the error
           still propagates. So on a network failure: the token is cleared, <code>await logout()</code>
           rejects, and <code>router.replace('/login')</code> <span class="ln">:47</span> <strong>never
           executes</strong>. The user is left looking at a dashboard that appears signed in, with no token

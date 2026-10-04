@@ -746,6 +746,22 @@
       "missing": "Jama nahin hua",
       "graded": "Number lag gaye"
     },
+    "calendar": {
+      "open": "Calendar",
+      "title": "Calendar",
+      "studentIntro": "Aap ki tamam classon ki aakhri tareekhein, aap ke apne calendar par.",
+      "teacherIntro": "Aap ke classrooms ki aakhri tareekhein, aur aap ki woh posts jo shaya hone ke liye schedule hain.",
+      "previous": "Pichhla mahina",
+      "next": "Agla mahina",
+      "today": "Aaj",
+      "loading": "Load ho raha hai…",
+      "loadFailed": "Calendar load nahin ho saka. Dobara koshish ke liye page refresh karen.",
+      "empty": "Is mahine kuch jama nahin karwana.",
+      "truncated": "Is mahine ke indiraajaat yahan dikhayi ja sakne wali tadaad se zyada hain. Tamam kaam dekhne ke liye classroom kholein.",
+      "due": "Aakhri tareekh",
+      "scheduledAssignment": "Assignment shaya hogi",
+      "scheduledAnnouncement": "Elaan shaya hoga"
+    },
     "people": {
       "heading": "Afraad",
       "loading": "Load ho raha hai…",

@@ -108,9 +108,9 @@ State a brief plan up front, then verify each step:
 2. [Step] → verify: [check]
 ```
 
-**Verification here IS tests — this repository has them.** 47 backend test files (21 in
-`backend/tests/unit`, 26 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-04)
-and 36 frontend test files. Report the
+**Verification here IS tests — this repository has them.** 48 backend test files (21 in
+`backend/tests/unit`, 27 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-04)
+and 38 frontend test files. Report the
 real result before saying done; never "should pass".
 
 | Change touches | Verify with |
@@ -152,8 +152,8 @@ surface the conflict and ask — never resolve it quietly.
 
 | | |
 |---|---|
-| Backend | **47 routes** (`grep -c '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py`) in **two routers**: 21 authentication or reference in `app/auth/routes.py`, 26 classroom in `app/classroom/routes.py` (classroom Phases 2–4). `tdd.md` v0.4.0 specifies **83 endpoints — 36 do not exist**; 14 of those are the rest of the classroom surface, built phase by phase on branch `add-classroom`. |
-| Frontend | 27 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales. Auth and onboarding journeys complete; classroom list, detail, people, stream, and classwork with submissions and grading built for students and teachers. |
+| Backend | **48 routes** (`grep -c '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py`) in **two routers**: 21 authentication or reference in `app/auth/routes.py`, 27 classroom in `app/classroom/routes.py` (classroom Phases 2–5). `tdd.md` v0.4.0 specifies **83 endpoints — 35 do not exist**; 13 of those are the rest of the classroom surface, built phase by phase on branch `add-classroom`. |
+| Frontend | 29 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales. Auth and onboarding journeys complete; classroom list, detail, people, stream, classwork with submissions and grading, and a calendar built for students and teachers. |
 | Database | 29 migration files (all applied — the 4 classroom files on 2026-10-04 via `supabase db push`), 59 `app.*` functions, 88 Row-Level Security policies — the last two measured on a shadow database built from all 29 files and matched on the live database (`backend/Architecture/database.md`, "At a glance"). |
 | `ml/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 

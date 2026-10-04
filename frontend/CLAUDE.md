@@ -9,9 +9,9 @@ Snapshot: **2026-08-15**.
 
 ## 1. What this is
 
-Next.js App Router, React, TypeScript, Tailwind. **27 pages** across three route groups —
-`(site)`, `(auth)`, `(app)` — and **36 test files** (Vitest). Three locales: `en`, `ur`,
-`ur-Latn`, each exactly 682 leaf keys, in identical order (re-measured 2026-10-04).
+Next.js App Router, React, TypeScript, Tailwind. **29 pages** across three route groups —
+`(site)`, `(auth)`, `(app)` — and **38 test files** (Vitest). Three locales: `en`, `ur`,
+`ur-Latn`, each exactly 696 leaf keys, in identical order (re-measured 2026-10-04).
 
 This application is the interface and nothing else. The data model, the endpoint catalogue and the
 authorization rules live in the backend documentation:

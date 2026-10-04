@@ -24,12 +24,15 @@ export function ClassworkTab({
   subjectId,
   isOwner,
   canPost,
+  initialOpenId,
 }: {
   spaceId: string
   subjectId: string
   isOwner: boolean
   /** Owner of a non-archived classroom. */
   canPost: boolean
+  /** Open this assignment first (a link from the calendar). */
+  initialOpenId?: string
 }) {
   const t = useTranslations('classroom.classwork')
   const [items, setItems] = useState<AssignmentSummary[] | null>(null)
@@ -37,7 +40,7 @@ export function ClassworkTab({
   const [failed, setFailed] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [creating, setCreating] = useState(false)
-  const [openId, setOpenId] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null)
 
   useEffect(() => {
     const controller = new AbortController()

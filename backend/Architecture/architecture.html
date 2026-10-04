@@ -136,7 +136,7 @@
       <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
       <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
       the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
-      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, and the keyset cursor — classroom Phases 2–4), <code>app/core/</code> (configuration, the
+      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, and the keyset cursor — classroom Phases 2–5), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -146,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">37</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:54</span></div></div>
-        <div class="stat"><div class="n">47</div><div class="l">implemented routes · 21 auth + 26 classroom</div></div>
-        <div class="stat"><div class="n">36</div><div class="l">specified but missing · 83 in <code>tdd.md</code> v0.4.0, minus 47</div></div>
+        <div class="stat"><div class="n">38</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:57</span></div></div>
+        <div class="stat"><div class="n">48</div><div class="l">implemented routes · 21 auth + 27 classroom</div></div>
+        <div class="stat"><div class="n">35</div><div class="l">specified but missing · 83 in <code>tdd.md</code> v0.4.0, minus 48</div></div>
         <div class="stat"><div class="n">29</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">47</div><div class="l">test files · 21 unit + 26 integration</div></div>
+        <div class="stat"><div class="n">48</div><div class="l">test files · 21 unit + 27 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -339,7 +339,7 @@ flowchart TB
       statement's <em>shape</em> from fixed literals and mark it <code># noqa: S608</code>: <code>auth/service.py</code>
       <code>update_me</code>, and <code>classroom/service.py</code> <code>require_owner</code> and <code>update_space</code>.</p>
 
-      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–4)</h3>
+      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–5)</h3>
       <p>Same layers, one difference: <strong>the database decides which classroom a caller may touch.</strong> The
       dependency decides only <em>who</em> may call — <code>participant</code> and <code>gated_student</code> wrap
       <code>require_guardian_verified</code>; leaving uses <code>require_role('student')</code> alone, because leaving is a
@@ -364,6 +364,9 @@ flowchart TB
       teacher from a student; a state refusal is <code>400</code> with <code>details.reason</code>. <strong>Visibility is
       the database's</strong>: a draft is hidden from the teacher until turned in, a grade from the student until
       returned, and both from the teacher once the student leaves.</p>
+      <p>The calendar (classroom Phase 5, <code>classroom/calendar.py</code>) has no table, migration or policy of its own:
+      one <code>UNION ALL</code> over the assignment and announcement tables, under their policies, so it shows only what the
+      caller could already see. Ranges are bounded at 62 days and results capped at 500.</p>
     </section>
 
     <section class="prose">
@@ -758,7 +761,7 @@ flowchart TB
       <span class="ln">dependencies.py:183-189</span> so a student with several parent links gets the most favourable
       one. A pending gate raises <code>GATE_PENDING</code> (403) <span class="ln">core/errors.py:73</span>.
       <strong>Wired since classroom Phase 2</strong> through <code>participant</code> and <code>gated_student</code>; the
-      learning endpoints it was written for are still among the 36 that do not exist.
+      learning endpoints it was written for are still among the 35 that do not exist.
       See <a href="api-endpoints.md">api-endpoints.md</a>.</p>
 
       <h3>The write boundary</h3>
@@ -953,7 +956,7 @@ flowchart TB
           <tr><td><a href="../../tdd.md"><code>tdd.md</code></a></td><td>Technical Design Document — §3.1 auth and its endpoint table, §6.8 Row-Level Security, §6.9 two-factor authentication, §6.11 client-side security, §7.2 the consolidated endpoint catalogue, §7.3 the error model</td></tr>
           <tr><td><code>user-stories.md</code> (outside the repository, in <code>Desktop\EduBridge-AI_FYP-planning\</code>)</td><td>12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154)</td></tr>
           <tr><td><a href="database.html">database.html</a> / <code>database.md</code></td><td>Tables by domain, the <strong>complete Row-Level Security policy catalogue</strong>, the <code>app.*</code> functions with signature and grant, and findings B1–B19 in full</td></tr>
-          <tr><td><a href="api-endpoints.md">api-endpoints.md</a></td><td>Every implemented route → handler → service function with <code>file:line</code>, mapped to its <code>tdd.md</code> §3.1 row, plus the explicit list of the <strong>36 specified-but-missing</strong> routes</td></tr>
+          <tr><td><a href="api-endpoints.md">api-endpoints.md</a></td><td>Every implemented route → handler → service function with <code>file:line</code>, mapped to its <code>tdd.md</code> §3.1 row, plus the explicit list of the <strong>35 specified-but-missing</strong> routes</td></tr>
           <tr><td><a href="../README.md"><code>backend/README.md</code></a></td><td>Environment variables, running and testing commands, and the standing <code>SECURITY DEFINER</code> rule quoted above</td></tr>
           <tr><td><a href="architecture.md">architecture.md</a></td><td>This page as Markdown — a parallel document, not generated from this one; it reads anywhere, this one carries the diagrams</td></tr>
         </tbody>

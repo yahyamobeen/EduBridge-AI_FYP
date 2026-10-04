@@ -45,7 +45,13 @@ vi.mock('@/lib/api/endpoints', () => ({
   updateSpace: vi.fn(),
   // The Stream is the default tab (Phase 3); these tests are about People.
   listAnnouncements: () => Promise.resolve({ items: [], next_cursor: null }),
+  // Classwork, opened directly by a calendar link (Phase 5).
+  getAssignment: (...a: unknown[]) => getAssignment(...a),
+  listAssignments: () => Promise.resolve({ items: [], next_cursor: null }),
 }))
+
+const getAssignment = vi.fn()
+const ASSIGNMENT_ID = '22222222-2222-4222-8222-222222222222'
 
 function identity(role: 'student' | 'teacher'): MeResponse {
   return {
@@ -221,5 +227,27 @@ describe('the id in the URL', () => {
       await screen.findByText(en.classroom.detail.unavailable, {}, LOADED),
     ).toBeInTheDocument()
     expect(getSpace).not.toHaveBeenCalled()
+  })
+})
+
+describe('a link to an assignment (from the calendar)', () => {
+  beforeEach(() => {
+    me = identity('student')
+    getSpace.mockResolvedValue(space())
+    getAssignment.mockReturnValue(new Promise(() => {}))
+  })
+
+  it('opens Classwork on that assignment', async () => {
+    wrap(<StudentClassroom spaceId={SPACE_ID} assignmentId={ASSIGNMENT_ID} />)
+    const tab = await screen.findByRole('tab', { name: en.classroom.tabs.classwork }, LOADED)
+    expect(tab).toHaveAttribute('aria-selected', 'true')
+    expect(getAssignment).toHaveBeenCalledWith(ASSIGNMENT_ID, expect.any(AbortSignal))
+  })
+
+  it('ignores an id that is not a UUID and opens the Stream', async () => {
+    wrap(<StudentClassroom spaceId={SPACE_ID} assignmentId="../x" />)
+    const tab = await screen.findByRole('tab', { name: en.classroom.tabs.stream }, LOADED)
+    expect(tab).toHaveAttribute('aria-selected', 'true')
+    expect(getAssignment).not.toHaveBeenCalled()
   })
 })
