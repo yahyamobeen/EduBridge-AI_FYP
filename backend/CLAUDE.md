@@ -16,8 +16,8 @@ JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberatel
 `app_user` holds `password_hash` itself.
 
 **Two routers**: `app/auth/routes.py` (21 routes — authentication, guardian, reference) and
-`app/classroom/routes.py` (14 routes — classroom Phases 2–3). `tdd.md` v0.4.0 specifies **83
-endpoints — 48 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
+`app/classroom/routes.py` (26 routes — classroom Phases 2–4). `tdd.md` v0.4.0 specifies **83
+endpoints — 36 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
 `app.*` functions only; never grant `app_backend` a write on `enrollment` or `join_code` to make a
 route easier (`Architecture/database.md`, invariant 9).
 `app/workers/` is scaffolded with a `.gitkeep` and nothing else.
@@ -101,7 +101,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20261004130000_announcement_ownership_and_scheduling.sql` (2026-10-04, with `supabase db push`).
+  `20261004140000_assignments_and_grading.sql` (2026-10-04, with `supabase db push`).
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
@@ -116,7 +116,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 ## 5. Testing
 
-45 test files: **20 in `tests/unit`**, **25 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-04).
+47 test files: **21 in `tests/unit`**, **26 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-04).
 
 `tests/unit` must stay runnable with **no connection string, no engine and no live project** —
 that is why `tests/conftest.py` has no fixtures and why `gate.py` and `onboarding.py` avoid

@@ -18,6 +18,7 @@ import {
 } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { MeResponse, PeopleResponse, SpaceDetail } from '@/lib/api/types'
+import { ClassworkTab } from './ClassworkTab'
 import { ConfirmInline } from './ConfirmInline'
 import { StreamTab } from './StreamTab'
 import {
@@ -31,8 +32,8 @@ import {
   UUID_RE,
 } from './styles'
 
-/** Stream first: it is what changes. Classwork and Chat join in later phases. */
-const TABS = ['stream', 'people'] as const
+/** Stream first: it is what changes. Chat joins in a later phase. */
+const TABS = ['stream', 'classwork', 'people'] as const
 type ClassroomTab = (typeof TABS)[number]
 
 /**
@@ -156,6 +157,13 @@ export function ClassroomView({
                         isOwner={isOwner}
                         canPost={isOwner && space.status === 'active'}
                         authorName={space.owner_name ?? t('card.unnamedTeacher')}
+                      />
+                    ) : tab === 'classwork' ? (
+                      <ClassworkTab
+                        spaceId={space.id}
+                        subjectId={space.subject.id}
+                        isOwner={isOwner}
+                        canPost={isOwner && space.status === 'active'}
                       />
                     ) : (
                       <PeopleSection

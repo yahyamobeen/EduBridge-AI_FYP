@@ -1,7 +1,7 @@
 # Backend API Endpoints
 
 > Every route the backend actually serves, mapped to its handler, its service function and its row in
-> `tdd.md` — followed by the **48 routes that `tdd.md` specifies and this repository does not
+> `tdd.md` — followed by the **36 routes that `tdd.md` specifies and this repository does not
 > implement.** This document doubles as the honest build-state record.
 >
 > **Snapshot: 2026-08-15.** Every `file:line` was opened and verified against this snapshot. Line
@@ -21,15 +21,15 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **35** (21 auth + 14 classroom) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
-| Routers in the backend | **2** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` — `app/auth/routes.py:90`, `app/classroom/routes.py:43` |
+| Implemented routes | **47** (21 auth + 26 classroom) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Routers in the backend | **2** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` — `app/auth/routes.py:90`, `app/classroom/routes.py:54` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 60 | §7.2 consolidates §3.1 plus Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Classroom (§3.6, `tdd.md:325-354` — **40 endpoints** since v0.4.0, counting each method/path pair in a combined row) and its own rows — where `GET /api/admin/rate-limits / PUT` is **two** endpoints |
 | **Total specified** | **83** | 23 + 3 + 6 + 40 + 11 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40) |
-| **Specified but missing** | **48** | 83 − 35 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40 and Phase 3 built 4 more** (§2.8) |
+| **Specified but missing** | **36** | 83 − 47 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40, Phase 3 built 4 and Phase 4 built 12** (§2.8) |
 
 **Two routers.** `backend/app/auth/routes.py` (21 routes) and, since classroom Phase 2,
-`backend/app/classroom/routes.py` (14 routes, §2.8). `GET /health` (`backend/app/main.py:119`) is
+`backend/app/classroom/routes.py` (26 routes, §2.8). `GET /health` (`backend/app/main.py:119`) is
 defined on the application object rather than a router, sits outside `/api`, and is not one of the
 83 — `tdd.md` does not specify it.
 
@@ -315,9 +315,9 @@ production actually calls, not through the ORM.
 > returned 404 and looked closed. `main.py` now passes
 > `openapi_url=None if settings.is_production else "/openapi.json"`.
 
-### 2.8 Classroom — `app/classroom/routes.py` (classroom Phases 2 and 3, 2026-10-04)
+### 2.8 Classroom — `app/classroom/routes.py` (classroom Phases 2–4, 2026-10-04)
 
-The second router, `APIRouter(tags=["classroom"])` at `routes.py:43`, mounted at `main.py:117`.
+The second router, `APIRouter(tags=["classroom"])` at `routes.py:54`, mounted at `main.py:117`.
 Every route is one rate-limit call and one service call; **who** may call is the dependency, and
 **which classroom** they may touch is decided by the database (`app.*` functions from
 `20261004120100` — see [database.md](database.md#classroom--post-apispaces-functions)). An unknown
@@ -330,20 +330,32 @@ consent right and is deliberately **not** guardian-gated.
 
 | Method | Path | Handler | Guard | Bucket | Service | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST` | `/api/spaces/join` | `routes.py:59` | GatedStudent | `classroom_join` | `service.join_space` `:230` | `:330` |
-| `GET` | `/api/spaces` | `routes.py:66` | Participant | `classroom_read` | `service.list_spaces` `:104` | `:326` |
-| `POST` | `/api/spaces` | `routes.py:72` | Teacher | `classroom_write` | `service.create_space` `:148` | `:325` |
-| `GET` | `/api/spaces/{space_id}` | `routes.py:80` | Participant | `classroom_read` | `service.get_space` `:113` | `:327` |
-| `PATCH` | `/api/spaces/{space_id}` | `routes.py:86` | Teacher | `classroom_write` | `service.update_space` `:176` | `:328` |
-| `POST` | `/api/spaces/{space_id}/join-code` | `routes.py:94` | Teacher | `classroom_write` | `service.change_join_code` `:213` | `:329` |
-| `DELETE` | `/api/spaces/{space_id}/membership` | `routes.py:104` | AnyStudent | `classroom_write` | `service.leave_space` `:270` | `:331` |
-| `GET` | `/api/spaces/{space_id}/people` | `routes.py:110` | Participant | `classroom_read` | `service.people` `:276` | `:332` |
-| `DELETE` | `/api/spaces/{space_id}/members/{student_id}` | `routes.py:116` | Teacher | `classroom_write` | `service.remove_student` `:302` | `:333` |
-| `GET` | `/api/reference/subjects` | `routes.py:124` | `authenticated` | `classroom_read` | `service.list_subjects` `:316` | `:334` |
-| `GET` | `/api/spaces/{space_id}/announcements` | `routes.py:141` | Participant | `classroom_read` | `announcements.list_announcements` `:60` | `:335` |
-| `POST` | `/api/spaces/{space_id}/announcements` | `routes.py:152` | Teacher | `classroom_write` | `announcements.create_announcement` `:86` | `:336` |
-| `PATCH` | `/api/announcements/{announcement_id}` | `routes.py:166` | Teacher | `classroom_write` | `announcements.update_announcement` `:107` | `:337` |
-| `DELETE` | `/api/announcements/{announcement_id}` | `routes.py:174` | Teacher | `classroom_write` | `announcements.delete_announcement` `:157` | `:337` |
+| `POST` | `/api/spaces/join` | `routes.py:70` | GatedStudent | `classroom_join` | `service.join_space` `:230` | `:330` |
+| `GET` | `/api/spaces` | `routes.py:77` | Participant | `classroom_read` | `service.list_spaces` `:104` | `:326` |
+| `POST` | `/api/spaces` | `routes.py:83` | Teacher | `classroom_write` | `service.create_space` `:148` | `:325` |
+| `GET` | `/api/spaces/{space_id}` | `routes.py:91` | Participant | `classroom_read` | `service.get_space` `:113` | `:327` |
+| `PATCH` | `/api/spaces/{space_id}` | `routes.py:97` | Teacher | `classroom_write` | `service.update_space` `:176` | `:328` |
+| `POST` | `/api/spaces/{space_id}/join-code` | `routes.py:105` | Teacher | `classroom_write` | `service.change_join_code` `:213` | `:329` |
+| `DELETE` | `/api/spaces/{space_id}/membership` | `routes.py:115` | AnyStudent | `classroom_write` | `service.leave_space` `:270` | `:331` |
+| `GET` | `/api/spaces/{space_id}/people` | `routes.py:121` | Participant | `classroom_read` | `service.people` `:276` | `:332` |
+| `DELETE` | `/api/spaces/{space_id}/members/{student_id}` | `routes.py:127` | Teacher | `classroom_write` | `service.remove_student` `:302` | `:333` |
+| `GET` | `/api/reference/subjects` | `routes.py:135` | `authenticated` | `classroom_read` | `service.list_subjects` `:316` | `:334` |
+| `GET` | `/api/spaces/{space_id}/announcements` | `routes.py:152` | Participant | `classroom_read` | `announcements.list_announcements` `:47` | `:335` |
+| `POST` | `/api/spaces/{space_id}/announcements` | `routes.py:163` | Teacher | `classroom_write` | `announcements.create_announcement` `:73` | `:336` |
+| `PATCH` | `/api/announcements/{announcement_id}` | `routes.py:177` | Teacher | `classroom_write` | `announcements.update_announcement` `:94` | `:337` |
+| `DELETE` | `/api/announcements/{announcement_id}` | `routes.py:185` | Teacher | `classroom_write` | `announcements.delete_announcement` `:144` | `:337` |
+| `GET` | `/api/spaces/{space_id}/assignments` | `routes.py:194` | Participant | `classroom_read` | `assignments.list_assignments` `:121` | `:338` |
+| `POST` | `/api/spaces/{space_id}/assignments` | `routes.py:207` | Teacher | `classroom_write` | `assignments.create_assignment` `:209` | `:338` |
+| `GET` | `/api/assignments/{assignment_id}` | `routes.py:221` | Participant | `classroom_read` | `assignments.get_assignment` `:145` | `:339` |
+| `PATCH` | `/api/assignments/{assignment_id}` | `routes.py:229` | Teacher | `classroom_write` | `assignments.update_assignment` `:240` | `:339` |
+| `DELETE` | `/api/assignments/{assignment_id}` | `routes.py:239` | Teacher | `classroom_write` | `assignments.delete_assignment` `:296` | `:339` |
+| `PUT` | `/api/assignments/{assignment_id}/submission` | `routes.py:245` | GatedStudent | `classroom_write` | `assignments.save_draft` `:348` | `:340` |
+| `POST` | `/api/assignments/{assignment_id}/submission/turn-in` | `routes.py:253` | GatedStudent | `classroom_write` | `assignments.turn_in` `:360` | `:341` |
+| `POST` | `/api/assignments/{assignment_id}/submission/unsubmit` | `routes.py:259` | GatedStudent | `classroom_write` | `assignments.unsubmit` `:369` | `:341` |
+| `GET` | `/api/assignments/{assignment_id}/submissions` | `routes.py:265` | Teacher | `classroom_read` | `assignments.submissions_table` `:422` | `:342` |
+| `GET` | `/api/assignments/{assignment_id}/submissions/{student_id}` | `routes.py:273` | Teacher | `classroom_read` | `assignments.student_work` `:435` | `:342` |
+| `PUT` | `/api/assignments/{assignment_id}/grades/{student_id}` | `routes.py:281` | Teacher | `classroom_write` | `assignments.save_grade` `:455` | `:343` |
+| `GET` | `/api/reference/subjects/{subject_id}/chapters` | `routes.py:295` | Teacher | `classroom_read` | `assignments.list_chapters` `:168` | `:344` |
 
 Buckets (`app/core/ratelimit.py:105-107`), all per **user**: `classroom_read` 120/60 s,
 `classroom_write` 30/60 s, `classroom_join` **10/300 s** — the one brute-force surface, against a
@@ -370,7 +382,7 @@ Responses worth knowing:
 `20261004130000` ([database.md](database.md#classroom), finding **B27**):
 
 - **`GET /spaces/{id}/announcements`** answers `200 {items, next_cursor}`, newest first by
-  `(publish_at, id)`, 20 per page (`PAGE_SIZE`, `announcements.py:28`). `?cursor=` is the opaque
+  `(publish_at, id)`, 20 per page (`PAGE_SIZE`, `announcements.py:27`). `?cursor=` is the opaque
   `next_cursor` of the previous page (`app/classroom/pagination.py`: base64 of `publish_at|id`; a
   malformed or timezone-naive cursor is `400` with `fields.cursor`). **Members never receive a
   scheduled post**: Row-Level Security removes it, so the service runs the same query for both
@@ -378,7 +390,8 @@ Responses worth knowing:
 - **`POST /spaces/{id}/announcements`** answers `201`. Body 1–5000 characters (trimmed);
   `publish_at` optional and timezone-aware. Omitted means now; otherwise it must be **after the
   database's `now()` and within 365 days**, else `400` with `fields.publish_at`. The comparison uses
-  the database clock, not Python's (`_check_schedule`, `:49`).
+  the database clock, not Python's (`check_schedule`, `app/classroom/scheduling.py:28`, shared
+  with assignments).
 - **`PATCH /announcements/{id}`** takes `body` and/or `publish_at`; empty is `400`. **Only a
   still-scheduled post can be rescheduled** (`400 fields.publish_at` otherwise): pulling a published
   post back into the future would hide what students have already read. This is the one rule the
@@ -387,9 +400,47 @@ Responses worth knowing:
   `classroom.announcement_deleted`. Not the author, an archived classroom, or no such post all
   answer the same `403`.
 
-Pinned by `tests/integration/test_classroom_api.py` (29 tests) and `test_classroom_stream.py` (15)
-over the database suite `test_classroom_rls.py` (52); `tests/unit/test_classroom_schemas.py` (11)
-and `test_classroom_pagination.py` (6) cover the request bounds and the cursor.
+**Assignments, submissions and grades (classroom Phase 4).** `app/classroom/assignments.py`, over
+the tables, policies and functions of `20261004140000`
+([database.md](database.md#classroom--assignment-functions)). The same query serves owner and
+member; the database narrows it:
+
+- **`GET /spaces/{id}/assignments`** answers `200 {items, next_cursor}` — the stream's keyset
+  pagination, 20 per page. A member gets `my_status` (`assigned`, `turned_in`, `turned_in_late`,
+  `missing`, `graded`) and `my_grade` (only once returned); the owner gets `turned_in_count`
+  (turned-in work of **active** members). Status is **derived** (`app/classroom/status.py`) from
+  `turned_in_at`, `due_at` and `returned_at` against the database clock — on the deadline is on
+  time, and at the deadline is not yet missing. A member never receives a scheduled assignment.
+- **`POST /spaces/{id}/assignments`** answers `201` with the detail. `title` 1–200, `instructions`
+  ≤ 10 000, `points` 1–1000 (optional), `due_at` and `publish_at` timezone-aware (optional). Each
+  refusal names its field: `publish_at` (past or over a year ahead), `due_at` (not after posting),
+  `chapter_id` (not in the classroom's subject — also a composite foreign key in the database).
+- **`PATCH /assignments/{id}`** sends **only what changed**; `null` clears `due_at`, `points` or
+  `chapter_id`, and is a `400` for anything else. `publish_at` moves only while still scheduled.
+  Lowering `points` below an existing grade is `400 fields.points` — the service locks the row
+  `FOR UPDATE` before checking, and the update policy refuses it regardless
+  (`app.points_compatible`).
+- **`DELETE /assignments/{id}`** answers `204`, through `app.delete_assignment` (there is no DELETE
+  grant), and writes `classroom.assignment_deleted` to `audit_log`.
+- **`PUT …/submission`**, **`POST …/turn-in`**, **`POST …/unsubmit`** each answer `200` with the
+  student's own submission. Turning in twice, or unsubmitting work that is not turned in, is not
+  an error. A state refusal is `400` with **`details.reason`**: `turned_in` (unsubmit before
+  editing) or `graded` (the teacher has saved a grade — returned or not — so the work is locked).
+  `link_url` must be a full `https://` link (`400 fields.link_url`).
+- **`GET …/submissions`** lists **every active member**, submitted or not; **`GET
+  …/submissions/{student_id}`** is one student's work. **A draft is never shown** — `body` and
+  `link_url` are `null` until the work is turned in, because the database returns nothing earlier.
+- **`PUT …/grades/{student_id}`** saves a grade (`0 ≤ grade ≤ points`, two decimals; `null` =
+  feedback only) and private feedback; `return_to_student: true` makes both visible to the student
+  and writes `classroom.grade_returned` to `audit_log`. Returning is one-way. Grading a non-member,
+  or in an archived classroom, is `403`.
+- **`GET /reference/subjects/{id}/chapters`** — the chapter picker, teachers only. Empty until
+  chapters are ingested.
+
+Pinned by `tests/integration/test_classroom_api.py` (29 tests), `test_classroom_stream.py` (15)
+and `test_classroom_assignments.py` (21) over the database suite `test_classroom_rls.py` (69);
+`tests/unit/test_classroom_schemas.py` (30), `test_classroom_pagination.py` (6) and
+`test_classroom_status.py` (9) cover the request bounds, the cursor and the status boundaries.
 
 ---
 
@@ -477,7 +528,7 @@ Relevant database findings, since these are the routes that would first exercise
 and mastery policies are `FOR ALL`, so every number a parent or teacher reads is student-writable).
 Implementing §3.5 against today's policies would land straight on all three.
 
-### 4.4 Spaces and classroom — 26 missing (§3.6; 14 of 40 built in classroom Phases 2 and 3)
+### 4.4 Spaces and classroom — 14 missing (§3.6; 26 of 40 built in classroom Phases 2–4)
 
 The six rows `tdd.md` specified through v0.3.9 keep their numbers. **Rows 15–18 were built in
 classroom Phase 2 and row 20 in Phase 3**; they are now in §2.8 and stay here, struck through, so
@@ -499,7 +550,7 @@ not numbered here, so that the numbering of every later section stays stable:
 |---|---|---|
 | 2 — classrooms core | ~~`GET /api/spaces` · `GET`/`PATCH /api/spaces/{id}` · `GET /api/spaces/{id}/people` · `DELETE /api/spaces/{id}/members/{student_id}` · `GET /api/reference/subjects`~~ **BUILT** — §2.8 | 0 of 6 left |
 | 3 — stream | ~~`GET /api/spaces/{id}/announcements` · `PATCH`/`DELETE /api/announcements/{id}`~~ **BUILT** — §2.8 | 0 of 3 left |
-| 4 — assignments | `GET`/`POST /api/spaces/{id}/assignments` · `GET`/`PATCH`/`DELETE /api/assignments/{id}` · `PUT …/submission` · `POST …/turn-in` · `POST …/unsubmit` · `GET …/submissions` · `GET …/submissions/{student_id}` · `PUT …/grades/{student_id}` · `GET /api/reference/subjects/{id}/chapters` | 12 |
+| 4 — assignments | ~~`GET`/`POST /api/spaces/{id}/assignments` · `GET`/`PATCH`/`DELETE /api/assignments/{id}` · `PUT …/submission` · `POST …/turn-in` · `POST …/unsubmit` · `GET …/submissions` · `GET …/submissions/{student_id}` · `PUT …/grades/{student_id}` · `GET /api/reference/subjects/{id}/chapters`~~ **BUILT** — §2.8 | 0 of 12 left |
 | 5 — calendar | `GET /api/calendar` | 1 |
 | 6 — files | three uploads, two downloads, two deletes | 7 |
 | 7 — chat | `GET`/`POST /api/spaces/{id}/messages` · `DELETE /api/messages/{id}` · `PUT …/mute` | 4 |
@@ -586,7 +637,7 @@ The sixteen codes that **do** have factories are listed in
 
 ```bash
 # route count
-grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py   # 21 and 14
+grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py   # 21 and 26
 
 # every route decorator, with its path and line
 grep -n "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py
@@ -601,6 +652,6 @@ grep -n "^| \(GET\|POST\|PUT\|PATCH\|DELETE\) " tdd.md     # 72 rows; many combi
 ---
 
 *Snapshot 2026-08-15, counts re-measured 2026-10-04 (classroom Phase 1). Implemented and specified
-are kept deliberately distinct: 35 of 83 (classroom Phase 3). Known
+are kept deliberately distinct: 47 of 83 (classroom Phase 4). Known
 defects are recorded here rather than deferred until fixed — see the Phase 0 findings register for
 the full 35.*

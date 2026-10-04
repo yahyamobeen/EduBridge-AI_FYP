@@ -13,7 +13,7 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**28 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04). The three `20261004…`
+**29 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04). The four `20261004…`
 classroom files were dry-run on a shadow database first, then applied by the owner with
 `supabase db push` on 2026-10-04 and re-verified on the live database.
 
@@ -47,6 +47,7 @@ classroom files were dry-run on a shadow database first, then applied by the own
 | 26 | `20261004120000_classroom_membership_boundary.sql` | **Classroom Phase 1** (B9, B10, B11). All direct writes to `enrollment` and `join_code`, and INSERT/DELETE on `classroom_space`, revoked; `owns_space` gains the subject-scope check; revocable self-declared `teacher_subject_scope`; join-code format and one-live-code index; set-returning RLS helpers. **Reverses the `join_code_owner` decision** (`database.md`). *Applied 2026-10-04* |
 | 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Applied 2026-10-04* |
 | 28 | `20261004130000_announcement_ownership_and_scheduling.sql` | **Classroom Phase 3** (B27). Announcement insert/update/delete require `author_id` = caller **and** an active owned classroom; `UPDATE` narrowed to `(body, publish_at)`; `publish_at` schedules a post, hidden from members by the read policy until then (no job); `updated_at` trigger, body check, feed and author indexes. *Applied 2026-10-04* |
+| 29 | `20261004140000_assignments_and_grading.sql` | **Classroom Phase 4**. `assignment` (owner content, scheduled by `publish_at`, chapter tag held to the subject by a composite foreign key), `assignment_submission` and `submission_grade` — the grade is its own table because all users share one database role. No write grant on either: five functions (draft, turn in, unsubmit, grade, delete) are the only writers, under one advisory lock per (assignment, student). Teachers see turned-in work of active members only; students see a grade once returned; any grade locks the work. *Applied 2026-10-04* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.
@@ -161,8 +162,8 @@ Verbatim at `backend/app/core/db.py:33-59`. Two things there are load-bearing:
 If the variable is never set, `app.current_user_id()` returns `NULL` and owner-scoped policies deny
 — fail-closed by design. Endpoints that run *before* a session exists (login, refresh, email
 verification, password reset, two-factor, the guardian flow) therefore cannot use a plain query;
-they call one of the narrow `SECURITY DEFINER` functions instead. All 50 live `app.*` functions
-(measured 2026-10-04 on a shadow database built from all 28 files) are catalogued, with their call
+they call one of the narrow `SECURITY DEFINER` functions instead. All 59 live `app.*` functions
+(measured 2026-10-04 on a shadow database built from all 29 files) are catalogued, with their call
 sites, in
 [`../backend/Architecture/database.md`](../backend/Architecture/database.md#the-app-privileged-functions).
 

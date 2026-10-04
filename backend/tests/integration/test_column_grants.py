@@ -396,6 +396,16 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
             # 20260816200000 (FR-A8) — the stored preference that governs
             # outgoing email, for every role rather than students only.
             ("app_user", "language_pref", "UPDATE"),
+            # 20261004140000 (classroom Phase 4) — what a teacher may edit.
+            # `space_id`, `subject_id` and `author_id` are not writable, so an
+            # assignment can never move classroom or subject, and the chapter
+            # tag is still held to the subject by a composite foreign key.
+            ("assignment", "chapter_id", "UPDATE"),
+            ("assignment", "due_at", "UPDATE"),
+            ("assignment", "instructions", "UPDATE"),
+            ("assignment", "points", "UPDATE"),
+            ("assignment", "publish_at", "UPDATE"),
+            ("assignment", "title", "UPDATE"),
             # 20260817120000 (Phase 4) — `revoke_user_tokens` (logout) is the
             # only plain UPDATE against `auth_token` in the application, and it
             # names this column alone. Narrowed when `family_started_at`,

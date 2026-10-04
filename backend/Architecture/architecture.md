@@ -29,7 +29,7 @@ The backend is a **single FastAPI application** with two routers. All server log
 | Package | Contents |
 |---|---|
 | `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
-| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–3), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`) and the keyset cursor (`pagination.py`) — §2.8 |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–4), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`) and the keyset cursor (`pagination.py`) — §2.8 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -46,16 +46,16 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **34** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Python source files | **37** | `find backend/app -type f -name "*.py" \| wc -l` |
 | Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:43`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **35** (21 + 14) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Implemented routes | **47** (21 + 26) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
 | Routes specified in `tdd.md` v0.4.0 | **83** | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **48** | 83 − 35 |
-| Applied migrations | **28** | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **45** (20 unit, 25 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **38 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 36; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), or `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:39` |
+| Specified but **not** implemented | **36** | 83 − 47 |
+| Applied migrations | **29** | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **47** (21 unit, 26 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **44 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 42; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), or `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:37` and `classroom/assignments.py:60` |
 
-*Re-measured 2026-10-04 (classroom Phase 3); the rest of this page is the 2026-08-15 account unless a
+*Re-measured 2026-10-04 (classroom Phase 4); the rest of this page is the 2026-08-15 account unless a
 section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5.*
 
 ### Directories that are scaffolded, with no implementation
@@ -257,7 +257,7 @@ choice between two function names) and mark it `# noqa: S608` with the reason: `
 `update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
 bound parameter.
 
-### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–3)
+### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–4)
 
 Same layers as above, with one difference that matters: **the database decides which classroom a
 caller may touch.** The route's dependency decides only *who* may call
@@ -287,6 +287,19 @@ rules the rest of the service does not have:
 - **Lists are keyset-paginated**, not offset-paginated: `classroom/pagination.py` encodes the last
   row's `(publish_at, id)` as an opaque base64 cursor and refuses a timezone-naive one, so a page
   boundary cannot skip or repeat a post when new ones arrive. Later classroom lists reuse it.
+
+Assignments and grading (classroom Phase 4) live in `classroom/assignments.py`, on the same two
+rules (the schedule check is shared, `classroom/scheduling.py`), plus three of their own:
+
+- **Status is derived, never stored.** `classroom/status.py` is a pure function of `turned_in_at`,
+  `due_at` and `returned_at` against the database clock — assigned, turned in, done late, missing,
+  graded. A stored status would drift the first time a teacher moved a deadline.
+- **Every submission and grade write is an `app.*` function** (`20261004140000`): neither table
+  carries a write grant, because a column grant cannot tell a teacher from a student. The service
+  maps each outcome; a state refusal is `400` with `details.reason` (`graded`, `turned_in`).
+- **Visibility is the database's.** The list and detail queries are the same for owner and member:
+  RLS hides a student's draft from the teacher until it is turned in, a grade from the student until
+  it is returned, and both from the teacher once the student leaves.
 
 Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`),
 all per user. Route table: [api-endpoints.md §2.8](api-endpoints.md).
@@ -712,7 +725,7 @@ gets the most favourable one. A pending gate raises `GATE_PENDING` (403, `core/e
 > **Note.** `require_guardian_verified` has been wired since classroom Phase 2, through
 > `participant` and `gated_student` (`classroom/dependencies.py:22`, `:35`). The learning endpoints it
 > was written for (`/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`,
-> `/api/reports/*`) are still among the 48 that do not exist. See [api-endpoints.md](api-endpoints.md).
+> `/api/reports/*`) are still among the 36 that do not exist. See [api-endpoints.md](api-endpoints.md).
 
 ### 8.4 The write boundary
 
@@ -914,7 +927,7 @@ verification iterates the unused hashes (`service.py:974-986`) instead of doing 
 | `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 165), §6.8 Row-Level Security (line 858), §6.9 two-factor authentication (line 893), §6.11 client-side security (line 988), §7.2 the consolidated endpoint catalogue (line 1026), §7.3 the error model (line 1043) | [`../../tdd.md`](../../tdd.md) |
 | `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | outside the repository: `Desktop\EduBridge-AI_FYP-planning\user-stories.md` |
 | `database.html` / `database.md` | Tables by domain, the **complete Row-Level Security policy catalogue**, the `app.*` privileged functions with signature and grant, and findings B1–B27 | [database.html](database.html) |
-| `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 48 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |
+| `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 36 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |
 | `backend/README.md` | Environment variables, the running and testing commands, and the standing `SECURITY DEFINER` rule quoted in §4.3 | [`../README.md`](../README.md) |
 
 ### Rendering the diagrams offline

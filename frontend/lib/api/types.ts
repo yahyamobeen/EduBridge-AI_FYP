@@ -392,3 +392,105 @@ export type AnnouncementPage = {
 export type AnnouncementCreateRequest = { body: string; publish_at?: string }
 
 export type AnnouncementUpdateRequest = { body?: string; publish_at?: string }
+
+// Phase 4 — assignments, submissions and grades
+
+/** Derived by the server from the timestamps on every read; never stored. */
+export type WorkStatus = 'assigned' | 'turned_in' | 'turned_in_late' | 'missing' | 'graded'
+
+export type ChapterRef = { id: string; number: number; title: string }
+
+export type ChaptersResponse = { chapters: ChapterRef[] }
+
+export type AssignmentSummary = {
+  id: string
+  title: string
+  due_at: string | null
+  points: number | null
+  chapter: ChapterRef | null
+  publish_at: string
+  /** Only ever true in the owner's view, as for announcements. */
+  scheduled: boolean
+  /** Member view only; null for the owner. `my_grade` only once returned. */
+  my_status: WorkStatus | null
+  my_grade: number | null
+  /** Owner view only; null for a member. */
+  turned_in_count: number | null
+}
+
+export type AssignmentPage = { items: AssignmentSummary[]; next_cursor: string | null }
+
+/** The calling student's own work. `grade` and `feedback` are null until returned. */
+export type MySubmission = {
+  body: string
+  link_url: string | null
+  turned_in_at: string | null
+  status: WorkStatus
+  grade: number | null
+  feedback: string | null
+  returned_at: string | null
+}
+
+export type AssignmentDetail = AssignmentSummary & {
+  space_id: string
+  instructions: string
+  created_at: string
+  updated_at: string
+  /** Member view only. */
+  my_submission: MySubmission | null
+}
+
+/** Times are ISO instants WITH an offset (lib/datetime.ts). */
+export type AssignmentCreateRequest = {
+  title: string
+  instructions?: string
+  due_at?: string
+  points?: number
+  chapter_id?: string
+  publish_at?: string
+}
+
+/** Send only what changed. `null` clears `due_at`, `points` or `chapter_id`. */
+export type AssignmentUpdateRequest = {
+  title?: string
+  instructions?: string
+  due_at?: string | null
+  points?: number | null
+  chapter_id?: string | null
+  publish_at?: string
+}
+
+export type SubmissionDraftRequest = { body: string; link_url: string | null }
+
+/**
+ * `details.reason` on a 400 from the submission endpoints: `graded` — the
+ * teacher has saved a grade, so the work is locked; `turned_in` — unsubmit first.
+ */
+export type SubmissionRefusalReason = 'graded' | 'turned_in'
+
+export type GradeRequest = {
+  grade: number | null
+  feedback: string
+  return_to_student: boolean
+}
+
+/** One row of the teacher's table: every active member, submitted or not. */
+export type SubmissionRow = {
+  student_id: string
+  full_name: string | null
+  status: WorkStatus
+  turned_in_at: string | null
+  grade: number | null
+  returned_at: string | null
+  /** A grade is saved (returned or not); the student's work is locked. */
+  graded: boolean
+}
+
+export type SubmissionsResponse = { rows: SubmissionRow[] }
+
+/** One student's work for the teacher. `body` is null until it is turned in. */
+export type StudentWork = SubmissionRow & {
+  body: string | null
+  link_url: string | null
+  feedback: string
+}

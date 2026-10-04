@@ -4,11 +4,17 @@ import type {
   AnnouncementCreateRequest,
   AnnouncementPage,
   AnnouncementUpdateRequest,
+  AssignmentCreateRequest,
+  AssignmentDetail,
+  AssignmentPage,
+  AssignmentUpdateRequest,
   BoardCode,
+  ChaptersResponse,
   EmailResendRequest,
   EmailVerifyRequest,
   EmailVerifyResponse,
   EnumsResponse,
+  GradeRequest,
   GuardianConfirmRequest,
   GuardianConfirmResponse,
   GuardianInviteRequest,
@@ -20,6 +26,7 @@ import type {
   LoginResponse,
   MeResponse,
   MeUpdateRequest,
+  MySubmission,
   PasswordChangeRequest,
   PasswordForgotRequest,
   PasswordResetRequest,
@@ -30,7 +37,10 @@ import type {
   SpaceDetail,
   SpaceListResponse,
   SpaceUpdateRequest,
+  StudentWork,
   SubjectsResponse,
+  SubmissionDraftRequest,
+  SubmissionsResponse,
   TwoFactorConfirmRequest,
   TwoFactorConfirmResponse,
   TwoFactorEnrollRequest,
@@ -379,4 +389,105 @@ export function updateAnnouncement(
 
 export function deleteAnnouncement(id: string): Promise<void> {
   return apiFetch<void>(`/announcements/${seg(id)}`, { method: 'DELETE' })
+}
+
+// Phase 4 — assignments, submissions and grades
+
+export function listAssignments(
+  spaceId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<AssignmentPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+  return apiFetch<AssignmentPage>(
+    `/spaces/${seg(spaceId)}/assignments${query}`,
+    withSignal(signal),
+  )
+}
+
+export function createAssignment(
+  spaceId: string,
+  body: AssignmentCreateRequest,
+): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/spaces/${seg(spaceId)}/assignments`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function getAssignment(id: string, signal?: AbortSignal): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/assignments/${seg(id)}`, withSignal(signal))
+}
+
+export function updateAssignment(
+  id: string,
+  body: AssignmentUpdateRequest,
+): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/assignments/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function deleteAssignment(id: string): Promise<void> {
+  return apiFetch<void>(`/assignments/${seg(id)}`, { method: 'DELETE' })
+}
+
+export function saveSubmission(
+  id: string,
+  body: SubmissionDraftRequest,
+): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission`, { method: 'PUT', body })
+}
+
+/** Idempotent: turning in twice answers with the current state. */
+export function turnInSubmission(id: string): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission/turn-in`, {
+    method: 'POST',
+  })
+}
+
+export function unsubmitSubmission(id: string): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission/unsubmit`, {
+    method: 'POST',
+  })
+}
+
+export function listSubmissions(
+  id: string,
+  signal?: AbortSignal,
+): Promise<SubmissionsResponse> {
+  return apiFetch<SubmissionsResponse>(
+    `/assignments/${seg(id)}/submissions`,
+    withSignal(signal),
+  )
+}
+
+export function getStudentWork(
+  id: string,
+  studentId: string,
+  signal?: AbortSignal,
+): Promise<StudentWork> {
+  return apiFetch<StudentWork>(
+    `/assignments/${seg(id)}/submissions/${seg(studentId)}`,
+    withSignal(signal),
+  )
+}
+
+export function saveGrade(
+  id: string,
+  studentId: string,
+  body: GradeRequest,
+): Promise<StudentWork> {
+  return apiFetch<StudentWork>(`/assignments/${seg(id)}/grades/${seg(studentId)}`, {
+    method: 'PUT',
+    body,
+  })
+}
+
+export function listChapters(
+  subjectId: string,
+  signal?: AbortSignal,
+): Promise<ChaptersResponse> {
+  return apiFetch<ChaptersResponse>(
+    `/reference/subjects/${seg(subjectId)}/chapters`,
+    withSignal(signal),
+  )
 }

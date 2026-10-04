@@ -1,5 +1,6 @@
 """
-Classroom routes — `tdd.md` §3.6, classroom Phase 2 (spaces, codes, membership).
+Classroom routes — `tdd.md` §3.6: spaces, codes and membership (Phase 2), the
+stream (Phase 3), and assignments, submissions and grades (Phase 4).
 
 Thin by design: rate limit first, then one service call. Who may call is
 decided by the dependency on each route (app/classroom/dependencies.py); which
@@ -15,23 +16,33 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.auth.dependencies import AuthContext, authenticated
-from app.classroom import announcements, service
+from app.classroom import announcements, assignments, service
 from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
 from app.classroom.schemas import (
     Announcement,
     AnnouncementCreateRequest,
     AnnouncementPage,
     AnnouncementUpdateRequest,
+    AssignmentCreateRequest,
+    AssignmentDetail,
+    AssignmentPage,
+    AssignmentUpdateRequest,
+    ChaptersResponse,
+    GradeRequest,
     JoinCodeRequest,
     JoinCodeResponse,
     JoinRequest,
     JoinResponse,
+    MySubmission,
     PeopleResponse,
     SpaceCreateRequest,
     SpaceDetail,
     SpaceListResponse,
     SpaceUpdateRequest,
+    StudentWork,
     SubjectsResponse,
+    SubmissionDraftRequest,
+    SubmissionsResponse,
 )
 from app.core.ratelimit import (
     CLASSROOM_JOIN_LIMIT,
@@ -175,3 +186,113 @@ def update_announcement_endpoint(
 def delete_announcement_endpoint(request: Request, announcement_id: UUID, ctx: Teacher) -> None:
     _write(request, ctx)
     announcements.delete_announcement(ctx.session, ctx.user_id, announcement_id)
+
+
+# ── Phase 4: assignments, submissions and grades ───────────────────────────
+
+
+@router.get("/spaces/{space_id}/assignments", response_model=AssignmentPage)
+def list_assignments_endpoint(
+    request: Request,
+    space_id: UUID,
+    ctx: Participant,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+) -> AssignmentPage:
+    _read(request, ctx)
+    return AssignmentPage(
+        **assignments.list_assignments(ctx.session, ctx.user_id, space_id, cursor)
+    )
+
+
+@router.post(
+    "/spaces/{space_id}/assignments",
+    response_model=AssignmentDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_assignment_endpoint(
+    request: Request, space_id: UUID, payload: AssignmentCreateRequest, ctx: Teacher
+) -> AssignmentDetail:
+    _write(request, ctx)
+    return AssignmentDetail(
+        **assignments.create_assignment(ctx.session, ctx.user_id, space_id, payload)
+    )
+
+
+@router.get("/assignments/{assignment_id}", response_model=AssignmentDetail)
+def get_assignment_endpoint(
+    request: Request, assignment_id: UUID, ctx: Participant
+) -> AssignmentDetail:
+    _read(request, ctx)
+    return AssignmentDetail(**assignments.get_assignment(ctx.session, ctx.user_id, assignment_id))
+
+
+@router.patch("/assignments/{assignment_id}", response_model=AssignmentDetail)
+def update_assignment_endpoint(
+    request: Request, assignment_id: UUID, payload: AssignmentUpdateRequest, ctx: Teacher
+) -> AssignmentDetail:
+    _write(request, ctx)
+    return AssignmentDetail(
+        **assignments.update_assignment(ctx.session, ctx.user_id, assignment_id, payload)
+    )
+
+
+@router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_assignment_endpoint(request: Request, assignment_id: UUID, ctx: Teacher) -> None:
+    _write(request, ctx)
+    assignments.delete_assignment(ctx.session, ctx.user_id, assignment_id)
+
+
+@router.put("/assignments/{assignment_id}/submission", response_model=MySubmission)
+def save_submission_endpoint(
+    request: Request, assignment_id: UUID, payload: SubmissionDraftRequest, ctx: GatedStudent
+) -> MySubmission:
+    _write(request, ctx)
+    return MySubmission(**assignments.save_draft(ctx.session, ctx.user_id, assignment_id, payload))
+
+
+@router.post("/assignments/{assignment_id}/submission/turn-in", response_model=MySubmission)
+def turn_in_endpoint(request: Request, assignment_id: UUID, ctx: GatedStudent) -> MySubmission:
+    _write(request, ctx)
+    return MySubmission(**assignments.turn_in(ctx.session, ctx.user_id, assignment_id))
+
+
+@router.post("/assignments/{assignment_id}/submission/unsubmit", response_model=MySubmission)
+def unsubmit_endpoint(request: Request, assignment_id: UUID, ctx: GatedStudent) -> MySubmission:
+    _write(request, ctx)
+    return MySubmission(**assignments.unsubmit(ctx.session, ctx.user_id, assignment_id))
+
+
+@router.get("/assignments/{assignment_id}/submissions", response_model=SubmissionsResponse)
+def submissions_endpoint(
+    request: Request, assignment_id: UUID, ctx: Teacher
+) -> SubmissionsResponse:
+    _read(request, ctx)
+    return SubmissionsResponse(**assignments.submissions_table(ctx.session, assignment_id))
+
+
+@router.get("/assignments/{assignment_id}/submissions/{student_id}", response_model=StudentWork)
+def student_work_endpoint(
+    request: Request, assignment_id: UUID, student_id: UUID, ctx: Teacher
+) -> StudentWork:
+    _read(request, ctx)
+    return StudentWork(**assignments.student_work(ctx.session, assignment_id, student_id))
+
+
+@router.put("/assignments/{assignment_id}/grades/{student_id}", response_model=StudentWork)
+def save_grade_endpoint(
+    request: Request,
+    assignment_id: UUID,
+    student_id: UUID,
+    payload: GradeRequest,
+    ctx: Teacher,
+) -> StudentWork:
+    _write(request, ctx)
+    return StudentWork(
+        **assignments.save_grade(ctx.session, ctx.user_id, assignment_id, student_id, payload)
+    )
+
+
+@router.get("/reference/subjects/{subject_id}/chapters", response_model=ChaptersResponse)
+def chapters_endpoint(request: Request, subject_id: UUID, ctx: Teacher) -> ChaptersResponse:
+    _read(request, ctx)
+    return ChaptersResponse(**assignments.list_chapters(ctx.session, subject_id))

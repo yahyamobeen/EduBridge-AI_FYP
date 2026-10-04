@@ -4,7 +4,7 @@
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
 > **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
-> sections re-measured **2026-10-04 on branch `add-classroom`** (28 migration files; the three
+> sections re-measured **2026-10-04 on branch `add-classroom`** (29 migration files; the four
 > `20261004…` files were applied on 2026-10-04 with `supabase db push` and re-verified on the live database).
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
@@ -21,28 +21,28 @@ Run from the repository root.
 
 | Measure | Value | Command |
 |---|---|---|
-| Migration files | **28** (all applied; the three `20261004…` files on 2026-10-04) | `ls supabase/migrations/*.sql \| wc -l` |
-| `CREATE TABLE` statements | **48** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
+| Migration files | **29** (all applied; the four `20261004…` files on 2026-10-04) | `ls supabase/migrations/*.sql \| wc -l` |
+| `CREATE TABLE` statements | **51** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
 | …of which DEFAULT partitions | **2** | `grep -hE '^CREATE TABLE.*PARTITION OF' supabase/migrations/*.sql \| wc -l` |
-| Base tables (48 − 2) | **46** | derived from the two rows above |
+| Base tables (51 − 2) | **49** | derived from the two rows above |
 | Views | **1** | `grep -hE '^CREATE VIEW' supabase/migrations/*.sql \| wc -l` |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
-| Indexes | **43** (42 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
-| Triggers | **14** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
-| `CREATE POLICY` occurrences | **96** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| …real `CREATE POLICY` statements | **93** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| **Policy objects the migrations produce** | **80** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 28 files, and the same 80 on the live database after `supabase db push` (77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
-| `CREATE OR REPLACE FUNCTION` statements | **62** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| Distinct `app.*` function names ever defined | **51** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
-| **Live `app.*` functions** (51 − 1 retired) | **50** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow; `issue_token_for_email` is the one dropped for good |
-| `SECURITY DEFINER` lines | **62** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| `SET search_path` lines | **62** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
-| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **52** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| `GRANT EXECUTE … TO app_backend` | **54** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
+| Indexes | **50** (49 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
+| Triggers | **17** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
+| `CREATE POLICY` occurrences | **104** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| …real `CREATE POLICY` statements | **101** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| **Policy objects the migrations produce** | **88** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 29 files, and the same 88 on the live database after `supabase db push` (80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
+| `CREATE OR REPLACE FUNCTION` statements | **71** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| Distinct `app.*` function names ever defined | **60** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
+| **Live `app.*` functions** (60 − 1 retired) | **59** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow; `issue_token_for_email` is the one dropped for good |
+| `SECURITY DEFINER` lines | **71** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
+| `SET search_path` lines | **71** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
+| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **61** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| `GRANT EXECUTE … TO app_backend` | **61** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
 | `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
-| Implemented HTTP endpoints | **35** (21 auth + 14 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Implemented HTTP endpoints | **47** (21 auth + 26 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
 
-**Measured from the catalogue (shadow database built from all 28 files, 2026-10-04): 49 of the 50 live `app.*` functions
+**Measured from the catalogue (shadow database built from all 29 files, 2026-10-04): 58 of the 59 live `app.*` functions
 carry `search_path`.** The exception is `app.set_updated_at()`
 (`20260801120000_initial_schema.sql:85`), a plain trigger function that is not `SECURITY DEFINER`
 and therefore has nothing to escalate. Two functions are not `SECURITY DEFINER`: that trigger, and
@@ -258,6 +258,9 @@ subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempo
 | `join_code` | `:341` | Unique code, revocable, optional expiry. Never readable by students — they receive it out of band. Since `20261004120000`: `ck_join_code_format` (`^[A-HJ-NP-Z2-9]{8}$`, 2⁴⁰ codes, minted in Python by `app/classroom/codes.py`) and `uq_join_code_one_live` (one unrevoked code per space). **Written only by `app.rotate_join_code` / `app.disable_join_code`.** |
 | `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. Since `20261004120000`: `removed_at` (set by the teacher; a removed student cannot rejoin with the code, one who left can — `ck_enrollment_removed_has_left`) and `muted_at` (written by the chat phase; survives leave and rejoin). **Written only by `app.join_space_by_code`, `app.leave_space` and `app.remove_student`.** |
 | `announcement` | `:364` | Space-scoped, author-attributed. Since `20261004130000`: `updated_at` (with `trg_announcement_updated`), `publish_at` (default `now()`; a future value **schedules** the post and the member read policy hides it until then — no job publishes it), `ck_announcement_body` (1–5000 characters after trimming), `ix_announcement_feed (space_id, publish_at DESC, id DESC)` for the keyset-paginated stream (replaces `ix_announcement_space`) and `ix_announcement_author` for the `ON DELETE RESTRICT` check. The owner may `UPDATE` only `body` and `publish_at`; INSERT and DELETE stay table-level and are held by the policies. |
+| `assignment` | `20261004140000:59` | Owner content, like `announcement`: author-attributed, scheduled by `publish_at` (members cannot read a future one). `subject_id` is denormalised for per-subject reports and held to the classroom's by the composite key `fk_assignment_space_subject (space_id, subject_id)`; the optional `chapter_id` is held to the same subject by `fk_assignment_chapter_subject (chapter_id, subject_id)` — a chapter from another subject is a foreign-key violation, not a service check. `ck_assignment_title` (1–200), `ck_assignment_instructions` (≤ 10 000), `ck_assignment_points` (1–1000 or NULL), `ck_assignment_due_after_publish`. The owner may `UPDATE` only `title, instructions, due_at, points, chapter_id, publish_at`; INSERT is table-level and held by `assignment_insert`; **no DELETE grant** — `app.delete_assignment` only. |
+| `assignment_submission` | `20261004140000:93` | One per (assignment, student) — `uq_submission_one_per_student`. `turned_in_at` (NULL = draft, stamped with `clock_timestamp()`) is the only state: **late, missing and graded are derived** (`app/classroom/status.py`), never stored. `ck_submission_link` allows `https://` only. `uq_submission_id_space_student` is the target for submission files (Phase 6). **No write grant**: written only by `app.save_submission_draft`, `app.turn_in_submission` and `app.unsubmit_submission`. |
+| `submission_grade` | `20261004140000:117` | The teacher's grade (`numeric(6,2)`) and private feedback, keyed `(assignment_id, student_id)`. **A separate table, not a column on the submission**: every user shares one database role, so a teacher-owned column on a student-owned row would be writable by both. `returned_at` is when the student may see it — set once, never cleared. **No write grant**: written only by `app.save_grade`. |
 
 ### Assessment
 
@@ -405,6 +408,14 @@ The six `*_read` policies below were created by the `FOREACH` loop at `202608011
 | `announcement` | `announcement_insert` | INSERT | — | `author_id = cuid() AND app.owns_active_space(space_id)` | `20261004130000:76` |
 | `announcement` | `announcement_update` | UPDATE | `author_id = cuid() AND app.owns_active_space(space_id)` | same expression; column grant `UPDATE (body, publish_at)` only | `20261004130000:80` |
 | `announcement` | `announcement_delete` | DELETE | `author_id = cuid() AND app.owns_active_space(space_id)` | — | `20261004130000:85` |
+| `assignment` | `assignment_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004140000:234` |
+| `assignment` | `assignment_member_read` | SELECT | `space_id IN (SELECT app.my_member_space_ids()) AND publish_at <= now()` | — | `20261004140000:240` |
+| `assignment` | `assignment_insert` | INSERT | — | `author_id = cuid() AND app.owns_active_space(space_id)` | `20261004140000:244` |
+| `assignment` | `assignment_update` | UPDATE | `author_id = cuid() AND app.owns_active_space(space_id)` | the same **and** `app.points_compatible(id, points)` — points can never drop below an existing grade | `20261004140000:248` |
+| `assignment_submission` | `submission_read_own` | SELECT | `student_id = cuid()` | — | `20261004140000:259` |
+| `assignment_submission` | `submission_teacher_read` | SELECT | `turned_in_at IS NOT NULL AND (space_id, student_id) IN (SELECT … FROM app.my_taught_students())` — **turned-in work of active members only**; a draft is the student's own | — | `20261004140000:263` |
+| `submission_grade` | `grade_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students())` | — | `20261004140000:271` |
+| `submission_grade` | `grade_student_read_returned` | SELECT | `student_id = cuid() AND returned_at IS NOT NULL` | — | `20261004140000:275` |
 
 `enrollment_student_join` (INSERT into **any** space) and `enrollment_leave` (UPDATE with no
 `WITH CHECK`) were **dropped** by `20261004120000` §4 — finding **B9** — and `app_backend` holds no
@@ -416,6 +427,12 @@ write grant on `enrollment`. Every enrolment change goes through a function in t
 could post as anyone, and there was no UPDATE or DELETE policy at all. ⚠️ `now()` in
 `announcement_member_read` is the **transaction** start, so a post becomes visible to the first
 query that begins after its `publish_at`, never part-way through one.
+
+The assignment tables (`20261004140000`) have no DELETE policy, and `assignment_submission` and
+`submission_grade` no write policy at all: with no write grant either, every change goes through
+a function in the [assignments section](#classroom--assignment-functions). **Leaving ends teacher
+visibility** (user story 7.1) is `app.my_taught_students()`: it lists active members only, so the
+moment a student leaves, their submissions and grades drop out of both teacher read policies.
 
 ### Assessment
 
@@ -527,6 +544,8 @@ the query: without `EXECUTE` it would error rather than deny.
 | `app.my_owned_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller owns with live scope | `app_backend` | `20261004120000` §1 |
 | `app.my_member_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller is actively enrolled in | `app_backend` | `20261004120000` §1 |
 | `app.caller_passes_guardian_gate()` | `STABLE` | Yes | `boolean` — `gate.py` in SQL; **fails closed** on an unbound user or unknown class level | `app_backend` | `20261004120000` §1 |
+| `app.my_taught_students()` | `STABLE` | Yes | `TABLE (space_id, student_id)` — active members of the caller's scoped spaces | `app_backend` | `20261004140000:167` |
+| `app.points_compatible(p_assignment uuid, p_points smallint)` | `STABLE` | Yes | `boolean` — the caller owns the classroom **and** no grade exceeds `p_points`; false for anyone else, so it is not an oracle | `app_backend` | `20261004140000:181` |
 
 **Why two set-returning helpers.** A `SECURITY DEFINER` function is never inlined, so a per-row
 helper such as `app.owns_space(space_id)` runs once per **row**. Used as
@@ -564,13 +583,38 @@ Proved on a shadow database built from all 27 files (2026-10-04): the same attac
 a student enrols without a code) and is refused with `permission denied` after these two.
 `backend/tests/integration/test_classroom_rls.py` pins every row of the table above (44 tests; 52 with classroom Phase 3's `TestAnnouncementBoundary`).
 
+### Classroom — assignment functions
+
+`20261004140000` (classroom Phase 4). The **only** writers of `assignment_submission` and
+`submission_grade`, and the only way to delete an assignment. Same contract as the space
+functions above: the actor comes from `app.current_user_id()`, an outcome is returned rather than
+raised, and each is `REVOKE`d from `PUBLIC`. Every submission and grade write takes
+`app.lock_submission` — one advisory lock per (assignment, student) — so a grade saved while the
+student edits or turns in cannot leave edited work behind a grade. **Once any grade row exists the
+work is locked** ("editable until graded", `prd.md` CL-7), even before it is returned.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.save_submission_draft(p_assignment uuid, p_body text, p_link text) → text` | `PUT /api/assignments/{id}/submission` | `saved` · `forbidden` · `graded` · `turned_in` | Upsert while not turned in. `turned_in` means unsubmit first. `20261004140000:281` |
+| `app.turn_in_submission(p_assignment uuid) → text` | `POST …/submission/turn-in` | `turned_in` · `already_turned_in` · `forbidden` · `graded` | Stamps `clock_timestamp()` — the real moment, unforgeable (no grant on the column). An empty turn-in is "mark as done". `20261004140000:306` |
+| `app.unsubmit_submission(p_assignment uuid) → text` | `POST …/submission/unsubmit` | `unsubmitted` · `not_turned_in` · `forbidden` · `graded` | `20261004140000:333` |
+| `app.save_grade(p_assignment, p_student, p_grade numeric, p_feedback text, p_return boolean) → text` | `PUT /api/assignments/{id}/grades/{student_id}` | `saved` · `forbidden` · `invalid_grade` | Owner of an **active** classroom, **active** member only; `0 ≤ grade ≤ points` (no points = feedback only). Takes `FOR SHARE` on the assignment so a concurrent change to `points` cannot interleave. Returning is one-way. `20261004140000:355` |
+| `app.delete_assignment(p_assignment uuid) → (deleted, object_keys)` | `DELETE /api/assignments/{id}` | — | Owner of an active classroom. `object_keys` is always empty until Phase 6 replaces the body to collect stored file keys before the cascade. `20261004140000:397` |
+
+Two **internal** helpers carry **no grant to `app_backend` at all** (plan R9) — they are called only from
+the functions above, which run as their owner: `app.submittable_space(p_assignment)` (published, active
+classroom, active member, **guardian gate passed** — the Class 9–10 rule at the database too, not only
+on the route; `20261004140000:202`) and `app.lock_submission(p_assignment, p_student)` (`20261004140000:220`). Calling
+either as `app_backend` is `permission denied`, which `test_classroom_rls.py` asserts.
+`TestAssignmentBoundary` (17 tests) pins every row of this section.
+
 ### The trigger function
 
 | Function | Volatility | Definer? | Returns | Grant | Defined at |
 |---|---|---|---|---|---|
 | `app.set_updated_at()` | default `VOLATILE` | No | `trigger` — sets `NEW.updated_at = now()` | `app_backend` (`20260816190000`) | `20260801120000:85` |
 
-**13** `CREATE TRIGGER` statements (`grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql | wc -l`,
+**17** `CREATE TRIGGER` statements (`grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql | wc -l`,
 re-measured 2026-10-04). The profile tables that once carried `updated_at` with no trigger
 (finding D14) were closed by `20260817150000` — see the section below.
 
@@ -854,8 +898,19 @@ publisher** — no background job, no status column; the post becomes visible be
 starts to hold. So do not add a `published` flag (it would drift from the timestamp it summarises),
 and do not filter scheduled rows in the service instead of the policy (a missed filter would leak a
 post early, which is exactly what the second layer exists to stop). The owner's read policy has no
-time condition, so the teacher sees their own scheduled posts. Assignments (classroom Phase 4)
-follow the same rule.
+time condition, so the teacher sees their own scheduled posts. Assignments follow the same rule
+(`assignment_member_read`, `20261004140000`), and a scheduled assignment cannot be submitted to either
+(`app.submittable_space` requires `publish_at <= now()`).
+
+### 11. A teacher-owned field on a student-owned row is its own table
+
+Every application user connects as `app_backend`, so a column grant cannot tell a teacher from a
+student. A grade stored as a column on `assignment_submission` would therefore be writable by the
+student whose work it grades. That is why `submission_grade` is a separate table, why neither table
+has any write grant, and why `submission_teacher_read` adds `turned_in_at IS NOT NULL`: the student
+owns the draft until they hand it in. **Do not "simplify" the grade onto the submission row.** Status
+(late, missing, graded) is likewise never stored — it is derived from three timestamps owned by two
+people, and a stored copy would drift the first time a deadline moved.
 
 ---
 

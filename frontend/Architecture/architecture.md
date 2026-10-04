@@ -15,11 +15,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 |---|---|---|
 | Pages | **27** (4 added by classroom Phase 2) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **33** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **36** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **590**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **682**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-04 (classroom Phase 3).*
+*Re-measured 2026-10-04 (classroom Phase 4).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -141,7 +141,7 @@ making a request. Components live in `components/classroom/`:
   session role.** A teacher whose subject scope was revoked is still `owner` but gets no controls and
   is told why. Not the security boundary — the database is — but `prd.md` §4.2 forbids rendering a
   control the caller cannot use. Since classroom Phase 3 its sections are tabs — **Stream** (the
-  default) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
+  default), **Classwork** (Phase 4) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
   `TABS` constant.
 - **`StreamTab.tsx`** (classroom Phase 3) — announcements, newest first. **Nothing here filters
   scheduled posts**: a member never receives one, because the database withholds it
@@ -152,6 +152,28 @@ making a request. Components live in `components/classroom/`:
   id**, because a post published between two requests can appear on both pages. Posting is offered
   only for the owner of a non-archived classroom (`canPost`); errors branch on `ApiError.code` and
   `details.fields`, never on `message`.
+- **`ClassworkTab.tsx`** (classroom Phase 4) — assignments, newest first, with "Load older"
+  merging by id as the stream does. Opening one replaces the list **in place** with
+  `AssignmentView.tsx`, and "Back" returns to the list kept in step with any change made inside — no
+  new route, so the RBAC boundary stays the two existing classroom pages. Nothing filters: a member
+  never receives a scheduled assignment, and each member's status is **derived by the server**
+  (`StatusChip`, in `AssignmentParts.tsx`, only names and colours it).
+- **`AssignmentForm.tsx`** — create and edit. Points are validated as a whole number 1–1000
+  **before** sending; the due date and schedule go out as ISO instants with an offset
+  (`lib/datetime.ts`); the chapter picker reads `/reference/subjects/{id}/chapters` and is replaced by
+  a note when the subject has none. An edit sends only what changed, with `null` to clear an
+  optional field — the API's contract.
+- **`SubmissionPanel.tsx`** — the student's own work, in three states read from the server's answer
+  (editing, turned in, returned). Unsaved edits are saved **before** turning in, not lost behind it.
+  The three refusals each get their own message, chosen by `details.reason` (`graded`, `turned_in`)
+  or `details.fields.link_url`. A link renders as an anchor only if it is `https://`, with
+  `rel="noopener noreferrer"` — the server already guarantees it; the client does not take that on
+  trust.
+- **`GradingTable.tsx`** — every active member, with "Review" opening their work inline. A draft is
+  never shown (the server returns nothing until it is turned in). A grade above the points is
+  refused before sending; "Save and return" sends `return_to_student: true`, and the row updates in
+  place from the response. In an archived classroom the work is still readable and grading is
+  hidden, matching the database, which refuses it.
 - **`JoinClassForm.tsx`** — branches on `details.reason` (`invalid_code`, `class_mismatch` with the
   class named, `classroom_full`) and on `GATE_PENDING` / `RATE_LIMITED`; never on `message`.
 - **`CreateClassForm.tsx`** — board → class → subject from `/reference/enums` and
@@ -519,7 +541,7 @@ The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot rea
 
 The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:130-131`) on every call.
 
-`startSession` (`endpoints.ts:274-276`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:284-286`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -545,7 +567,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2 and 3 added the `classroom` namespace (562, then 590).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **590 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-04) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2, 3 and 4 added the `classroom` namespace (562, then 590, then 682).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -686,7 +708,7 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-33 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+36 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
 
 The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
 give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured
@@ -697,7 +719,9 @@ machine load inside the full suite rather than the code — the same class of fa
 (pre-existing; dates render in the browser's zone, which is correct for client-only rendering, but a
 server-rendered date would mismatch). `StreamTab.test.tsx` also renders in `ur` and `ur-Latn` with an
 `onError` that fails on any missing key, and `components/ui/Tabs.test.tsx` pins the reversed arrows
-under `dir="rtl"`.
+under `dir="rtl"`. The Phase 4 files (`ClassworkTab.test.tsx`, `SubmissionPanel.test.tsx`,
+`GradingTable.test.tsx`) use the same `LOADED` first wait and fixed time zone, and each ends with the
+`ur` / `ur-Latn` `onError` sweep.
 
 The suite is not uniform — three files do something other than test a component:
 
@@ -804,7 +828,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:278-287`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:285`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:288-297`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:295`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

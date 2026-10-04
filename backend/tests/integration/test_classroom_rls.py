@@ -757,3 +757,230 @@ class TestAnnouncementBoundary:
             == 1
         )
         assert db.execute(text("DELETE FROM announcement WHERE id = :p"), {"p": post}).rowcount == 1
+
+
+# ── Phase 4: assignments, submissions, grades (20261004140000) ──────────────
+
+
+def _assign(db, teacher_id: str, space_id: UUID, *, points=10, scheduled=False) -> UUID:
+    """An assignment inserted as its author — the direct path the policy governs."""
+    _as(db, teacher_id)
+    return db.execute(
+        text(
+            "INSERT INTO assignment (space_id, subject_id, author_id, title, points, publish_at) "
+            "SELECT s.id, s.subject_id, :a, 'Lab 1', :pts, "
+            "       CASE WHEN :sched THEN now() + interval '1 hour' ELSE now() END "
+            "  FROM classroom_space s WHERE s.id = :s "
+            "RETURNING id"
+        ),
+        {"s": space_id, "a": teacher_id, "pts": points, "sched": scheduled},
+    ).scalar_one()
+
+
+def _call(db, user_id: str, statement: str, params: dict):
+    _as(db, user_id)
+    return db.execute(text(statement), params).scalar_one()
+
+
+@pytest.fixture
+def member(db, classroom) -> str:
+    _, code = classroom
+    student = _user(db, role="student")
+    assert _join(db, student, code) == "joined"
+    return student
+
+
+@pytest.fixture
+def lab(db, teacher, classroom) -> UUID:
+    return _assign(db, teacher, classroom[0])
+
+
+class TestAssignmentBoundary:
+    def test_a_student_cannot_create_an_assignment(self, db, classroom, member):
+        message = _refused(
+            db,
+            "INSERT INTO assignment (space_id, subject_id, author_id, title) "
+            "SELECT id, subject_id, :u, 'Mine' FROM classroom_space WHERE id = :s",
+            {"s": classroom[0], "u": member},
+        )
+        assert "row-level security" in message
+
+    def test_an_owner_cannot_author_as_someone_else(self, db, teacher, classroom):
+        other = _user(db, role="teacher")
+        _as(db, teacher)
+        message = _refused(
+            db,
+            "INSERT INTO assignment (space_id, subject_id, author_id, title) "
+            "SELECT id, subject_id, :u, 'Forged' FROM classroom_space WHERE id = :s",
+            {"s": classroom[0], "u": other},
+        )
+        assert "row-level security" in message
+
+    def test_a_scheduled_assignment_is_invisible_to_members_and_cannot_be_turned_in(
+        self, db, teacher, classroom, member
+    ):
+        later = _assign(db, teacher, classroom[0], scheduled=True)
+        _as(db, teacher)
+        assert _count(db, "SELECT count(*) FROM assignment WHERE id = :a", {"a": later}) == 1
+        _as(db, member)
+        assert _count(db, "SELECT count(*) FROM assignment WHERE id = :a", {"a": later}) == 0
+        outcome = _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": later})
+        assert outcome == "forbidden"
+
+    def test_nobody_writes_a_submission_or_a_grade_directly(self, db, classroom, member, lab):
+        _as(db, member)
+        submission = _refused(
+            db,
+            "INSERT INTO assignment_submission (assignment_id, space_id, student_id, body) "
+            "VALUES (:a, :s, :u, 'mine')",
+            {"a": lab, "s": classroom[0], "u": member},
+        )
+        grade = _refused(
+            db,
+            "INSERT INTO submission_grade (assignment_id, space_id, student_id, grade, graded_by) "
+            "VALUES (:a, :s, :u, 10, :u)",
+            {"a": lab, "s": classroom[0], "u": member},
+        )
+        assert "permission denied" in submission
+        assert "permission denied" in grade
+
+    def test_a_student_cannot_backdate_a_turn_in(self, db, member, lab):
+        assert _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab}) == "turned_in"
+        message = _refused(
+            db,
+            "UPDATE assignment_submission SET turned_in_at = '2020-01-01' WHERE assignment_id = :a",
+            {"a": lab},
+        )
+        assert "permission denied" in message
+
+    def test_a_student_cannot_grade_through_the_function(self, db, member, lab):
+        outcome = _call(
+            db, member, "SELECT app.save_grade(:a, :u, 10, 'self', true)", {"a": lab, "u": member}
+        )
+        assert outcome == "forbidden"
+
+    def test_a_teacher_sees_work_only_once_turned_in_and_only_while_the_student_stays(
+        self, db, teacher, classroom, member, lab
+    ):
+        def teacher_sees(table: str) -> int:
+            _as(db, teacher)
+            return _count(
+                db,
+                f"SELECT count(*) FROM {table} WHERE assignment_id = :a",  # noqa: S608 -- literal
+                {"a": lab},
+            )
+
+        _call(db, member, "SELECT app.save_submission_draft(:a, 'draft', NULL)", {"a": lab})
+        assert teacher_sees("assignment_submission") == 0  # a draft is the student's own
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert teacher_sees("assignment_submission") == 1
+        _call(db, teacher, "SELECT app.save_grade(:a, :u, 7, '', false)", {"a": lab, "u": member})
+        assert teacher_sees("submission_grade") == 1
+
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": classroom[0]})
+        assert teacher_sees("assignment_submission") == 0  # user story 7.1
+        assert teacher_sees("submission_grade") == 0
+
+    def test_a_classmate_sees_nothing_of_another_students_work(self, db, classroom, member, lab):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        classmate = _user(db, role="student")
+        assert _join(db, classmate, classroom[1]) == "joined"
+        _as(db, classmate)
+        seen = _count(
+            db, "SELECT count(*) FROM assignment_submission WHERE assignment_id = :a", {"a": lab}
+        )
+        assert seen == 0
+
+    def test_a_grade_is_hidden_until_it_is_returned(self, db, teacher, member, lab):
+        def student_sees() -> int:
+            _as(db, member)
+            return _count(
+                db, "SELECT count(*) FROM submission_grade WHERE assignment_id = :a", {"a": lab}
+            )
+
+        grade = "SELECT app.save_grade(:a, :u, 9, 'Good', :r)"
+        _call(db, teacher, grade, {"a": lab, "u": member, "r": False})
+        assert student_sees() == 0
+        _call(db, teacher, grade, {"a": lab, "u": member, "r": True})
+        assert student_sees() == 1
+
+    def test_graded_work_is_locked(self, db, teacher, member, lab):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        _call(db, teacher, "SELECT app.save_grade(:a, :u, 9, '', false)", {"a": lab, "u": member})
+        assert _call(db, member, "SELECT app.unsubmit_submission(:a)", {"a": lab}) == "graded"
+        draft = "SELECT app.save_submission_draft(:a, 'x', NULL)"
+        assert _call(db, member, draft, {"a": lab}) == "graded"
+
+    def test_a_grade_above_the_points_is_refused(self, db, teacher, member, lab):
+        outcome = _call(
+            db, teacher, "SELECT app.save_grade(:a, :u, 11, '', false)", {"a": lab, "u": member}
+        )
+        assert outcome == "invalid_grade"
+
+    def test_points_cannot_drop_below_an_existing_grade(self, db, teacher, member, lab):
+        _call(db, teacher, "SELECT app.save_grade(:a, :u, 8, '', false)", {"a": lab, "u": member})
+        _as(db, teacher)
+        message = _refused(db, "UPDATE assignment SET points = 5 WHERE id = :a", {"a": lab})
+        assert "row-level security" in message
+        # The control: down to the grade itself is fine.
+        lowered = db.execute(text("UPDATE assignment SET points = 8 WHERE id = :a"), {"a": lab})
+        assert lowered.rowcount == 1
+
+    def test_the_due_date_must_follow_publication(self, db, teacher, lab):
+        _as(db, teacher)
+        message = _refused(
+            db,
+            "UPDATE assignment SET due_at = publish_at - interval '1 day' WHERE id = :a",
+            {"a": lab},
+        )
+        assert "ck_assignment_due_after_publish" in message
+
+    def test_a_chapter_must_belong_to_the_classrooms_subject(
+        self, db, service_conn, teacher, lab, physics_11
+    ):
+        _as(db, _provisioned_admin(service_conn))
+        chemistry = _subject(db, "Chemistry", level=11)
+        own, foreign = (
+            db.execute(
+                text(
+                    "INSERT INTO chapter (subject_id, number, title) "
+                    "VALUES (:s, 901, 'Test chapter') RETURNING id"
+                ),
+                {"s": subject},
+            ).scalar_one()
+            for subject in (physics_11, chemistry)
+        )
+        _as(db, teacher)
+        message = _refused(
+            db, "UPDATE assignment SET chapter_id = :c WHERE id = :a", {"c": foreign, "a": lab}
+        )
+        assert "fk_assignment_chapter_subject" in message
+        tagged = db.execute(
+            text("UPDATE assignment SET chapter_id = :c WHERE id = :a"), {"c": own, "a": lab}
+        )
+        assert tagged.rowcount == 1
+
+    def test_internal_helpers_are_not_callable(self, db, member, lab):
+        _as(db, member)
+        for statement in (
+            "SELECT app.submittable_space(:a)",
+            "SELECT app.lock_submission(:a, :a)",
+        ):
+            assert "permission denied" in _refused(db, statement, {"a": lab})
+
+    def test_an_assignment_is_deleted_only_through_the_function(self, db, teacher, lab):
+        _as(db, teacher)
+        message = _refused(db, "DELETE FROM assignment WHERE id = :a", {"a": lab})
+        assert "permission denied" in message
+        stranger = _user(db, role="teacher")
+        delete = "SELECT deleted FROM app.delete_assignment(:a)"
+        assert _call(db, stranger, delete, {"a": lab}) is False
+        assert _call(db, teacher, delete, {"a": lab}) is True
+
+    def test_the_author_can_edit(self, db, teacher, lab):
+        """The control: a policy refusing everything would pass the tests above."""
+        _as(db, teacher)
+        edited = db.execute(
+            text("UPDATE assignment SET title = 'Lab 1 (revised)' WHERE id = :a"), {"a": lab}
+        )
+        assert edited.rowcount == 1

@@ -110,13 +110,13 @@
     <h1>Database</h1>
     <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql
-    · classroom sections re-measured 2026-10-04 on branch add-classroom (28 migration files; the three 20261004… files applied 2026-10-04 and re-verified on the live database)</p>
+    · classroom sections re-measured 2026-10-04 on branch add-classroom (29 migration files; the four 20261004… files applied 2026-10-04 and re-verified on the live database)</p>
 
     <div class="grid">
       <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
-      <div class="stat"><div class="n">46</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
-      <div class="stat"><div class="n">80</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-04)</div></div>
-      <div class="stat"><div class="n">50</div><div class="l">live <code>app.*</code> functions · 48 are SECURITY DEFINER</div></div>
+      <div class="stat"><div class="n">49</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
+      <div class="stat"><div class="n">88</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-04)</div></div>
+      <div class="stat"><div class="n">59</div><div class="l">live <code>app.*</code> functions · 57 are SECURITY DEFINER</div></div>
     </div>
 
     <section class="prose">
@@ -125,7 +125,7 @@
       does not exist here. Every policy instead reads a transaction-scoped session setting through
       <code>app.current_user_id()</code>, bound by <code>SELECT set_config('app.current_user_id', :uid, true)</code> at
       <span class="ln">backend/app/core/db.py:33-59</span>.</p>
-      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 46 tables cannot render
+      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 49 tables cannot render
       legibly in a single diagram, and the point of a diagram is to be read. The complete field lists, the full policy
       catalogue with every <code>USING</code> and <code>WITH CHECK</code> predicate, the invariants and the known gaps live in
       <a href="database.md">database.md</a>, which is the authoritative page; this one is its visual companion.</p>
@@ -359,6 +359,10 @@ erDiagram
     classroom_space ||--o{ join_code       : "codes, never student-readable"
     classroom_space ||--o{ enrollment      : roster
     classroom_space ||--o{ announcement    : posts
+    classroom_space ||--o{ assignment      : classwork
+    assignment      ||--o{ assignment_submission : "one per student"
+    assignment      ||--o{ submission_grade      : "teacher-owned, separate table"
+    chapter         |o--o{ assignment      : "tag, same subject (composite FK)"
     app_user        ||--o{ enrollment      : "as student_id"
     subject         ||--o{ classroom_space : "the class's subject"
     app_user        ||--o{ teacher_subject_scope : "self-declared by app.create_space"
@@ -401,6 +405,33 @@ erDiagram
         timestamptz created_at
         timestamptz updated_at
     }
+    assignment {
+        uuid id PK
+        uuid space_id FK
+        uuid subject_id FK "held to the space's"
+        uuid author_id FK
+        text title
+        smallint points "1-1000 or NULL"
+        timestamptz due_at "after publish_at"
+        uuid chapter_id FK "optional"
+        timestamptz publish_at "future = scheduled"
+    }
+    assignment_submission {
+        uuid id PK
+        uuid assignment_id FK
+        uuid student_id FK
+        text body
+        text link_url "https only"
+        timestamptz turned_in_at "NULL = draft"
+    }
+    submission_grade {
+        uuid assignment_id PK
+        uuid student_id PK
+        numeric grade
+        text feedback "private"
+        uuid graded_by FK
+        timestamptz returned_at "student sees it from here"
+    }
     </div></div>
     <p><code>ck_teacher_space_has_subject</code> <span class="ln">:334</span> forces a teacher space to declare its subject,
     because subject-scoping depends on it. Join codes are never readable by students — they receive the code out of band.</p>
@@ -422,6 +453,17 @@ erDiagram
       <code>announcement_member_read</code> adds <code>publish_at &lt;= now()</code>, so members cannot read it until then — no
       job publishes it. The owner's read policy has no time condition. Proved on a shadow database: an owner's raw
       <code>INSERT</code> with another teacher's <code>author_id</code> succeeds on the 27-migration schema and is refused after.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261004140000 — assignments, submissions and grades</span>
+      The grade is its <strong>own table</strong>: every user shares one database role, so a teacher-owned column on a
+      student-owned row would be writable by both. Neither <code>assignment_submission</code> nor <code>submission_grade</code>
+      has any write grant — students write through <code>app.save_submission_draft</code> / <code>turn_in_submission</code> /
+      <code>unsubmit_submission</code>, teachers through <code>app.save_grade</code>. A teacher reads a student's work only
+      once it is <strong>turned in</strong> and only while the student is an <strong>active</strong> member (leaving ends
+      visibility); a student reads their grade only once it is <strong>returned</strong>; any grade locks the work. Late,
+      missing and graded are derived, never stored. The chapter tag is held to the classroom's subject by a composite
+      foreign key.
     </div>
 
     <!-- ════════════════════════ ASSESSMENT ════════════════════════ -->
@@ -669,7 +711,7 @@ erDiagram
     <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
     <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
     superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.
-    <strong>80</strong> policy objects are live on a shadow database built from all 28 migrations (2026-10-04); the groups
+    <strong>88</strong> policy objects are live on a shadow database built from all 29 migrations (2026-10-04); the groups
     below summarise them by domain and are not the complete list — database.md is.</p>
 
     <div class="callout">
@@ -730,7 +772,7 @@ erDiagram
     </details>
 
     <details>
-      <summary>Classroom — 9 policies</summary>
+      <summary>Classroom — 17 policies</summary>
       <table>
         <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
         <tr><td><code>classroom_space</code></td><td><code>space_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:261</span></td></tr>
@@ -746,6 +788,16 @@ erDiagram
         <tr><td><code>announcement</code></td><td><code>announcement_delete</code></td><td><span class="pill del">DELETE</span></td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td>—</td><td><span class="ln">20261004130000:85</span></td></tr>
         <tr><td colspan="6"><em><code>announcement_read</code> and <code>announcement_write</code> (which never checked <code>author_id</code>) were
         <strong>dropped</strong> by <span class="ln">20261004130000</span> — finding B27.</em></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>—</td><td><span class="ln">20261004140000:234</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_member_space_ids()) AND publish_at &lt;= now()</code></td><td>—</td><td><span class="ln">20261004140000:240</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td><span class="ln">20261004140000:244</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td>same <strong>and</strong> <code>app.points_compatible(id, points)</code></td><td><span class="ln">20261004140000:248</span></td></tr>
+        <tr><td><code>assignment_submission</code></td><td><code>submission_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261004140000:259</span></td></tr>
+        <tr><td><code>assignment_submission</code></td><td><code>submission_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>turned_in_at IS NOT NULL</code> AND <code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code> — a draft is the student's own</td><td>—</td><td><span class="ln">20261004140000:263</span></td></tr>
+        <tr><td><code>submission_grade</code></td><td><code>grade_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code></td><td>—</td><td><span class="ln">20261004140000:271</span></td></tr>
+        <tr><td><code>submission_grade</code></td><td><code>grade_student_read_returned</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid() AND returned_at IS NOT NULL</code></td><td>—</td><td><span class="ln">20261004140000:275</span></td></tr>
+        <tr><td colspan="6"><em>No write policy on <code>assignment_submission</code> or <code>submission_grade</code>, and no DELETE
+        policy on <code>assignment</code>: every change is a function (below).</em></td></tr>
       </table>
     </details>
 
@@ -812,8 +864,8 @@ erDiagram
     <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
 
     <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
-    <h2>The <code>app.*</code> privileged functions — 50 live</h2>
-    <p><em>Re-measured 2026-10-04 from the catalogue of a shadow database built from all 28 migration files; the paragraph
+    <h2>The <code>app.*</code> privileged functions — 59 live</h2>
+    <p><em>Re-measured 2026-10-04 from the catalogue of a shadow database built from all 29 migration files; the paragraph
     below is the 2026-08-15 account and its counts are historical. None of the 50 is executable by <code>PUBLIC</code>.</em></p>
     <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
     of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
@@ -846,6 +898,8 @@ erDiagram
         <tr><td><code>app.my_owned_space_ids()</code></td><td>STABLE</td><td>yes</td><td><code>SETOF uuid</code> — read predicate, evaluated once per query</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
         <tr><td><code>app.my_member_space_ids()</code></td><td>STABLE</td><td>yes</td><td><code>SETOF uuid</code> — active enrolments, evaluated once per query</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
         <tr><td><code>app.caller_passes_guardian_gate()</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — <code>gate.py</code> in SQL, fails closed</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.my_taught_students()</code></td><td>STABLE</td><td>yes</td><td><code>TABLE(space_id, student_id)</code> — active members of the caller's spaces</td><td><code>app_backend</code></td><td><span class="ln">20261004140000:167</span></td></tr>
+        <tr><td><code>app.points_compatible(uuid, smallint)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — owner, and no grade above the points</td><td><code>app_backend</code></td><td><span class="ln">20261004140000:181</span></td></tr>
         <tr><td><code>app.set_updated_at()</code></td><td>VOLATILE</td><td>no</td><td><code>trigger</code> — 13 trigger statements</td><td><code>app_backend</code></td><td><span class="ln">20260801120000:85</span></td></tr>
       </table>
     </details>
@@ -862,6 +916,20 @@ erDiagram
         <tr><td><code>app.remove_student(uuid, uuid)</code></td><td><code>DELETE /api/spaces/{id}/members/{student_id}</code></td><td>boolean; sets <code>removed_at</code></td></tr>
         <tr><td><code>app.space_people(uuid)</code></td><td><code>GET /api/spaces/{id}/people</code></td><td>owner + active members; mute flags to the owner only</td></tr>
         <tr><td><code>app.my_spaces()</code></td><td><code>GET /api/spaces</code>, <code>GET /api/spaces/{id}</code></td><td>owned + actively enrolled spaces</td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the only writers of submissions and grades (<span class="ln">20261004140000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.save_submission_draft(uuid, text, text)</code></td><td><code>PUT /api/assignments/{id}/submission</code></td><td><code>saved</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code></td></tr>
+        <tr><td><code>app.turn_in_submission(uuid)</code></td><td><code>POST …/submission/turn-in</code></td><td><code>turned_in</code> · <code>already_turned_in</code> · <code>forbidden</code> · <code>graded</code> — stamps <code>clock_timestamp()</code></td></tr>
+        <tr><td><code>app.unsubmit_submission(uuid)</code></td><td><code>POST …/submission/unsubmit</code></td><td><code>unsubmitted</code> · <code>not_turned_in</code> · <code>forbidden</code> · <code>graded</code></td></tr>
+        <tr><td><code>app.save_grade(uuid, uuid, numeric, text, boolean)</code></td><td><code>PUT /api/assignments/{id}/grades/{student_id}</code></td><td><code>saved</code> · <code>forbidden</code> · <code>invalid_grade</code>; returning is one-way</td></tr>
+        <tr><td><code>app.delete_assignment(uuid)</code></td><td><code>DELETE /api/assignments/{id}</code></td><td><code>(deleted, object_keys)</code>; keys empty until Phase 6</td></tr>
+        <tr><td colspan="3"><em><code>app.submittable_space(uuid)</code> and <code>app.lock_submission(uuid, uuid)</code> are internal — <strong>no
+        grant</strong> to <code>app_backend</code>; one advisory lock per (assignment, student) serialises every write above.</em></td></tr>
       </table>
     </details>
 

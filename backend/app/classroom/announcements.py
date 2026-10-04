@@ -8,12 +8,10 @@ pre-checks so a refusal is a readable 403/400 rather than a database error, and
 keeps the one rule the database cannot express: a post already published cannot
 be moved back into the future (that would hide what students have already seen).
 
-Times are compared against the DATABASE clock, never Python's — Phase 4
-measured the two 1.1 s apart, and a "future" check against the wrong clock is
-exactly the boundary that drifts.
+A schedule is checked against the DATABASE clock, never Python's
+(app/classroom/scheduling.py, shared with assignments).
 """
 
-from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -21,12 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.classroom.pagination import decode_cursor, encode_cursor
+from app.classroom.scheduling import check_schedule
 from app.classroom.schemas import AnnouncementCreateRequest, AnnouncementUpdateRequest
 from app.classroom.service import audit, require_owner, rls_refusal_as_forbidden
 from app.core.errors import forbidden_scope, validation_error
 
 PAGE_SIZE = 20
-_MAX_SCHEDULE_AHEAD = timedelta(days=365)
 _COLUMNS = (
     "id, body, author_id, publish_at, publish_at > now() AS scheduled, created_at, updated_at"
 )
@@ -44,17 +42,6 @@ def _require_participant(db: Session, space_id: UUID) -> None:
     )
     if not (row["owner"] or row["member"]):
         raise forbidden_scope()
-
-
-def _check_schedule(db: Session, publish_at: datetime | None) -> None:
-    if publish_at is None:
-        return
-    db_now = db.execute(text("SELECT now()")).scalar_one()
-    if publish_at <= db_now or publish_at > db_now + _MAX_SCHEDULE_AHEAD:
-        raise validation_error(
-            message="Choose a future time within the next year.",
-            details={"fields": {"publish_at": "Choose a future time within the next year."}},
-        )
 
 
 def list_announcements(db: Session, space_id: UUID, cursor: str | None) -> dict:
@@ -87,7 +74,7 @@ def create_announcement(
     db: Session, user_id: UUID, space_id: UUID, payload: AnnouncementCreateRequest
 ) -> dict:
     require_owner(db, space_id)  # owner of a NON-archived space
-    _check_schedule(db, payload.publish_at)
+    check_schedule(db, payload.publish_at)
     with rls_refusal_as_forbidden():
         row = (
             db.execute(
@@ -128,7 +115,7 @@ def update_announcement(
                 message="Only a scheduled post can be rescheduled.",
                 details={"fields": {"publish_at": "This post is already published."}},
             )
-        _check_schedule(db, payload.publish_at)
+        check_schedule(db, payload.publish_at)
 
     sets, params = [], {"id": announcement_id}
     if payload.body is not None:
