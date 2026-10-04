@@ -399,6 +399,12 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
             # author their own revocation reason and rewrite the family start,
             # defeating the absolute session cap that migration exists to create.
             ("auth_token", "revoked", "UPDATE"),
+            # 20261004120000 (B10) — the owner may rename and archive, nothing
+            # else. INSERT is app.create_space only; there is no DELETE, and
+            # `owner_id`, `owner_role` and `subject_id` are not writable, so a
+            # classroom can never be moved to another teacher or subject.
+            ("classroom_space", "status", "UPDATE"),
+            ("classroom_space", "title", "UPDATE"),
             # Kept deliberately: dropping it would leave `student_profile` with
             # no updatable column at all. Nothing READS it any more —
             # `app_user.language_pref` is the source of truth as of

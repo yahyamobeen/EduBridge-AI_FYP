@@ -13,7 +13,9 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**19 applied.** `ls supabase/migrations/*.sql | wc -l`
+**27 files** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-04): **25 applied**, plus the two
+`20261004…` classroom files on branch `add-classroom`, dry-run on a shadow database and **pending
+the owner's apply**.
 
 | # | File | Contents |
 |---|---|---|
@@ -36,6 +38,14 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 | 17 | `20260816170000_split_read_from_write_on_owner_tables.sql` | **Phase 2** (B5, B6, B7). Seven `FOR ALL` policies split. Subscription activation is no longer self-grantable, revocation becomes a **one-way door** (`WITH CHECK (revoked = true)`), and the five progress tables are read-only |
 | 18 | `20260816180000_scope_guardian_functions_to_caller.sql` | **Phase 2** (C2). Both guardian functions check their caller. ⚠️ They have **different** callers — the parent confirms, the **student** invites |
 | 19 | `20260816190000_revoke_public_execute_on_helpers.sql` | **Phase 2** (C5). Seven helper functions stop being executable by `PUBLIC` (the register said five). `app_backend` is granted explicitly: `is_admin()` is in 35 policies and `current_user_id()` in 41, and without EXECUTE they **error rather than deny** |
+| 20 | `20260816200000_language_pref_on_app_user.sql` | **Phase 3** (FR-A8). `language_pref` moves to `app_user`, so every role — not only students — can receive Urdu email; backfill gated on the column not already existing |
+| 21 | `20260816210000_change_password_function.sql` | **Phase 3** (FR-A8). `app.change_password` — takes no user identifier; the subject is `app.current_user_id()` |
+| 22 | `20260817120000_session_policy_columns.sql` | **Phase 4**. `sessions_invalidated_at`, `family_started_at`, `revoked_at`, `revoked_reason`; `auth_token` UPDATE narrowed to `revoked` |
+| 23 | `20260817130000_session_policy_functions.sql` | **Phase 4** (E2, E3, D2). `app.invalidate_sessions`, `app.insert_refresh_token`, `app.rotate_refresh_token` — rotation is one locked statement |
+| 24 | `20260817140000_purge_expired_auth_tokens.sql` | **Phase 4**. `app.purge_expired_auth_tokens` with a 30-day grace; scheduled only if `pg_cron` is installed |
+| 25 | `20260817150000_missing_updated_at_triggers.sql` | **Phase 5** (D14). The four missing `updated_at` triggers |
+| 26 | `20261004120000_classroom_membership_boundary.sql` | **Classroom Phase 1** (B9, B10, B11). All direct writes to `enrollment` and `join_code`, and INSERT/DELETE on `classroom_space`, revoked; `owns_space` gains the subject-scope check; revocable self-declared `teacher_subject_scope`; join-code format and one-live-code index; set-returning RLS helpers. **Reverses the `join_code_owner` decision** (`database.md`). *Pending apply* |
+| 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Pending apply* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.
@@ -150,8 +160,9 @@ Verbatim at `backend/app/core/db.py:33-59`. Two things there are load-bearing:
 If the variable is never set, `app.current_user_id()` returns `NULL` and owner-scoped policies deny
 — fail-closed by design. Endpoints that run *before* a session exists (login, refresh, email
 verification, password reset, two-factor, the guardian flow) therefore cannot use a plain query;
-they call one of the narrow `SECURITY DEFINER` functions instead. All 33 are catalogued, with their
-call sites, in
+they call one of the narrow `SECURITY DEFINER` functions instead. All 50 live `app.*` functions
+(measured 2026-10-04 on a shadow database built from all 27 files) are catalogued, with their call
+sites, in
 [`../backend/Architecture/database.md`](../backend/Architecture/database.md#the-app-privileged-functions).
 
 Background jobs that legitimately need unrestricted access (the analytics extract-transform-load

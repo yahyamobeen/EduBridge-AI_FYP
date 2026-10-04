@@ -3,7 +3,9 @@
 > The EduBridge AI schema as it is actually applied — tables, the complete Row-Level Security
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
-> **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.**
+> **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
+> sections re-measured **2026-10-04 on branch `add-classroom`** (27 migration files; the two
+> `20261004…` files are written and dry-run, **not yet applied** — the owner applies them).
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
 > [Migration rules](#migration-rules) for why they can.
@@ -19,33 +21,40 @@ Run from the repository root.
 
 | Measure | Value | Command |
 |---|---|---|
-| Applied migrations | **11** | `ls supabase/migrations/*.sql \| wc -l` |
+| Migration files | **27** (25 applied; the two `20261004…` files pending on `add-classroom`) | `ls supabase/migrations/*.sql \| wc -l` |
 | `CREATE TABLE` statements | **48** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
 | …of which DEFAULT partitions | **2** | `grep -hE '^CREATE TABLE.*PARTITION OF' supabase/migrations/*.sql \| wc -l` |
 | Base tables (48 − 2) | **46** | derived from the two rows above |
 | Views | **1** | `grep -hE '^CREATE VIEW' supabase/migrations/*.sql \| wc -l` |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
-| Indexes | **40** | `grep -hE '^CREATE INDEX' supabase/migrations/*.sql \| wc -l` |
-| Triggers | **9** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
-| `CREATE POLICY` occurrences | **73** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| …real `CREATE POLICY` statements | **72** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| **Live policy objects** | **73** | see [the reconciliation](#why-73-73-and-72-are-all-correct) |
-| `CREATE OR REPLACE FUNCTION` statements | **37** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| Distinct `app.*` function names ever defined | **34** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
-| **Live `app.*` functions** (34 − 1 dropped) | **33** | `grep -nE 'DROP FUNCTION' supabase/migrations/*.sql` shows `issue_token_for_email` retired |
-| `SECURITY DEFINER` function definitions | **35** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| Definitions carrying `SET search_path` | **36** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
-| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **30** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| `GRANT EXECUTE … TO app_backend` | **30** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
-| Implemented HTTP endpoints | **17 of 48** | `grep -cE '^@router\.' backend/app/auth/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Indexes | **41** (40 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
+| Triggers | **13** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
+| `CREATE POLICY` occurrences | **91** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| …real `CREATE POLICY` statements | **88** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| **Policy objects the migrations produce** | **77** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 27 files (79 before `20261004120000`, which drops 4 and creates 2) |
+| `CREATE OR REPLACE FUNCTION` statements | **62** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| Distinct `app.*` function names ever defined | **51** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
+| **Live `app.*` functions** (51 − 1 retired) | **50** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow; `issue_token_for_email` is the one dropped for good |
+| `SECURITY DEFINER` lines | **62** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
+| `SET search_path` lines | **62** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
+| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **52** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| `GRANT EXECUTE … TO app_backend` | **54** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
+| `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
+| Implemented HTTP endpoints | **21** | `grep -cE '^@router\.' backend/app/auth/routes.py` (plus `/health` in `backend/app/main.py`) |
 
-**36 of the 37 function definitions carry `SET search_path`.** The exception is
-`app.set_updated_at()` (`20260801120000_initial_schema.sql:85`), a plain trigger function that is
-not `SECURITY DEFINER` and therefore has nothing to escalate. Two definitions are not
-`SECURITY DEFINER`: that trigger, and `app.current_user_id()`
-(`20260801120100_rls_policies.sql:49`), which only reads a session setting.
+**Measured from the catalogue (shadow database, 2026-10-04): 49 of the 50 live `app.*` functions
+carry `search_path`.** The exception is `app.set_updated_at()`
+(`20260801120000_initial_schema.sql:85`), a plain trigger function that is not `SECURITY DEFINER`
+and therefore has nothing to escalate. Two functions are not `SECURITY DEFINER`: that trigger, and
+`app.current_user_id()` (`20260801120100_rls_policies.sql:49`), which only reads a session setting.
+The grep counts above count *lines*, which drift from function counts when a later migration
+re-states a definition; the catalogue query is the authority.
 
 ### Why 73, 73 and 72 are all correct
+
+> **Historical — the 2026-08-16 reconciliation, kept for its method.** The current numbers are in the
+> table above and were measured from a shadow database rather than derived by arithmetic; the lesson
+> below (statements ≠ objects ≠ live) still applies.
 
 Three different numbers describe the same policy layer, and conflating them is the easiest
 mistake to make here:
@@ -236,7 +245,7 @@ protected is [B1](#b-known-gaps--the-database-would-not-catch-a-missed-check).
 | `subject_group` | `:281` | Which elective groups take each subject. |
 | `chapter` | `:288` | `uq_chapter (subject_id, number)`. |
 | `slo` | `:298` | Student Learning Outcomes. `retired_at` **soft-retires** on a syllabus change; rows are never deleted, so historical mastery keeps its meaning. |
-| `teacher_subject_scope` | `:311` | Many-to-many least-privilege scope: which subjects a teacher may see. |
+| `teacher_subject_scope` | `:311` | Many-to-many least-privilege scope: which subjects a teacher may see. **Self-declared** since `20261004120000`: `app.create_space` writes the row when a teacher creates a classroom (owner decision 2026-10-03). An administrator withdraws it by stamping `revoked_at` — `DELETE` is revoked from `app_backend`, because a deleted row would be silently re-declared by the teacher's next classroom. |
 
 Seeded by `20260801120200_seed_reference_data.sql` — two boards, four class levels each, the
 subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempotent.
@@ -245,9 +254,9 @@ subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempo
 
 | Table | Defined at | Notes |
 |---|---|---|
-| `classroom_space` | `20260801120000_initial_schema.sql:324` | `owner_role space_owner_role` (teacher or parent). `ck_teacher_space_has_subject` (`:334`) forces a teacher space to declare its subject, because subject-scoping depends on it. |
-| `join_code` | `:341` | Unique code, revocable, optional expiry. Never readable by students — they receive it out of band. |
-| `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. |
+| `classroom_space` | `20260801120000_initial_schema.sql:324` | `ck_teacher_space_has_subject` (`:334`) forces a teacher space to declare its subject, because subject-scoping depends on it. Since `20261004120000`: `ck_space_owner_is_teacher` (the enum still lists `parent`, but parents no longer create spaces — `prd.md` §4.2 v0.3.5) and `ck_space_title` (1–120 characters). **Created only by `app.create_space`; never deleted** — `status = 'archived'` is the end state, and the owner may write only `title` and `status`. |
+| `join_code` | `:341` | Unique code, revocable, optional expiry. Never readable by students — they receive it out of band. Since `20261004120000`: `ck_join_code_format` (`^[A-HJ-NP-Z2-9]{8}$`, 2⁴⁰ codes, minted in Python by `app/classroom/codes.py`) and `uq_join_code_one_live` (one unrevoked code per space). **Written only by `app.rotate_join_code` / `app.disable_join_code`.** |
+| `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. Since `20261004120000`: `removed_at` (set by the teacher; a removed student cannot rejoin with the code, one who left can — `ck_enrollment_removed_has_left`) and `muted_at` (written by the chat phase; survives leave and rejoin). **Written only by `app.join_space_by_code`, `app.leave_space` and `app.remove_student`.** |
 | `announcement` | `:364` | Space-scoped, author-attributed. |
 
 ### Assessment
@@ -388,11 +397,14 @@ The six `*_read` policies below were created by the `FOREACH` loop at `202608011
 | Table | Policy | FOR | USING | WITH CHECK | Live at |
 |---|---|---|---|---|---|
 | `classroom_space` | `space_visible` | SELECT | `owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()` | — | `20260801120100:261` |
-| `classroom_space` | `space_owner_write` | ALL | `owner_id = cuid()` | `owner_id = cuid()` | `20260801120100:269` |
-| `join_code` | `join_code_owner` | ALL | `app.owns_space(space_id) OR app.is_admin()` | `app.owns_space(space_id)` | `20260801120100:275` |
+| `classroom_space` | `space_owner_update` | UPDATE | `app.owns_space(id)` | `app.owns_space(id)` | `20261004120000` §2 — replaces `space_owner_write` (FOR ALL, no role check: **B10**). Column grant `UPDATE (title, status)` only; no INSERT/DELETE grant |
+| `join_code` | `join_code_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004120000` §3 — replaces `join_code_owner` (FOR ALL); no write grant at all |
 | `enrollment` | `enrollment_visible` | SELECT | `student_id = cuid() OR app.owns_space(space_id) OR app.is_admin()` | — | `20260801120100:281` |
-| `enrollment` | `enrollment_student_join` | INSERT | — | `student_id = cuid()` | `20260801120100:289` |
-| `enrollment` | `enrollment_leave` | UPDATE | `student_id = cuid() OR app.owns_space(space_id)` | *(none — falls back to `USING`)* | `20260801120100:294` |
+
+`enrollment_student_join` (INSERT into **any** space) and `enrollment_leave` (UPDATE with no
+`WITH CHECK`) were **dropped** by `20261004120000` §4 — finding **B9** — and `app_backend` holds no
+write grant on `enrollment`. Every enrolment change goes through a function in the
+[classroom section](#classroom--post-apispaces-functions).
 | `announcement` | `announcement_read` | SELECT | `app.is_enrolled_in(space_id) OR app.owns_space(space_id) OR app.is_admin()` | — | `20260801120100:298` |
 | `announcement` | `announcement_write` | INSERT | — | `app.owns_space(space_id)` | `20260801120100:302` |
 
@@ -488,32 +500,70 @@ bound parameters.
 
 ### Row-Level Security helpers — called by policies, not by routes
 
-These six are the ones the policy predicates above call. **Five of the six retain PostgreSQL's
-default `EXECUTE` grant to `PUBLIC`** — there is no `REVOKE` for them anywhere in the migrations
-(finding C5). They are `SECURITY DEFINER` so that reading the tables they check does not recurse
-into the very policies calling them.
+These are the ones the policy predicates above call. They are `SECURITY DEFINER` so that reading
+the tables they check does not recurse into the very policies calling them. **None is executable
+by `PUBLIC`** — finding C5 was closed by `20260816190000`, and every helper since is granted to
+`app_backend` explicitly, because a policy is evaluated with the privileges of the role running
+the query: without `EXECUTE` it would error rather than deny.
 
 | Function | Volatility | Definer? | Returns | Grant | Defined at |
 |---|---|---|---|---|---|
-| `app.current_user_id()` | `STABLE` | **No** | `uuid` — the bound user, or `NULL` | default `PUBLIC` | `20260801120100:49` |
-| `app.is_admin()` | `STABLE` | Yes | `boolean` — caller is an `active` `admin` | default `PUBLIC` | `20260801120100:56` |
-| `app.is_verified_guardian_of(p_student uuid)` | `STABLE` | Yes | `boolean` — a **verified** link exists | default `PUBLIC` | `20260801120100:67` |
-| `app.teaches_student_subject(p_student uuid, p_subject uuid)` | `STABLE` | Yes | `boolean` — active enrolment in a space the caller owns **and** a matching `teacher_subject_scope` row | default `PUBLIC` | `20260801120100:81` |
-| `app.owns_space(p_space uuid)` | `STABLE` | Yes | `boolean` | default `PUBLIC` | `20260801120100:99` |
-| `app.is_enrolled_in(p_space uuid)` | `STABLE` | Yes | `boolean` — enrolled and `left_at IS NULL` | default `PUBLIC` | `20260801120100:109` |
+| `app.current_user_id()` | `STABLE` | **No** | `uuid` — the bound user, or `NULL` | `app_backend` | `20260801120100:49` |
+| `app.is_admin()` | `STABLE` | Yes | `boolean` — caller is an `active` `admin` | `app_backend` | `20260801120100:56` |
+| `app.is_verified_guardian_of(p_student uuid)` | `STABLE` | Yes | `boolean` — a **verified** link exists | `app_backend` | `20260801120100:67` |
+| `app.teaches_student_subject(p_student uuid, p_subject uuid)` | `STABLE` | Yes | `boolean` — active enrolment in a space the caller owns **and** an **unrevoked** `teacher_subject_scope` row | `app_backend` | `20260801120100:81`, body replaced `20261004120000` §1 |
+| `app.owns_space(p_space uuid)` | `STABLE` | Yes | `boolean` — owner **and** active teacher **and** unrevoked scope for the space's subject (**B11**) | `app_backend` | `20260801120100:99`, body replaced `20261004120000` §1 |
+| `app.is_enrolled_in(p_space uuid)` | `STABLE` | Yes | `boolean` — enrolled and `left_at IS NULL` | `app_backend` | `20260801120100:109` |
+| `app.owns_active_space(p_space uuid)` | `STABLE` | Yes | `boolean` — `owns_space` **and** `status = 'active'`: the write predicate, so an archived classroom is read-only | `app_backend` | `20261004120000` §1 |
+| `app.my_owned_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller owns with live scope | `app_backend` | `20261004120000` §1 |
+| `app.my_member_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller is actively enrolled in | `app_backend` | `20261004120000` §1 |
+| `app.caller_passes_guardian_gate()` | `STABLE` | Yes | `boolean` — `gate.py` in SQL; **fails closed** on an unbound user or unknown class level | `app_backend` | `20261004120000` §1 |
+
+**Why two set-returning helpers.** A `SECURITY DEFINER` function is never inlined, so a per-row
+helper such as `app.owns_space(space_id)` runs once per **row**. Used as
+`space_id IN (SELECT app.my_owned_space_ids())` it is an uncorrelated subquery that runs once per
+**query** as a hashed subplan — the difference between a 300-row roster costing 300 lookups and one.
+New classroom read policies use the set form; the single-space form stays for function bodies and
+service pre-checks.
 
 `app.is_verified_guardian_of` and `app.teaches_student_subject` were checked in the Epic 1 review
 and **cannot be abused through their parameters** — both anchor on `app.current_user_id()`
 internally, so passing an arbitrary student identifier proves nothing.
 
+### Classroom — `POST /api/spaces` functions
+
+`20261004120100`. Since `20261004120000` these are the **only** writers of `enrollment` and
+`join_code` and the only way to create a `classroom_space`. Each derives the actor from
+`app.current_user_id()` — never a parameter (finding C1's shape) — and **returns an outcome instead
+of raising**, because a `RAISE` would surface as `500 INTERNAL_ERROR`. Capacity checks run after a
+row lock (`FOR UPDATE` on `teacher_profile`, `FOR NO KEY UPDATE` on the space), so two concurrent
+requests cannot both pass a limit. All are granted to `app_backend` and `REVOKE`d from `PUBLIC`.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.create_space(p_title text, p_subject uuid) → (outcome, new_space_id)` | `POST /api/spaces` | `created` · `not_teacher` · `unknown_subject` · `classroom_limit` · `scope_revoked` | Self-declares `teacher_subject_scope` in the same transaction; 50 active classrooms per teacher. |
+| `app.rotate_join_code(p_space uuid, p_code text) → (outcome, new_code)` | `POST /api/spaces`, `POST /api/spaces/{id}/join-code` | `rotated` · `forbidden` · `collision` | The code is minted in Python (`secrets`); `collision` means retry with a fresh one. Requires a non-archived space. |
+| `app.disable_join_code(p_space uuid) → boolean` | `POST /api/spaces/{id}/join-code` | — | Owner-only; allowed on an archived space. |
+| `app.join_space_by_code(p_code text) → (outcome, joined_space_id, space_title, space_subject, space_board, space_class_level)` | `POST /api/spaces/join` | `joined` · `already_member` · `invalid_code` · `class_mismatch` · `classroom_full` · `gate_pending` · `not_student` | Normalises case, spaces and dashes. **A removed student gets `invalid_code`**, indistinguishable from an unknown code. Board, class **and** group must match. Re-checks the guardian gate. 300 active members per space. |
+| `app.leave_space(p_space uuid) → boolean` | `DELETE /api/spaces/{id}/membership` | — | Idempotent; allowed on an archived space (leaving is a consent right, `prd.md:258`). |
+| `app.remove_student(p_space uuid, p_student uuid) → boolean` | `DELETE /api/spaces/{id}/members/{student_id}` | — | Sets `left_at` and `removed_at`. |
+| `app.space_people(p_space uuid) → (user_id, full_name, is_owner, joined_at, muted)` | `GET /api/spaces/{id}/people` | — | The narrow door past `app_user_self_read`: owner and **active** members only, `full_name` only; `muted` is shown to the owner only. |
+| `app.my_spaces() → (space_id, title, status, subject…, owner_name, viewer_role, can_manage, member_count, joined_at)` | `GET /api/spaces`, `GET /api/spaces/{id}` | — | `member_count` for the owner only. A de-scoped teacher still sees their row with `can_manage = false`. |
+
+Proved on a shadow database built from all 27 files (2026-10-04): the same attack script, run as
+`app_backend`, **succeeds** against the 25 earlier migrations (a student creates a "teacher" space;
+a student enrols without a code) and is refused with `permission denied` after these two.
+`backend/tests/integration/test_classroom_rls.py` (44 tests) pins every row of the table above.
+
 ### The trigger function
 
 | Function | Volatility | Definer? | Returns | Grant | Defined at |
 |---|---|---|---|---|---|
-| `app.set_updated_at()` | default `VOLATILE` | No | `trigger` — sets `NEW.updated_at = now()` | default `PUBLIC` | `20260801120000:85` |
+| `app.set_updated_at()` | default `VOLATILE` | No | `trigger` — sets `NEW.updated_at = now()` | `app_backend` (`20260816190000`) | `20260801120000:85` |
 
-Wired to nine tables (`grep -c '^CREATE TRIGGER' supabase/migrations/*.sql`). Three profile tables
-carry `updated_at` columns with **no** trigger attached — finding D14.
+**13** `CREATE TRIGGER` statements (`grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql | wc -l`,
+re-measured 2026-10-04). The profile tables that once carried `updated_at` with no trigger
+(finding D14) were closed by `20260817150000` — see the section below.
 
 ### Session and token lifecycle — `POST /auth/login`, `/auth/refresh`, `/auth/logout`
 
@@ -774,6 +824,20 @@ never silently grant free access forever.
 teacher, parent or admin path and no privileged function touching them. Re-verified in the Epic 1
 review; **this invariant holds**.
 
+⚠️ **Classroom chat is a different thing and must never reuse these tables.** The owner brought a
+class-public classroom chat into v1 (2026-10-03); it is planned as its own table (`space_message`,
+classroom Phase 7) with teacher moderation. Invariant 8 is about the private **tutor** conversation
+and is unchanged by it.
+
+### 9. Classroom membership and codes are written only by functions
+
+Since `20261004120000`, `app_backend` holds **no** write grant on `enrollment` or `join_code`, no
+INSERT or DELETE on `classroom_space`, and no DELETE on `teacher_subject_scope`. Every change goes
+through a `SECURITY DEFINER` function that reads the actor from `app.current_user_id()`. **Do not
+grant a write privilege back to make an endpoint easier** — add a narrow function, the same rule as
+pre-authentication access (`backend/CLAUDE.md` §3). `test_classroom_rls.py` asserts each refusal by
+its message.
+
 ---
 
 ## Known gaps
@@ -810,9 +874,9 @@ land.
 | **B6** | **FIXED, Phase 2 (`20260816170000`).** `auth_token_owner` was `FOR ALL`, so revocation was **reversible** — logout, password reset and the response to detected theft were all undoable by the owner. Replaced with `FOR SELECT` plus `FOR UPDATE … WITH CHECK (revoked = true)`: a **one-way door**. ⚠️ A column grant would NOT have worked — `GRANT UPDATE (revoked)` permits `false` as readily as `true`. Only a `WITH CHECK` expresses "this transition and not its inverse", which is the opposite conclusion from B2/B3. | `20260816170000` |
 | **B7** | **FIXED, Phase 2 (`20260816170000`).** `attempt_student_own`, `attempt_answer_owner`, `mastery_owner`, `coverage_owner` and `readiness_owner` were `FOR ALL` — exactly the numbers `coverage_viewers_read`, `readiness_viewers_read`, `mastery_guardian_read` and `attempt_teacher_read` show a parent or teacher, so a student could rewrite the evidence about themselves. All five are now `FOR SELECT` on the owner, with **no write policy and no write grant**: nothing writes them yet, and the phase that builds those endpoints adds a narrow one. | `20260816170000` |
 | **B8** | `quiz_teacher_write` checks only `created_by`. It never checks the space, and never checks the role — any user who created a quiz row owns it. | `20260801120100:342` |
-| **B9** | `enrollment_student_join` self-enrols into **any** space; `enrollment_leave` has no `WITH CHECK`. | `:289`, `:294` |
-| **B10** | `classroom_space` has no role check — any user can create a space with `owner_role = 'teacher'`. | `20260801120100:269` |
-| **B11** | `teacher_subject_scope` governs only two policies (`coverage_viewers_read`, `readiness_viewers_read`, through `app.teaches_student_subject`). Every other teacher read goes through `app.owns_space()`, which has **no subject-scope check at all**. | `:406`, `:419` vs `:99` |
+| **B9** | **FIXED, classroom Phase 1 (`20261004120000`, `20261004120100`) — pending owner apply.** `enrollment_student_join` self-enrolled into **any** space and `enrollment_leave` had no `WITH CHECK`. Both dropped; `app_backend` holds **no** write grant on `enrollment`; the only writers are `app.join_space_by_code` (live code, matching board/class/group, guardian gate, removed ≠ rejoinable), `app.leave_space` and `app.remove_student`. **Measured on a shadow database**: the same raw `INSERT INTO enrollment` as `app_backend` succeeds before and is `permission denied` after. | `20261004120000` §4 |
+| **B10** | **FIXED, classroom Phase 1 (`20261004120000`) — pending owner apply.** `classroom_space` had no role check — any user could create a space with `owner_role = 'teacher'`. `space_owner_write` (FOR ALL) replaced by `space_owner_update`; INSERT/UPDATE/DELETE revoked, `UPDATE (title, status)` granted back; creation only through `app.create_space`, which reads the role from the bound session. Plus `ck_space_owner_is_teacher`. Measured the same way as B9: a student's raw `INSERT INTO classroom_space` succeeds before, `permission denied` after. | `20261004120000` §2 |
+| **B11** | **FIXED, classroom Phase 1 (`20261004120000`) — pending owner apply.** `app.owns_space()` had **no subject-scope check**, so `teacher_subject_scope` governed only two policies. It now requires an active teacher **and** an unrevoked scope row for the space's subject; `app.teaches_student_subject` honours `revoked_at` too. Scope is self-declared by `app.create_space` (owner decision 2026-10-03) and withdrawn by an administrator stamping `revoked_at`. ⚠️ The quiz attempt teacher reads (`20260801120100:362`, `:384`) narrow with it — intended (`prd.md` §4.2 "own subject only"), and no route reaches them yet. | `20261004120000` §0–§1 |
 | **B12** | `quiz_question` has a SELECT policy only, so the quiz-authoring path has **no write path** through `app_backend`. | `20260801120100:347` |
 | **B13** | Six curriculum policies were changed to `USING (true)`, dropping the bound-user requirement they were created with. Curriculum data is now readable with no session at all. | `20260802140000:55-71` vs `20260801120100:238` |
 | **B14** | `20260802140000`'s header states the six curriculum tables "were never given" a policy. Only the **read** half was missing — `20260801120100:232-247` already gave all six a `*_admin_write`. A migration comment that misdescribes the state it is fixing is how the next contributor inherits the wrong mental model. | `20260802140000:5-14` vs `20260801120100:232-247` |
@@ -861,11 +925,15 @@ their own session attributed to the assistant. Card 1.5's privacy invariant conc
 chat content, and that still holds: `chat_session`, `message` and `visual_aid` remain owner-only
 with no teacher, parent or admin path and no privileged function touching them.
 
-**`join_code.join_code_owner` stays `FOR ALL`.** A space owner minting and editing codes for a
-space they already own is the behaviour the feature exists to provide, and the predicate
-`app.owns_space(...)` scopes it. The classroom weaknesses that do matter — `classroom_space`
-having no role check, `enrollment_student_join` self-enrolling into any space — are separate
-findings and stay in §2.4.
+~~**`join_code.join_code_owner` stays `FOR ALL`.**~~ **REVERSED by the repository owner on
+2026-10-03, implemented in `20261004120000` §3.** The original reasoning: a space owner minting and
+editing codes for a space they already own is the behaviour the feature exists to provide, and
+`app.owns_space(...)` scopes it. Why it was reversed: while the owner could `INSERT` any string,
+**code entropy and "one live code per space" were application promises, not database facts** — a
+client bug or a future endpoint could store `AAAAAAAA`, and any student with a matching class could
+then walk into a classroom of minors uninvited. Now `join_code_owner_read` is SELECT-only, codes
+are minted in Python with `secrets`, written only by `app.rotate_join_code`, and held to
+`ck_join_code_format` and `uq_join_code_one_live`.
 
 
 ### Related findings recorded elsewhere

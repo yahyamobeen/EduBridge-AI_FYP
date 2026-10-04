@@ -62,8 +62,7 @@ lives in them yet — `find ml mcp-servers infra backend/app/workers -type f`.
 |---|---|
 | `backend/` | FastAPI application — `app/auth/` (routes, service, tokens, gate, onboarding), `app/core/` (config, database, errors, rate limiting), `app/models/` |
 | `frontend/` | Next.js App Router application |
-| `supabase/migrations/` | The 11 versioned SQL migrations — the schema's source of truth |
-| `tools/` | Build scripts for the User Stories deliverable |
+| `supabase/migrations/` | The 27 versioned SQL migrations (`ls supabase/migrations/*.sql \| wc -l`) — the schema's source of truth |
 | `docs/` | Five point-in-time plan files; **not** a description of the system as it stands — that is what these pages are for |
 | `prd.md`, `tdd.md` | The contract. Work requiring something not in them updates both in the same change |
 

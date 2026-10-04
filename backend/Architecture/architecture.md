@@ -10,8 +10,8 @@
 Related documents: [Database](database.html) · [API endpoints](api-endpoints.md) ·
 [architecture.html](architecture.html) (the same content with rendered diagrams)
 
-Contract documents at the repository root: [`prd.md`](../../prd.md) · [`tdd.md`](../../tdd.md) ·
-[`user-stories.md`](../../user-stories.md)
+Contract documents at the repository root: [`prd.md`](../../prd.md) · [`tdd.md`](../../tdd.md).
+`user-stories.md` lives outside the repository, in `Desktop\EduBridge-AI_FYP-planning\`.
 
 **Acronyms are expanded on first use in each section.** API — Application Programming Interface.
 RLS — Row-Level Security. RBAC — Role-Based Access Control. JWT — JSON Web Token. TOTP —
@@ -869,7 +869,7 @@ verification iterates the unused hashes (`service.py:974-986`) instead of doing 
 |---|---|---|
 | `prd.md` | Product Requirements Document — the four roles, the monetisation model, §4.3 the parental-consent gate (line 275), MON-2 the fail-closed subscription rule | [`../../prd.md`](../../prd.md) |
 | `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 165), §6.8 Row-Level Security (line 858), §6.9 two-factor authentication (line 893), §6.11 client-side security (line 988), §7.2 the consolidated endpoint catalogue (line 1026), §7.3 the error model (line 1043) | [`../../tdd.md`](../../tdd.md) |
-| `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | [`../../user-stories.md`](../../user-stories.md) |
+| `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | outside the repository: `Desktop\EduBridge-AI_FYP-planning\user-stories.md` |
 | `database.html` / `database.md` | Tables by domain, the **complete Row-Level Security policy catalogue**, the `app.*` privileged functions with signature and grant, and findings B1–B19 | [database.html](database.html) |
 | `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 31 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |
 | `backend/README.md` | Environment variables, the running and testing commands, and the standing `SECURITY DEFINER` rule quoted in §4.3 | [`../README.md`](../README.md) |

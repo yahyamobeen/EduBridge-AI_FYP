@@ -9,7 +9,7 @@
 
 Related documents: [architecture.md](architecture.md) · [architecture.html](architecture.html) ·
 [Database](database.html) · [`tdd.md`](../../tdd.md) · [`prd.md`](../../prd.md) ·
-[`user-stories.md`](../../user-stories.md)
+`user-stories.md` (outside the repository, in `Desktop\EduBridge-AI_FYP-planning\`)
 
 **Acronyms.** API — Application Programming Interface. RLS — Row-Level Security. RBAC — Role-Based
 Access Control. JWT — JSON Web Token. TOTP — Time-based One-Time Password. OTP — One-Time Password.
@@ -24,9 +24,9 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 | Implemented routes | **21** | `grep -c "^@router\." backend/app/auth/routes.py` |
 | Routers in the backend | **1** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
-| Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
-| **Total specified** | **49** | 23 + 3 + 6 + 6 + 11 |
-| **Specified but missing** | **28** | 49 − 21 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged |
+| Specified in `tdd.md` §7.2 | 60 | §7.2 consolidates §3.1 plus Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Classroom (§3.6, `tdd.md:325-354` — **40 endpoints** since v0.4.0, counting each method/path pair in a combined row) and its own rows — where `GET /api/admin/rate-limits / PUT` is **two** endpoints |
+| **Total specified** | **83** | 23 + 3 + 6 + 40 + 11 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40) |
+| **Specified but missing** | **62** | 83 − 21 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built **none** — it is the database boundary they will stand on |
 
 **All 21 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
 router. `GET /health` (`backend/app/main.py:86`) is defined on the application object rather than the
@@ -320,12 +320,12 @@ production actually calls, not through the ORM.
 ## 3. Dependencies that exist but protect nothing yet
 
 Two RBAC (Role-Based Access Control) dependencies are implemented, tested, and **wired to no route**,
-because the routes they were written for are among the 31 missing:
+because the routes they were written for are among the 62 missing (§4):
 
 | Dependency | file:line | Waiting on |
 |---|---|---|
-| `require_subject_scope` | `app/auth/dependencies.py:123` | the classroom and quiz endpoints (§3.5, §3.6) |
-| `require_guardian_verified` | `app/auth/dependencies.py:158` | `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
+| `require_subject_scope` | `app/auth/dependencies.py:206` (since 2026-10-04 it also requires `revoked_at IS NULL`, `:236-242`) | the classroom and quiz endpoints (§3.5, §3.6) |
+| `require_guardian_verified` | `app/auth/dependencies.py:248` | `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*`, and the student classroom routes (§4.4) |
 
 `tdd.md:198` specifies that the gate dependency blocks **every** student learning and assessment
 endpoint, and that an authorization-matrix test asserts it on each such route. That test exists
@@ -401,21 +401,38 @@ Relevant database findings, since these are the routes that would first exercise
 and mastery policies are `FOR ALL`, so every number a parent or teacher reads is student-writable).
 Implementing §3.5 against today's policies would land straight on all three.
 
-### 4.4 Spaces and classroom — 6 missing (§3.6)
+### 4.4 Spaces and classroom — 40 missing (§3.6)
+
+The six rows `tdd.md` specified through v0.3.9 keep their numbers:
 
 | # | Method | Path | Role | Purpose | `tdd.md` |
 |---|---|---|---|---|---|
-| 15 | `POST` | `/api/spaces` | Teacher / Parent | Create a space; a teacher declares the subject | `tdd.md:321` |
-| 16 | `POST` | `/api/spaces/{id}/join-code` | Owner | Generate, rotate or revoke a join code | `tdd.md:322` |
-| 17 | `POST` | `/api/spaces/join` | Student | Join via code, with consent | `tdd.md:323` |
-| 18 | `DELETE` | `/api/spaces/{id}/membership` | Student | Leave a space at any time | `tdd.md:324` |
-| 19 | `GET` | `/api/spaces/{id}/report` | Teacher (subject) / Parent (child) | Scoped weak-area report | `tdd.md:325` |
-| 20 | `POST` | `/api/spaces/{id}/announcements` | Owner | Post a one-way announcement | `tdd.md:326` |
+| 15 | `POST` | `/api/spaces` | Teacher (was "Teacher / Parent" — corrected in v0.4.0) | Create a space; a teacher declares the subject | `tdd.md:325` |
+| 16 | `POST` | `/api/spaces/{id}/join-code` | Owner | Rotate or disable a join code | `tdd.md:329` |
+| 17 | `POST` | `/api/spaces/join` | Student (gate-checked) | Join via code, with consent | `tdd.md:330` |
+| 18 | `DELETE` | `/api/spaces/{id}/membership` | Student (**not** gate-checked) | Leave a space at any time | `tdd.md:331` |
+| 19 | `GET` | `/api/spaces/{id}/report` | Teacher (subject) / Parent (child) | Scoped weak-area report | `tdd.md:354` |
+| 20 | `POST` | `/api/spaces/{id}/announcements` | Owner | Post an announcement, now or scheduled | `tdd.md:336` |
 
-Findings **B9**, **B10** and **B11** all bear on this group: `enrollment_student_join` self-enrols
-into *any* space and `enrollment_leave` has no `WITH CHECK`; `classroom_space` has no role check, so
-any user can create a space as `owner_role='teacher'`; and `teacher_subject_scope` governs only two
-policies, while every other teacher read uses `owns_space()`, which has no scope check.
+**`tdd.md` v0.4.0 added 34 more** (`tdd.md:326-353`), to be built by classroom phase — they are
+not numbered here, so that the numbering of every later section stays stable:
+
+| Phase | Endpoints | Count |
+|---|---|---|
+| 2 — classrooms core | `GET /api/spaces` · `GET`/`PATCH /api/spaces/{id}` · `GET /api/spaces/{id}/people` · `DELETE /api/spaces/{id}/members/{student_id}` · `GET /api/reference/subjects` | 6 |
+| 3 — stream | `GET /api/spaces/{id}/announcements` · `PATCH`/`DELETE /api/announcements/{id}` | 3 |
+| 4 — assignments | `GET`/`POST /api/spaces/{id}/assignments` · `GET`/`PATCH`/`DELETE /api/assignments/{id}` · `PUT …/submission` · `POST …/turn-in` · `POST …/unsubmit` · `GET …/submissions` · `GET …/submissions/{student_id}` · `PUT …/grades/{student_id}` · `GET /api/reference/subjects/{id}/chapters` | 12 |
+| 5 — calendar | `GET /api/calendar` | 1 |
+| 6 — files | three uploads, two downloads, two deletes | 7 |
+| 7 — chat | `GET`/`POST /api/spaces/{id}/messages` · `DELETE /api/messages/{id}` · `PUT …/mute` | 4 |
+| 8 — parent | `GET /api/parent/classrooms` | 1 |
+
+**Findings B9, B10 and B11 are FIXED at the database layer** (`20261004120000`,
+`20261004120100`, pending the owner's apply), *before* any of these routes exists — the order
+`backend/Architecture/database.md` argued for. Previously `enrollment_student_join` self-enrolled
+into *any* space, `classroom_space` had no role check, and `owns_space()` had no scope check. The
+routes in this group will call the classroom functions catalogued in
+[`database.md`](database.md#classroom--post-apispaces-functions); none of them may need a write grant.
 
 ### 4.5 Reports, administration and subscription — 11 missing (§7.2's own rows)
 
@@ -504,6 +521,7 @@ grep -n "^| \(GET\|POST\|PUT\|PATCH\|DELETE\) " tdd.md     # 47 rows; :1038 is t
 
 ---
 
-*Snapshot 2026-08-15. Implemented and specified are kept deliberately distinct: 18 of 49. Known
+*Snapshot 2026-08-15, counts re-measured 2026-10-04 (classroom Phase 1). Implemented and specified
+are kept deliberately distinct: 21 of 83. Known
 defects are recorded here rather than deferred until fixed — see the Phase 0 findings register for
 the full 35.*

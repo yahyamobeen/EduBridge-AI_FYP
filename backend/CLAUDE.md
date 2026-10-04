@@ -15,8 +15,9 @@ PostgreSQL on Supabase. Authentication is **application-managed** — this servi
 JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberately unused, so
 `app_user` holds `password_hash` itself.
 
-**One router today**: `app/auth/routes.py`, 17 routes, all authentication, guardian or reference.
-`tdd.md` §3.1 and §7.2 specify **48 endpoints — 31 do not exist.**
+**One router today**: `app/auth/routes.py`, 21 routes, all authentication, guardian or reference.
+`tdd.md` v0.4.0 specifies **83 endpoints — 62 do not exist** (`Architecture/api-endpoints.md` §1).
+`app/classroom/` holds only `codes.py` (join-code generation) until classroom Phase 2 adds its router.
 `app/workers/` is scaffolded with a `.gitkeep` and nothing else.
 
 Full picture: [`Architecture/README.md`](Architecture/README.md).
@@ -98,7 +99,8 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20260803180000_login_2fa_lookup.sql`.
+  `20260817150000_missing_updated_at_triggers.sql`; `20261004120000` and `20261004120100`
+  (classroom boundary) are written and dry-run on branch `add-classroom`, pending the owner's apply.
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
@@ -113,7 +115,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 ## 5. Testing
 
-25 test files: **10 in `tests/unit`**, **15 in `tests/integration`**.
+41 test files: **18 in `tests/unit`**, **23 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-04).
 
 `tests/unit` must stay runnable with **no connection string, no engine and no live project** —
 that is why `tests/conftest.py` has no fixtures and why `gate.py` and `onboarding.py` avoid
