@@ -1,14 +1,18 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { createContext, useContext, useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher'
+import { SubjectModal } from '@/components/tutor/SubjectModal'
 import { ArrowIcon } from '@/components/ui/Icon'
 import { Link, useRouter } from '@/i18n/navigation'
 import { logout } from '@/lib/api/endpoints'
 import type { MeResponse } from '@/lib/api/types'
 import { avatarInitial, displayName } from '@/lib/auth/displayName'
 import { navFor, ROLE_ACCENT } from '@/lib/auth/navigation'
+
+export const TutorContext = createContext<{ openTutor: () => void }>({ openTutor: () => {} })
+export const useTutor = () => useContext(TutorContext)
 
 /**
  * The dashboard chrome: the prototype's 256px docked sidebar, the identity
@@ -38,10 +42,12 @@ export function DashboardShell({
   const tDash = useTranslations('dashboard')
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [tutorOpen, setTutorOpen] = useState(false)
 
   const items = navFor(me.role)
   const accent = ROLE_ACCENT[me.role]
   const initial = avatarInitial(me)
+  const isClass9Student = me.role === 'student' && me.profile?.class_level === 9
 
   /**
    * The redirect must happen on BOTH paths.
@@ -89,21 +95,37 @@ export function DashboardShell({
       </div>
 
       <ul className="flex-grow space-y-2">
-        {items.map((item, index) => (
-          <li key={item.key}>
-            <Link
-              href={item.href}
-              aria-current={index === 0 ? 'page' : undefined}
-              className={
-                index === 0
-                  ? 'block rounded bg-primary-container px-4 py-2 font-semibold text-on-primary-container'
-                  : 'block rounded px-4 py-2 text-on-surface-variant transition-colors hover:bg-surface-variant'
-              }
-            >
-              {t(item.key)}
-            </Link>
-          </li>
-        ))}
+        {items.map((item, index) => {
+          const isTutorButton = isClass9Student && item.key === 'tutor'
+          return (
+            <li key={item.key}>
+              {isTutorButton ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    setTutorOpen(true)
+                  }}
+                  className="block w-full rounded px-4 py-2 text-start text-on-surface-variant transition-colors hover:bg-surface-variant"
+                >
+                  {t(item.key)}
+                </button>
+              ) : (
+                <Link
+                  href={item.href}
+                  aria-current={index === 0 ? 'page' : undefined}
+                  className={
+                    index === 0
+                      ? 'block rounded bg-primary-container px-4 py-2 font-semibold text-on-primary-container'
+                      : 'block rounded px-4 py-2 text-on-surface-variant transition-colors hover:bg-surface-variant'
+                  }
+                >
+                  {t(item.key)}
+                </Link>
+              )}
+            </li>
+          )
+        })}
       </ul>
 
       <div className="mt-auto space-y-4 border-t border-outline-variant pt-4">
@@ -120,39 +142,45 @@ export function DashboardShell({
   )
 
   return (
-    <div className="flex min-h-screen">
-      {/* Docked sidebar, 256px, from md up — as measured in the prototype. */}
-      <nav
-        aria-label={tDash('primaryNav')}
-        className="sticky top-0 hidden h-screen w-64 flex-col border-e border-outline-variant bg-surface-container-low p-4 md:flex"
-      >
-        {nav}
-      </nav>
-
-      {/* Below md the prototype has no navigation at all, which would strand a
-          phone user. A disclosure keeps the same items reachable. */}
-      <div className="md:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          aria-controls="mobile-nav"
-          className="fixed bottom-4 end-4 z-20 rounded-full bg-primary px-5 py-3 text-label-caps uppercase text-on-primary shadow-lg"
+    <TutorContext.Provider value={{ openTutor: () => setTutorOpen(true) }}>
+      <div className="flex min-h-screen">
+        {/* Docked sidebar, 256px, from md up — as measured in the prototype. */}
+        <nav
+          aria-label={tDash('primaryNav')}
+          className="sticky top-0 hidden h-screen w-64 flex-col border-e border-outline-variant bg-surface-container-low p-4 md:flex"
         >
-          {open ? tDash('closeMenu') : tDash('openMenu')}
-        </button>
-        {open && (
-          <div
-            id="mobile-nav"
-            className="fixed inset-0 z-10 flex flex-col overflow-y-auto bg-surface-container-low p-4"
+          {nav}
+        </nav>
+
+        {/* Below md the prototype has no navigation at all, which would strand a
+            phone user. A disclosure keeps the same items reachable. */}
+        <div className="md:hidden">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            className="fixed bottom-4 end-4 z-20 rounded-full bg-primary px-5 py-3 text-label-caps uppercase text-on-primary shadow-lg"
           >
-            {nav}
-          </div>
+            {open ? tDash('closeMenu') : tDash('openMenu')}
+          </button>
+          {open && (
+            <div
+              id="mobile-nav"
+              className="fixed inset-0 z-10 flex flex-col overflow-y-auto bg-surface-container-low p-4"
+            >
+              {nav}
+            </div>
+          )}
+        </div>
+
+        <div className="flex-grow overflow-y-auto p-gutter md:p-margin-desktop">{children}</div>
+
+        {isClass9Student && (
+          <SubjectModal isOpen={tutorOpen} onClose={() => setTutorOpen(false)} />
         )}
       </div>
-
-      <div className="flex-grow overflow-y-auto p-gutter md:p-margin-desktop">{children}</div>
-    </div>
+    </TutorContext.Provider>
   )
 }
 
@@ -168,11 +196,13 @@ export function PlaceholderCard({
   body,
   span = 4,
   href,
+  onClick,
 }: {
   title: string
   body: string
   span?: 4 | 6 | 8 | 12
   href?: string
+  onClick?: () => void
 }) {
   const t = useTranslations('dashboard')
   const cols = {
@@ -191,7 +221,7 @@ export function PlaceholderCard({
       <p className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-1 text-label-caps uppercase text-on-surface-variant">
         {t('notYetAvailable')}
       </p>
-      {href && (
+      {href ? (
         <div className="mt-4">
           <Link
             href={href}
@@ -201,7 +231,18 @@ export function PlaceholderCard({
             <ArrowIcon className="h-4 w-4 rtl:-scale-x-100" />
           </Link>
         </div>
-      )}
+      ) : onClick ? (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={onClick}
+            className="inline-flex items-center gap-2 text-body-sm font-semibold text-primary hover:text-primary-container"
+          >
+            {t('learnMore')}
+            <ArrowIcon className="h-4 w-4 rtl:-scale-x-100" />
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

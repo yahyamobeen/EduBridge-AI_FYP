@@ -12,6 +12,7 @@ from app.auth.routes import router as auth_router
 from app.core.config import get_settings
 from app.core.db import DatabaseUnreachableError, assert_backend_role_cannot_bypass_rls
 from app.core.errors import register_exception_handlers
+from app.tutor.routes import router as tutor_router
 
 logger = logging.getLogger("edubridge")
 
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(auth_router, prefix=settings.api_base_path)
+    app.include_router(tutor_router, prefix=settings.api_base_path)
 
     @app.get("/health", tags=["system"])
     def health() -> dict:

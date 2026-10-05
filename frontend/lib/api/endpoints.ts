@@ -27,6 +27,9 @@ import type {
   TwoFactorStatusResponse,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponse,
+  PhysicsChatRequest,
+  PhysicsChatResponse,
+  PhysicsTutorInfoResponse,
 } from './types'
 
 /**
@@ -271,4 +274,25 @@ export async function logout(): Promise<void> {
     // outcome, especially on the shared devices prd.md §3.1 describes.
     endSession()
   }
+}
+
+/**
+ * Class 9 Physics AI Tutor chat endpoint.
+ */
+export function chatClass9Physics(
+  body: PhysicsChatRequest,
+  signal?: AbortSignal,
+): Promise<PhysicsChatResponse> {
+  return apiFetch<PhysicsChatResponse>('/tutor/class9/physics/chat', {
+    method: 'POST',
+    body,
+    signal,
+  })
+}
+
+export function getPhysicsTutorInfo(signal?: AbortSignal): Promise<PhysicsTutorInfoResponse> {
+  return apiFetch<PhysicsTutorInfoResponse>(
+    '/tutor/class9/physics/info',
+    signal ? { signal } : {},
+  )
 }

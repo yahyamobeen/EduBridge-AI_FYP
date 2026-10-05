@@ -23,14 +23,16 @@ Unified Configuration (a PostgreSQL runtime setting).
 
 ## 1. Overview
 
-The backend is a **single FastAPI application** with one router. All server logic lives under
-`backend/app/`, split into three packages:
+The backend is a **FastAPI application**. Server logic lives under
+`backend/app/`, split into five packages:
 
 | Package | Contents |
 |---|---|
-| `app/auth/` | The only router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
-| `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
-| `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
+| `app/auth/` | Auth router (`routes.py`), service layer, dependencies, tokens, parental-consent gate, onboarding derivation, email, TOTP, backup codes, Turnstile |
+| `app/tutor/` | Tutor router (`routes.py`), Class 9 student guards, and textbook page scan asset endpoints |
+| `app/retrieval/` | Visual retrieval module (`physics9/`): late-interaction ColQwen2/ColPali embeddings retriever, MaxSim similarity scoring, multimodal Gemini generator, multilingual grounding |
+| `app/core/` | Configuration, database engines and per-transaction user binding, error envelope, rate limiter |
+| `app/models/` | SQLAlchemy ORM declarations and Python enumerations mirroring PostgreSQL types |
 
 The database is **PostgreSQL on Supabase**, with the schema owned by versioned SQL (Structured Query
 Language) migrations in `supabase/migrations/` rather than by the ORM. Authentication is

@@ -569,6 +569,44 @@
     "selecting": "Tarteeb di ja rahi hai…",
     "noCheckoutNote": "Yahan abhi koi adaigi nahi li jati. Plan muntakhib karne se aap ka intekhab mehfooz ho jata hai; billing aainda release mein aayegi."
   },
+  "tutor": {
+    "modal": {
+      "title": "Class 9 AI Tutor",
+      "subtitle": "Punjab Textbook Board (PCTB) nisab ke mutabiq mazmoon muntakhib karein",
+      "close": "Band karein",
+      "back": "Mazameen par wapis",
+      "comingSoonTitle": "Jald aa raha hai",
+      "comingSoonNotice": "{subject} ke liye AI Tutor filhal tayyari ke marhale mein hai. Juray rahein!",
+      "availableBadge": "Dastiyab",
+      "comingSoonBadge": "Jald dastiyab"
+    },
+    "subjects": {
+      "physics": "Physics",
+      "mathematics": "Mathematics",
+      "chemistry": "Chemistry",
+      "english": "English",
+      "urdu": "Urdu",
+      "islamiyat": "Islamiyat"
+    },
+    "chat": {
+      "title": "Class 9 Physics AI Tutor",
+      "subtitle": "Punjab Textbook Board (PCTB) · Class 9 Physics",
+      "welcome": "Assalam-o-Alaikum! Main aap ka Class 9 Physics AI tutor hoon. English, Roman Urdu ya Urdu script mein sawal poochein, main darsi kitab ke hawalon ke sath step-by-step wazahat karoon ga.",
+      "inputPlaceholder": "Physics ka sawal poochein (maslan thermocouple kaise kaam karta hai?)...",
+      "send": "Bheinjein",
+      "thinking": "Kitab ke safhat talash aur jawab tayyar kiya ja raha hai...",
+      "references": "Darsi Kitab ke Hawale",
+      "page": "Safha",
+      "chapter": "Chapter",
+      "chip1": "Thermocouple kaise kaam karta hai?",
+      "chip2": "Pascal ka qanoon kya hai?",
+      "chip3": "Kinetic energy ka formula aur wazahat",
+      "chip4": "Inertia aur Newton ka pehla qanoon",
+      "errorFallback": "Tutor service se rabta nahi ho saka. Barah-e-karam apna internet check karein aur dobara koshish karein.",
+      "retry": "Dobara koshish karein",
+      "disclaimer": "Official Punjab Textbook Board (PCTB) Class 9 Physics kitab par mabni."
+    }
+  },
   "errorPage": {
     "title": "Kuch ghalat ho gaya",
     "body": "Ye safha dikhaya nahi ja saka. Umooman dobara koshish karne se masla hal ho jata hai.",

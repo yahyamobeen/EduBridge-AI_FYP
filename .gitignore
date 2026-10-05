@@ -38,8 +38,10 @@ coverage/
 *.gguf
 *.safetensors
 *.onnx
+*.pt
 data/raw/
 data/processed/
+backend/data/
 chroma/
 *.faiss
 

@@ -299,3 +299,45 @@ export type SubscriptionResponse = {
   trial_ends_at: string | null
   current_period_end: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Class 9 Physics Visual Retrieval Tutor
+// ---------------------------------------------------------------------------
+
+export type PhysicsChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type PageCitation = {
+  page: number
+  chapter: number | null
+  score: number
+  url: string
+}
+
+export type PhysicsChatRequest = {
+  message: string
+  lang?: 'en' | 'ur' | 'ur-Latn'
+  history?: PhysicsChatMessage[]
+}
+
+export type PhysicsChatResponse = {
+  reply: string
+  pages: PageCitation[]
+  timings: {
+    encode?: number
+    search?: number
+    generate?: number
+  }
+  gen_error?: string | null
+}
+
+export type PhysicsTutorInfoResponse = {
+  subject: string
+  class_level: number
+  board: string
+  book_pages: number
+  has_real_embeddings: boolean
+  checkpoint: string
+}

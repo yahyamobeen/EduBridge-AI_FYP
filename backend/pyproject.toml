@@ -61,6 +61,7 @@ ignore = ["S101", "S311", "ARG001", "ARG002", "B008", "UP042"]
 # render. Wrapping the style attributes to 100 columns would make them harder
 # to read, not easier, and changes nothing about the output.
 "app/auth/email_templates.py" = ["E501"]
+"app/retrieval/physics9/generator.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

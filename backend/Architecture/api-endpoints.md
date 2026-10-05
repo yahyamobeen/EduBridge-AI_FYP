@@ -21,19 +21,18 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **21** | `grep -c "^@router\." backend/app/auth/routes.py` |
-| Routers in the backend | **1** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **24** | 21 in `backend/app/auth/routes.py` + 3 in `backend/app/tutor/routes.py` |
+| Routers in the backend | **2** | `auth_router` (`app/auth/routes.py`) and `tutor_router` (`app/tutor/routes.py`) |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
 | **Total specified** | **49** | 23 + 3 + 6 + 6 + 11 |
-| **Specified but missing** | **28** | 49 − 21 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged |
+| **Specified but missing** | **25** | Auth/admin, Quiz, Spaces/Reports, generic SSE Tutor (Class 9 Physics Tutor implemented) |
 
-**All 21 implemented routes live in one file**, `backend/app/auth/routes.py`. There is no second
-router. `GET /health` (`backend/app/main.py:86`) is defined on the application object rather than the
+**21 auth routes live in** `backend/app/auth/routes.py`, and **3 tutor routes live in** `backend/app/tutor/routes.py`. `GET /health` (`backend/app/main.py`) is defined on the application object rather than a
 router, sits outside `/api`, and is not one of the 49 — `tdd.md` does not specify it.
 
-Everything is mounted under `settings.api_base_path`, default `/api` (`app/main.py:84`,
-`app/core/config.py:36`).
+Everything is mounted under `settings.api_base_path`, default `/api` (`app/main.py`,
+`app/core/config.py`).
 
 ---
 
@@ -300,7 +299,20 @@ cannot see the first's enrolment, that a refusal writes nothing and ends no sess
 teacher's chosen language reaches `app.lookup_user_for_email_flow` — asserted through the function
 production actually calls, not through the ORM.
 
-### 2.6 Outside the router
+### 2.7 Class 9 Physics Visual Retrieval Tutor (PCTB)
+
+| Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
+|---|---|---|---|---|---|---|
+| `POST /api/tutor/class9/physics/chat` | `physics_chat_endpoint` `tutor/routes.py:34` | `answer_physics_query` `retrieval/physics9/service.py:17` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | `tutor_chat` (20 / min) | §3.2 row `tdd.md:239` (specialized) |
+| `GET /api/tutor/class9/physics/pages/{page_num}` | `physics_page_scan_endpoint` `tutor/routes.py:84` | `get_page_image_path` | `FileResponse` | `require_role('student')` | none | Visual grounding asset |
+| `GET /api/tutor/class9/physics/info` | `physics_tutor_info_endpoint` `tutor/routes.py:101` | metadata inspection | `PhysicsTutorInfoResponse` | none | none | Health & model telemetry |
+
+Grounds answers directly in the 200 pages of the Punjab Curriculum and Textbook Board (PCTB) Class 9 Physics textbook.
+Uses dual-path retrieval: full ColQwen2 multi-vector MaxSim late-interaction when embeddings/model are loaded, and
+sublinear token-overlap matching fallback when running lightweight test or resource-constrained nodes.
+Integrated multimodal generation uses Gemini 2.5 Flash with fallback to grounded template generation.
+
+### 2.8 Outside the router
 
 | Route | Defined at | Auth | Limit | Specified? |
 |---|---|---|---|---|
@@ -317,15 +329,13 @@ production actually calls, not through the ORM.
 
 ---
 
-## 3. Dependencies that exist but protect nothing yet
+## 3. Dependencies and access control
 
-Two RBAC (Role-Based Access Control) dependencies are implemented, tested, and **wired to no route**,
-because the routes they were written for are among the 31 missing:
-
-| Dependency | file:line | Waiting on |
+| Dependency | file:line | Guarded routes |
 |---|---|---|
-| `require_subject_scope` | `app/auth/dependencies.py:123` | the classroom and quiz endpoints (§3.5, §3.6) |
-| `require_guardian_verified` | `app/auth/dependencies.py:158` | `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
+| `require_guardian_verified` | `app/auth/dependencies.py:158` | `/api/tutor/class9/physics/chat` (Active), waiting on `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
+| `require_class_9_student` | `app/tutor/routes.py:24` | `/api/tutor/class9/physics/chat` (verifies student role and `class_level == 9`) |
+| `require_subject_scope` | `app/auth/dependencies.py:123` | Waiting on the classroom and quiz endpoints (§3.5, §3.6) |
 
 `tdd.md:198` specifies that the gate dependency blocks **every** student learning and assessment
 endpoint, and that an authorization-matrix test asserts it on each such route. That test exists

@@ -178,6 +178,12 @@ class Settings(BaseSettings):
     # credential. Set the real origins explicitly.
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Class 9 Physics Visual Retrieval Tutor (PCTB)
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
+    physics_embeddings_path: str = Field(default="", validation_alias="PHYSICS_EMBEDDINGS_PATH")
+    physics_pages_dir: str = Field(default="", validation_alias="PHYSICS_PAGES_DIR")
+
     argon2_time_cost: int = 3
     argon2_memory_cost: int = 65536
     argon2_parallelism: int = 4

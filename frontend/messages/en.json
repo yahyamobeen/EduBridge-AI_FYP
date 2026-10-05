@@ -569,6 +569,44 @@
     "selecting": "Setting up…",
     "noCheckoutNote": "No payment is taken here yet. Choosing the plan records your selection; billing arrives in a later release."
   },
+  "tutor": {
+    "modal": {
+      "title": "Class 9 AI Tutor",
+      "subtitle": "Select a subject aligned with Punjab Textbook Board (PCTB) curriculum",
+      "close": "Close",
+      "back": "Back to Subjects",
+      "comingSoonTitle": "Coming Soon",
+      "comingSoonNotice": "The AI Tutor for {subject} is currently under development. Stay tuned!",
+      "availableBadge": "Available",
+      "comingSoonBadge": "Coming Soon"
+    },
+    "subjects": {
+      "physics": "Physics",
+      "mathematics": "Mathematics",
+      "chemistry": "Chemistry",
+      "english": "English",
+      "urdu": "Urdu",
+      "islamiyat": "Islamiyat"
+    },
+    "chat": {
+      "title": "Class 9 Physics AI Tutor",
+      "subtitle": "Punjab Textbook Board (PCTB) · Class 9 Physics",
+      "welcome": "Assalam-o-Alaikum! I am your Class 9 Physics AI tutor. Ask questions in English, Roman Urdu, or Urdu script, and I will explain step-by-step with citations to your textbook.",
+      "inputPlaceholder": "Ask a physics question (e.g., How does a thermocouple work?)...",
+      "send": "Send",
+      "thinking": "Searching textbook pages and preparing explanation...",
+      "references": "Textbook References",
+      "page": "Page",
+      "chapter": "Chapter",
+      "chip1": "How does a thermocouple work?",
+      "chip2": "What is Pascal's law?",
+      "chip3": "Explain kinetic energy with formula",
+      "chip4": "Define inertia and Newton's first law",
+      "errorFallback": "Could not connect to the tutor service. Please check your connection and try again.",
+      "retry": "Retry",
+      "disclaimer": "Grounded in official Punjab Textbook Board (PCTB) Class 9 Physics textbook."
+    }
+  },
   "errorPage": {
     "title": "Something went wrong",
     "body": "This page could not be displayed. Trying again often fixes it.",

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { DashboardShell, PlaceholderCard } from '@/components/app/DashboardShell'
+import { DashboardShell, PlaceholderCard, useTutor } from '@/components/app/DashboardShell'
 import { SessionGuard } from '@/components/app/SessionGuard'
 import type { MeResponse } from '@/lib/api/types'
 import { firstName } from '@/lib/auth/displayName'
@@ -27,48 +27,51 @@ function classSummary(me: MeResponse): string {
   return `${profile.board} · ${profile.class_level} · ${profile.student_group}`
 }
 
-export function StudentDashboard() {
+function StudentDashboardContent({ me }: { me: MeResponse }) {
   const t = useTranslations('dashboard.student')
   const tc = useTranslations('dashboard.cards')
+  const { openTutor } = useTutor()
+  const isClass9 = me.profile?.class_level === 9
 
   return (
-    <SessionGuard allow={['student']}>
-      {(me) => (
-        <DashboardShell me={me} subtitle={classSummary(me)}>
-          <header className="mb-8">
-            <h1 className="font-headline text-headline-lg text-on-background">
-              {t('welcome', { name: firstName(me) })}
-            </h1>
-            <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
-          </header>
+    <DashboardShell me={me} subtitle={classSummary(me)}>
+      <header className="mb-8">
+        <h1 className="font-headline text-headline-lg text-on-background">
+          {t('welcome', { name: firstName(me) })}
+        </h1>
+        <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
+      </header>
 
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
-            <PlaceholderCard
-              span={8}
-              title={tc('performanceTitle')}
-              body={tc('performanceBody')}
-            />
-            <PlaceholderCard span={4} title={tc('studyNextTitle')} body={tc('studyNextBody')} />
-            <PlaceholderCard
-              span={4}
-              title={tc('tutorTitle')}
-              body={tc('tutorBody')}
-              href="/coming-soon/tutor"
-            />
-            <PlaceholderCard span={4} title={tc('quizzesTitle')} body={tc('quizzesBody')} />
-            {/*
-              prd.md §4.2 guarantees a student can see who may view them and can
-              leave any space. The right needs a route, so it has a card too.
-            */}
-            <PlaceholderCard
-              span={4}
-              title={tc('myClassesTitle')}
-              body={tc('myClassesBody')}
-              href="/coming-soon/my-classes"
-            />
-          </div>
-        </DashboardShell>
-      )}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
+        <PlaceholderCard span={8} title={tc('performanceTitle')} body={tc('performanceBody')} />
+        <PlaceholderCard span={4} title={tc('studyNextTitle')} body={tc('studyNextBody')} />
+        <PlaceholderCard
+          span={4}
+          title={tc('tutorTitle')}
+          body={tc('tutorBody')}
+          href={isClass9 ? undefined : '/coming-soon/tutor'}
+          onClick={isClass9 ? openTutor : undefined}
+        />
+        <PlaceholderCard span={4} title={tc('quizzesTitle')} body={tc('quizzesBody')} />
+        {/*
+          prd.md §4.2 guarantees a student can see who may view them and can
+          leave any space. The right needs a route, so it has a card too.
+        */}
+        <PlaceholderCard
+          span={4}
+          title={tc('myClassesTitle')}
+          body={tc('myClassesBody')}
+          href="/coming-soon/my-classes"
+        />
+      </div>
+    </DashboardShell>
+  )
+}
+
+export function StudentDashboard() {
+  return (
+    <SessionGuard allow={['student']}>
+      {(me) => <StudentDashboardContent me={me} />}
     </SessionGuard>
   )
 }
