@@ -125,6 +125,9 @@ def get_space(db: Session, space_id: UUID) -> dict:
         text("SELECT code FROM join_code WHERE space_id = :sid AND revoked = false"),
         {"sid": space_id},
     ).scalar_one_or_none()
+    detail["chat_locked"] = db.execute(
+        text("SELECT chat_locked FROM classroom_space WHERE id = :sid"), {"sid": space_id}
+    ).scalar_one()
     return detail
 
 
@@ -202,6 +205,9 @@ def update_space(db: Session, space_id: UUID, payload: SpaceUpdateRequest) -> di
     if payload.status is not None:
         sets.append("status = CAST(:status AS space_status)")
         params["status"] = payload.status.value
+    if payload.chat_locked is not None:
+        sets.append("chat_locked = :locked")
+        params["locked"] = payload.chat_locked
     with rls_refusal_as_forbidden():
         db.execute(
             text(f"UPDATE classroom_space SET {', '.join(sets)} WHERE id = :sid"),  # noqa: S608 -- fixed literals

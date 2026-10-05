@@ -13,10 +13,12 @@ import {
   getSpace,
   leaveSpace,
   removeMember,
+  setMemberMuted,
   updateSpace,
 } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { PeopleResponse, SpaceDetail } from '@/lib/api/types'
+import { ChatTab } from './ChatTab'
 import { ClassworkTab } from './ClassworkTab'
 import { ConfirmInline } from './ConfirmInline'
 import { StreamTab } from './StreamTab'
@@ -31,8 +33,8 @@ import {
   UUID_RE,
 } from './styles'
 
-/** Stream first: it is what changes. Chat joins in a later phase. */
-const TABS = ['stream', 'classwork', 'people'] as const
+/** Stream first: it is what changes. */
+const TABS = ['stream', 'classwork', 'chat', 'people'] as const
 type ClassroomTab = (typeof TABS)[number]
 
 /**
@@ -179,6 +181,14 @@ export function ClassroomView({
                         canPost={isOwner && space.status === 'active'}
                         initialOpenId={openAssignment}
                       />
+                    ) : tab === 'chat' ? (
+                      <ChatTab
+                        key={space.id}
+                        spaceId={space.id}
+                        isOwner={isOwner}
+                        archived={space.status === 'archived'}
+                        onSpaceChange={setSpace}
+                      />
                     ) : (
                       <PeopleSection
                         spaceId={space.id}
@@ -228,6 +238,8 @@ function PeopleSection({
   const [confirming, setConfirming] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [removeFailed, setRemoveFailed] = useState(false)
+  const [muting, setMuting] = useState<string | null>(null)
+  const [muteFailed, setMuteFailed] = useState(false)
 
   const load = useCallback(
     (signal?: AbortSignal) =>
@@ -259,6 +271,26 @@ function PeopleSection({
       setRemoveFailed(true)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function toggleMute(studentId: string, muted: boolean) {
+    setMuting(studentId)
+    setMuteFailed(false)
+    try {
+      await setMemberMuted(spaceId, studentId, muted)
+      setPeople((p) =>
+        p
+          ? {
+              ...p,
+              members: p.members.map((m) => (m.user_id === studentId ? { ...m, muted } : m)),
+            }
+          : p,
+      )
+    } catch {
+      setMuteFailed(true)
+    } finally {
+      setMuting(null)
     }
   }
 
@@ -305,15 +337,30 @@ function PeopleSection({
                             }),
                           })}
                         </p>
+                        {m.muted && (
+                          <p className="text-body-sm font-semibold text-on-surface-variant">
+                            {t('muted')}
+                          </p>
+                        )}
                       </div>
                       {isOwner && confirming !== m.user_id && (
-                        <button
-                          type="button"
-                          className={SECONDARY_BUTTON}
-                          onClick={() => setConfirming(m.user_id)}
-                        >
-                          {t('remove')}
-                        </button>
+                        <div className="flex flex-wrap gap-3">
+                          <button
+                            type="button"
+                            className={SECONDARY_BUTTON}
+                            disabled={muting === m.user_id}
+                            onClick={() => void toggleMute(m.user_id, !m.muted)}
+                          >
+                            {m.muted ? t('unmute') : t('mute')}
+                          </button>
+                          <button
+                            type="button"
+                            className={SECONDARY_BUTTON}
+                            onClick={() => setConfirming(m.user_id)}
+                          >
+                            {t('remove')}
+                          </button>
+                        </div>
                       )}
                     </div>
                     {isOwner && confirming === m.user_id && (
@@ -333,6 +380,11 @@ function PeopleSection({
           {removeFailed && (
             <div className="mt-4">
               <FormBanner>{t('removeFailed')}</FormBanner>
+            </div>
+          )}
+          {muteFailed && (
+            <div className="mt-4">
+              <FormBanner>{t('muteFailed')}</FormBanner>
             </div>
           )}
         </>

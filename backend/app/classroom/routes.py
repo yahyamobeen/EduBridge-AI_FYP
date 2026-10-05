@@ -1,7 +1,7 @@
 """
 Classroom routes — `tdd.md` §3.6: spaces, codes and membership (Phase 2), the
 stream (Phase 3), assignments, submissions and grades (Phase 4), the calendar
-(Phase 5), and files (Phase 6).
+(Phase 5), files (Phase 6) and the class chat (Phase 7).
 
 Thin by design: rate limit first, then one service call. Who may call is
 decided by the dependency on each route (app/classroom/dependencies.py); which
@@ -24,6 +24,7 @@ from app.classroom import (
     announcements,
     assignments,
     calendar,
+    chat,
     file_service,
     links,
     service,
@@ -42,6 +43,8 @@ from app.classroom.schemas import (
     AssignmentUpdateRequest,
     CalendarResponse,
     ChaptersResponse,
+    ChatMessage,
+    ChatPage,
     FileMeta,
     GradeRequest,
     JoinCodeRequest,
@@ -50,6 +53,8 @@ from app.classroom.schemas import (
     JoinResponse,
     LinkMeta,
     LinkRequest,
+    MessageCreateRequest,
+    MuteRequest,
     MySubmission,
     PeopleResponse,
     SpaceCreateRequest,
@@ -64,6 +69,8 @@ from app.classroom.schemas import (
 )
 from app.core.config import get_settings
 from app.core.ratelimit import (
+    CHAT_POLL_LIMIT,
+    CHAT_POST_LIMIT,
     CLASSROOM_JOIN_LIMIT,
     CLASSROOM_READ_LIMIT,
     CLASSROOM_WRITE_LIMIT,
@@ -492,3 +499,44 @@ def view_attachment_endpoint(
     request: Request, response: Response, file_id: UUID, ctx: Participant
 ) -> ViewLink:
     return _view(request, response, ctx, "material", file_id)
+
+
+# ── Phase 7: the class chat ─────────────────────────────────────────────────
+
+
+@router.get("/spaces/{space_id}/messages", response_model=ChatPage)
+def poll_messages_endpoint(
+    request: Request,
+    space_id: UUID,
+    ctx: Participant,
+    # The previous answer's `server_time`: a catch-up poll.
+    after: AwareDatetime | None = None,
+    # The previous answer's `older_cursor`: the page before it.
+    before: Annotated[str | None, Query(max_length=200)] = None,
+) -> ChatPage:
+    enforce(request, bucket="chat_poll", limit=CHAT_POLL_LIMIT, subject=str(ctx.user_id))
+    return ChatPage(**chat.poll(ctx.session, space_id, after, before))
+
+
+@router.post(
+    "/spaces/{space_id}/messages", response_model=ChatMessage, status_code=status.HTTP_201_CREATED
+)
+def post_message_endpoint(
+    request: Request, space_id: UUID, payload: MessageCreateRequest, ctx: Participant
+) -> ChatMessage:
+    enforce(request, bucket="chat_post", limit=CHAT_POST_LIMIT, subject=str(ctx.user_id))
+    return ChatMessage(**chat.post(ctx.session, ctx.user_id, space_id, payload.body))
+
+
+@router.delete("/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_message_endpoint(request: Request, message_id: UUID, ctx: Teacher) -> None:
+    _write(request, ctx)
+    chat.delete(ctx.session, ctx.user_id, message_id)
+
+
+@router.put("/spaces/{space_id}/members/{student_id}/mute", status_code=status.HTTP_204_NO_CONTENT)
+def mute_member_endpoint(
+    request: Request, space_id: UUID, student_id: UUID, payload: MuteRequest, ctx: Teacher
+) -> None:
+    _write(request, ctx)
+    chat.set_muted(ctx.session, ctx.user_id, space_id, student_id, payload.muted)

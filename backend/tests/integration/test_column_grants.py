@@ -418,8 +418,19 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
             # else. INSERT is app.create_space only; there is no DELETE, and
             # `owner_id`, `owner_role` and `subject_id` are not writable, so a
             # classroom can never be moved to another teacher or subject.
+            # 20261005130000 (classroom Phase 7) adds the chat lock, under the
+            # same owner-only policy.
+            ("classroom_space", "chat_locked", "UPDATE"),
             ("classroom_space", "status", "UPDATE"),
             ("classroom_space", "title", "UPDATE"),
+            # 20261005130000 (classroom Phase 7) — posting names the classroom,
+            # the author and the text, nothing else: `created_at` and the
+            # moderation columns take their defaults, so neither a message's
+            # time nor its deletion can be forged. The author is held to the
+            # caller by `space_message_insert`.
+            ("space_message", "author_id", "INSERT"),
+            ("space_message", "body", "INSERT"),
+            ("space_message", "space_id", "INSERT"),
             # Kept deliberately: dropping it would leave `student_profile` with
             # no updatable column at all. Nothing READS it any more —
             # `app_user.language_pref` is the source of truth as of

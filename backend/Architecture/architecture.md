@@ -29,7 +29,7 @@ The backend is a **single FastAPI application** with two routers. All server log
 | Package | Contents |
 |---|---|
 | `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
-| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–6b), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), and a student's links (`links.py`) — §2.8, §9.5 |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–7), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), a student's links (`links.py`), and the class chat (`chat.py`) — §2.8, §9.5 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -46,16 +46,16 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **42** | `find backend/app -type f -name "*.py" \| wc -l` |
-| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:75`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **59** (21 + 38) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Python source files | **43** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:82`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **63** (21 + 42) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
 | Routes specified in `tdd.md` | **87** (83 in v0.4.0, plus Phase 6b's 4) | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **28** | 87 − 59 |
-| Applied migrations | **31** | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **51** (22 unit, 29 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **51 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 49; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), or `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61` |
+| Specified but **not** implemented | **24** | 87 − 63 |
+| Applied migrations | **32** (all applied; `20261005130000`, the class chat, on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **52** (22 unit, 30 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **55 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 52; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61`, or `app.can_post_message`, which follows one in `classroom/chat.py:60` |
 
-*Re-measured 2026-10-05 (classroom Phase 6b); the rest of this page is the 2026-08-15 account unless a
+*Re-measured 2026-10-05 (classroom Phase 7); the rest of this page is the 2026-08-15 account unless a
 section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5. Citations into
 `main.py`, `core/ratelimit.py` and `core/config.py` were re-verified on 2026-10-05, when Phase 6
 moved all three — most had drifted well before that.*
@@ -101,7 +101,7 @@ HTTP request
   1  CORSMiddleware                       main.py:100
   2  request_context middleware           main.py:108  → X-Request-ID and three security headers
   3  route function                       auth/routes.py
-  4  enforce(...) rate limiter            core/ratelimit.py:154
+  4  enforce(...) rate limiter            core/ratelimit.py:160
   5  authenticated dependency             auth/dependencies.py:29   → binds app.current_user_id
   6  service function                     auth/service.py
   7  SQLAlchemy Core text()               → PostgreSQL under Row-Level Security
@@ -146,11 +146,11 @@ outside `/api` and outside the rate limiter.
 > **Known defect D16.** `/health` is unauthenticated, unrate-limited, and reports
 > `settings.environment` in its body (`main.py:131`).
 
-### 2.4 Rate limiter — `app/core/ratelimit.py:154`
+### 2.4 Rate limiter — `app/core/ratelimit.py:160`
 
 `enforce(request, bucket=..., limit=..., subject=...)` is called as the first statement of every
 rate-limited handler. It is an **in-process fixed-window counter** over a module-level dictionary
-guarded by a `threading.Lock` (`ratelimit.py:114-115`). Its own module docstring states the limit of
+guarded by a `threading.Lock` (`ratelimit.py:120-121`). Its own module docstring states the limit of
 that design, and it is quoted here rather than paraphrased:
 
 > "SCOPE, STATED PLAINLY: this is an IN-PROCESS fixed-window counter. It is a real control for a
@@ -160,18 +160,18 @@ that design, and it is quoted here rather than paraphrased:
 > upgrade, and the interface here does not change when it happens."
 > — `backend/app/core/ratelimit.py:9-14`
 
-Two keying strategies (`ratelimit.py:118`):
+Two keying strategies (`ratelimit.py:124`):
 
 - **Pre-authentication** buckets (`register`, `login`, `refresh`) key on `request.client.host`. The
-  comment at `ratelimit.py:129-133` records that behind a proxy this is the proxy's address, and that
+  comment at `ratelimit.py:135-139` records that behind a proxy this is the proxy's address, and that
   `X-Forwarded-For` is deliberately **not** trusted because any caller can set it.
 - **Authenticated** buckets pass `subject=str(ctx.user_id)` so the bucket is per-user. The reason is
   the deployment target: a Pakistani school laboratory or a mobile carrier puts a whole cohort
   behind one public address, so an address-keyed limit on the guardian-status poll would let fifteen
-  students exhaust the allowance for the building (`ratelimit.py:119-127`).
+  students exhaust the allowance for the building (`ratelimit.py:125-133`).
 
 A second, per-account layer exists for the 2FA (two-factor authentication) endpoints. The address
-ceilings are deliberately loose and the real bound is `enforce_subject` (`ratelimit.py:164`), called
+ceilings are deliberately loose and the real bound is `enforce_subject` (`ratelimit.py:170`), called
 from inside the service once a token has identified whose account it is
 (`service.py:720`, `:802`, `:923`, `:1042`).
 
@@ -192,7 +192,7 @@ from inside the service once a token has identified whose account it is
 | `password_forgot` | 30 / 300 s | — | `ratelimit.py:75` |
 | `password_reset` | 60 / 300 s | — | `ratelimit.py:76` |
 
-`rate_limited_with_retry` (`ratelimit.py:172`) puts a real `retry_after` into `details` so the
+`rate_limited_with_retry` (`ratelimit.py:178`) puts a real `retry_after` into `details` so the
 client's countdown is honest.
 
 > **Known defect E3.** `Retry-After` is placed in the JSON body's `details`, not in the HTTP
@@ -259,7 +259,7 @@ choice between two function names) and mark it `# noqa: S608` with the reason: `
 `update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
 bound parameter.
 
-### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–6b)
+### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–7)
 
 Same layers as above, with one difference that matters: **the database decides which classroom a
 caller may touch.** The route's dependency decides only *who* may call
@@ -334,9 +334,29 @@ download does, then signs a five-minute link to the storage service (§9.5): the
 the file on Supabase's domain, never in the application's own pages, and only a PDF or an image —
 Office files are download-only (owner decision 2026-10-05).
 
-Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`)
-and `file_upload` (30 per hour) / `file_download` (60 per minute, `:111-112`), all per user. Route
-table: [api-endpoints.md §2.8](api-endpoints.md). The object store itself is §9.5.
+The class chat (classroom Phase 7, `classroom/chat.py`, `20261005130000`) is **class-public** and
+is never the tutor conversation (invariant 8 in [database.md](database.md)). Three rules of its own:
+
+- **Who may post is the insert policy.** A student writes `space_message` directly — a
+  column-limited `INSERT` that `space_message_insert` holds to the caller and to
+  `app.can_post_message` (unmuted, unlocked, active, the guardian gate passed; the teacher always).
+  The service asks the same function first only so a member's refusal is a `details.reason` they
+  can act on — `archived`, `muted`, `chat_locked`.
+- **Polling, with the database's clock.** The poll's cursor is the reading transaction's `now()`,
+  never Python's; each catch-up re-reads a 15-second overlap, because insert order is not commit
+  order, and the client merges by id. Deletions reach a member as ids only
+  (`app.space_message_tombstones`), since a member cannot read a deleted row; a catch-up more than
+  200 messages behind starts again from the newest page (`reset`). SSE or WebSockets, and a shared
+  rate-limit store, are the scale-out path (`tdd.md` §3.6).
+- **Moderation is retained, and audited.** The teacher's delete stamps the row
+  (`app.delete_space_message`) and keeps it readable to them; mute is `enrollment.muted_at`
+  (`app.set_student_muted`); lock is `classroom_space.chat_locked`, through the existing `PATCH`.
+  Deleting and muting write `audit_log` rows.
+
+Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`),
+`file_upload` (30 per hour) / `file_download` (60 per minute, `:111-112`), and `chat_poll` (60 per
+minute) / `chat_post` (10 per minute, `:117-118`), all per user. Route table:
+[api-endpoints.md §2.8](api-endpoints.md). The object store itself is §9.5.
 
 ---
 
@@ -529,7 +549,7 @@ grep -rnE "SELECT (\*|[a-z_, ]+) FROM app\.|SELECT app\." backend/app --include=
 Client                Route              authenticated dep       PostgreSQL (app_backend)
   │  Authorization: Bearer <JWT>
   ├───────────────────►│
-  │                    │  enforce(...)  ← in-process, no I/O   core/ratelimit.py:117
+  │                    │  enforce(...)  ← in-process, no I/O   core/ratelimit.py:160
   │                    ├──────────────────►│
   │                    │                   │  decode_access_token   auth/security.py:92
   │                    │                   │  (signature + type=="access"; no database)

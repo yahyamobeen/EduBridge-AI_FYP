@@ -11,6 +11,8 @@ import type {
   BoardCode,
   CalendarResponse,
   ChaptersResponse,
+  ChatMessage,
+  ChatPage,
   EmailResendRequest,
   EmailVerifyRequest,
   EmailVerifyResponse,
@@ -577,4 +579,48 @@ export function viewSubmissionFile(fileId: string): Promise<ViewLink> {
 
 export function viewAttachment(fileId: string): Promise<ViewLink> {
   return apiFetch<ViewLink>(`/attachments/${seg(fileId)}/view`)
+}
+
+// Phase 7 — the class chat
+
+/**
+ * The chat poll. `after` (a previous `server_time`) asks for what is new;
+ * `before` (an `older_cursor`) for the page before; neither, for the newest page.
+ */
+export function getMessages(
+  spaceId: string,
+  query: { after?: string; before?: string } = {},
+  signal?: AbortSignal,
+): Promise<ChatPage> {
+  const params = new URLSearchParams()
+  if (query.after) params.set('after', query.after)
+  if (query.before) params.set('before', query.before)
+  const qs = params.toString()
+  return apiFetch<ChatPage>(
+    `/spaces/${seg(spaceId)}/messages${qs ? `?${qs}` : ''}`,
+    withSignal(signal),
+  )
+}
+
+export function postMessage(spaceId: string, body: string): Promise<ChatMessage> {
+  return apiFetch<ChatMessage>(`/spaces/${seg(spaceId)}/messages`, {
+    method: 'POST',
+    body: { body },
+  })
+}
+
+/** Soft: the teacher keeps reading it. Deleting twice is not an error. */
+export function deleteMessage(messageId: string): Promise<void> {
+  return apiFetch<void>(`/messages/${seg(messageId)}`, { method: 'DELETE' })
+}
+
+export function setMemberMuted(
+  spaceId: string,
+  studentId: string,
+  muted: boolean,
+): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(spaceId)}/members/${seg(studentId)}/mute`, {
+    method: 'PUT',
+    body: { muted },
+  })
 }

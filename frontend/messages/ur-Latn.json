@@ -621,6 +621,7 @@
       "label": "Classroom ke hisse",
       "stream": "Sargarmiyan",
       "classwork": "Classwork",
+      "chat": "Chat",
       "people": "Afraad"
     },
     "stream": {
@@ -807,6 +808,34 @@
       "addingFiles": "Files shamil ho rahi hain…",
       "notAttached": "Assignment ban gayi, lekin yeh files shamil nahin ho sakin: {names}. Inhein neeche dobara shamil karen."
     },
+    "chat": {
+      "heading": "Class chat",
+      "intro": "Is class ke sab log yahan likhi hui baat parh sakte hain.",
+      "logLabel": "Paighamat",
+      "loading": "Load ho raha hai…",
+      "unavailable": "Chat load nahin ho saki.",
+      "empty": "Abhi koi paigham nahin. Baat cheet shuru karen.",
+      "loadOlder": "Purane paighamat dekhein",
+      "teacherBadge": "Ustad",
+      "formerMember": "Sabiq rukn",
+      "deletedNote": "Hazf shuda — yeh paigham sirf aap dekh sakte hain.",
+      "delete": "Hazf karen",
+      "deleteConfirm": "Yeh paigham hazf karen? Talaba ise mazeed nahin dekh sakenge; aap ise yahan parh sakenge.",
+      "deleteFailed": "Paigham hazf nahin ho saka. Dobara koshish karen.",
+      "composerLabel": "Paigham",
+      "placeholder": "Class ke liye paigham likhein…",
+      "send": "Bhejein",
+      "sending": "Bheja ja raha hai…",
+      "sendFailed": "Aap ka paigham nahin bheja ja saka. Dobara koshish karen.",
+      "tooFast": "Aap bohat tezi se paighamat bhej rahe hain. {seconds, plural, one {# second} other {# seconds}} baad dobara koshish karen.",
+      "archived": "Yeh classroom archive hai, is liye is ki chat sirf parhi ja sakti hai.",
+      "muted": "Aap ke ustad ne is chat mein aap ke paighamat band kar diye hain. Aap ise parh sakte hain.",
+      "locked": "Aap ke ustad ne chat band kar di hai. Aap ise parh sakte hain.",
+      "lockedOwner": "Chat band hai: sirf aap paigham bhej sakte hain.",
+      "lock": "Chat band karen",
+      "unlock": "Chat kholein",
+      "lockFailed": "Chat mein tabdeeli nahin ho saki. Dobara koshish karen."
+    },
     "people": {
       "heading": "Afraad",
       "loading": "Load ho raha hai…",
@@ -818,7 +847,11 @@
       "joined": "Shamil hue {date}",
       "remove": "Nikaalein",
       "removeConfirm": "{name} ko nikaalein? Woh class code se dobara shamil nahin ho sakenge.",
-      "removeFailed": "Talib ilm ko nikala nahin ja saka. Dobara koshish karen."
+      "removeFailed": "Talib ilm ko nikala nahin ja saka. Dobara koshish karen.",
+      "mute": "Chat mein khamosh karen",
+      "unmute": "Khamoshi khatam karen",
+      "muted": "Chat mein khamosh",
+      "muteFailed": "Yeh tabdeeli nahin ho saki. Dobara koshish karen."
     },
     "code": {
       "heading": "Class code",

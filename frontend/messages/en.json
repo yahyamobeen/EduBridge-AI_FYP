@@ -621,6 +621,7 @@
       "label": "Classroom sections",
       "stream": "Stream",
       "classwork": "Classwork",
+      "chat": "Chat",
       "people": "People"
     },
     "stream": {
@@ -807,6 +808,34 @@
       "addingFiles": "Adding files…",
       "notAttached": "The assignment was created, but these files could not be added: {names}. Add them again below."
     },
+    "chat": {
+      "heading": "Class chat",
+      "intro": "Everyone in this class can read what is written here.",
+      "logLabel": "Messages",
+      "loading": "Loading…",
+      "unavailable": "The chat could not be loaded.",
+      "empty": "No messages yet. Start the conversation.",
+      "loadOlder": "Load older messages",
+      "teacherBadge": "Teacher",
+      "formerMember": "Former member",
+      "deletedNote": "Deleted — only you can see this message.",
+      "delete": "Delete",
+      "deleteConfirm": "Delete this message? Students will no longer see it; you can still read it here.",
+      "deleteFailed": "The message could not be deleted. Try again.",
+      "composerLabel": "Message",
+      "placeholder": "Write a message to the class…",
+      "send": "Send",
+      "sending": "Sending…",
+      "sendFailed": "Your message was not sent. Try again.",
+      "tooFast": "You are sending messages too quickly. Try again in {seconds, plural, one {# second} other {# seconds}}.",
+      "archived": "This classroom is archived, so its chat is read-only.",
+      "muted": "Your teacher has turned off your messages in this chat. You can still read it.",
+      "locked": "Your teacher has locked the chat. You can still read it.",
+      "lockedOwner": "The chat is locked: only you can post.",
+      "lock": "Lock chat",
+      "unlock": "Unlock chat",
+      "lockFailed": "The chat could not be changed. Try again."
+    },
     "people": {
       "heading": "People",
       "loading": "Loading…",
@@ -818,7 +847,11 @@
       "joined": "Joined {date}",
       "remove": "Remove",
       "removeConfirm": "Remove {name}? They will not be able to rejoin with the class code.",
-      "removeFailed": "The student could not be removed. Try again."
+      "removeFailed": "The student could not be removed. Try again.",
+      "mute": "Mute in chat",
+      "unmute": "Unmute",
+      "muted": "Muted in chat",
+      "muteFailed": "That could not be changed. Try again."
     },
     "code": {
       "heading": "Class code",

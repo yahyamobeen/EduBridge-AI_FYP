@@ -16,8 +16,8 @@ JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberatel
 `app_user` holds `password_hash` itself.
 
 **Two routers**: `app/auth/routes.py` (21 routes — authentication, guardian, reference) and
-`app/classroom/routes.py` (38 routes — classroom Phases 2–6b). `tdd.md` specifies **87
-endpoints — 28 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
+`app/classroom/routes.py` (42 routes — classroom Phases 2–7). `tdd.md` specifies **87
+endpoints — 24 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
 `app.*` functions only; never grant `app_backend` a write on `enrollment` or `join_code` to make a
 route easier (`Architecture/database.md`, invariant 9).
 `app/workers/` is scaffolded with a `.gitkeep` and nothing else.
@@ -110,7 +110,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20261005120000_submission_links.sql` (2026-10-05, with `supabase db push`).
+  `20261005130000_classroom_chat.sql` (2026-10-05, with `supabase db push`).
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
@@ -125,7 +125,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 ## 5. Testing
 
-51 test files: **22 in `tests/unit`**, **29 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-05).
+52 test files: **22 in `tests/unit`**, **30 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-05).
 
 `tests/unit` must stay runnable with **no connection string, no engine and no live project** —
 that is why `tests/conftest.py` has no fixtures and why `gate.py` and `onboarding.py` avoid
@@ -148,7 +148,9 @@ reason after `--`.
 - `DATABASE_URL` connects as **`app_backend`, never `postgres`.** The application refuses to start
   if its role reports `rolsuper` or `rolbypassrls`.
 - `question_key` has **no Row-Level Security policy** and must never gain one.
-- Chat content is **owner-only** — no teacher, parent or administrator read path.
+- **Tutor** chat content is **owner-only** — no teacher, parent or administrator read path. The
+  **class** chat (`space_message`, classroom Phase 7) is class-public by design and is a different
+  table; never let the two share one.
 - Secrets are never logged, never committed, never edited directly.
 
 ⚠️ **The database authorization layer does not currently hold.** `user-stories.md` card 1.5

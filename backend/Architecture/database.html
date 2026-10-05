@@ -110,13 +110,13 @@
     <h1>Database</h1>
     <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql
-    · classroom sections re-measured 2026-10-05 on branch add-classroom (31 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, and 20261005120000, submission links, on 2026-10-05)</p>
+    · classroom sections re-measured 2026-10-05 on branch add-classroom (32 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, 20261005120000, submission links, and 20261005130000, the class chat, on 2026-10-05)</p>
 
     <div class="grid">
       <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
-      <div class="stat"><div class="n">52</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
-      <div class="stat"><div class="n">95</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
-      <div class="stat"><div class="n">67</div><div class="l">live <code>app.*</code> functions · 65 are SECURITY DEFINER</div></div>
+      <div class="stat"><div class="n">53</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
+      <div class="stat"><div class="n">98</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
+      <div class="stat"><div class="n">71</div><div class="l">live <code>app.*</code> functions · 69 are SECURITY DEFINER</div></div>
     </div>
 
     <section class="prose">
@@ -125,7 +125,7 @@
       does not exist here. Every policy instead reads a transaction-scoped session setting through
       <code>app.current_user_id()</code>, bound by <code>SELECT set_config('app.current_user_id', :uid, true)</code> at
       <span class="ln">backend/app/core/db.py:33-59</span>.</p>
-      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 52 tables cannot render
+      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 53 tables cannot render
       legibly in a single diagram, and the point of a diagram is to be read. The complete field lists, the full policy
       catalogue with every <code>USING</code> and <code>WITH CHECK</code> predicate, the invariants and the known gaps live in
       <a href="database.md">database.md</a>, which is the authoritative page; this one is its visual companion.</p>
@@ -367,6 +367,8 @@ erDiagram
     assignment      ||--o{ material_attachment : "teacher files (or)"
     assignment_submission ||--o{ submission_file : "student files, max 5"
     assignment_submission ||--o{ submission_link : "student links, max 5"
+    classroom_space ||--o{ space_message   : "class chat, class-public"
+    app_user        ||--o{ space_message   : "as author_id (RESTRICT)"
     app_user        ||--o{ enrollment      : "as student_id"
     subject         ||--o{ classroom_space : "the class's subject"
     app_user        ||--o{ teacher_subject_scope : "self-declared by app.create_space"
@@ -378,6 +380,7 @@ erDiagram
         uuid subject_id FK "required when teacher"
         text title "1-120 chars"
         space_status status "active|archived — never deleted"
+        boolean chat_locked "only the teacher posts while true"
     }
     teacher_subject_scope {
         uuid teacher_id PK
@@ -398,7 +401,7 @@ erDiagram
         timestamptz joined_at
         timestamptz left_at "soft leave"
         timestamptz removed_at "teacher removal; blocks rejoin"
-        timestamptz muted_at "chat phase; survives rejoin"
+        timestamptz muted_at "app.set_student_muted; survives rejoin"
     }
     announcement {
         uuid id PK
@@ -462,6 +465,15 @@ erDiagram
         uuid student_id FK
         text url "https only, unique per submission"
     }
+    space_message {
+        uuid id PK
+        uuid space_id FK
+        uuid author_id FK "the caller (insert policy)"
+        text body "1-1000 chars, plain text"
+        timestamptz created_at "clock_timestamp(), not insertable"
+        timestamptz deleted_at "soft delete, retained"
+        uuid deleted_by FK "the teacher"
+    }
     </div></div>
     <p><code>ck_teacher_space_has_subject</code> <span class="ln">:334</span> forces a teacher space to declare its subject,
     because subject-scoping depends on it. Join codes are never readable by students — they receive the code out of band.</p>
@@ -512,6 +524,18 @@ erDiagram
       written only by <code>app.add_submission_link</code> / <code>app.remove_submission_link</code> and readable exactly like a
       file: the student always, the teacher once turned in and while the student stays. The old single
       <code>assignment_submission.link_url</code> is copied into the table and cleared; the column stays, unread.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261005130000 — the class chat (applied 2026-10-05)</span>
+      <code>space_message</code> is <strong>class-public</strong> and is never the tutor <code>message</code> table. A member
+      posts with a column-limited <code>INSERT (space_id, author_id, body)</code>, held by <code>space_message_insert</code> to
+      the caller and to <code>app.can_post_message</code>: an active, <strong>unmuted</strong> member of an
+      <strong>unlocked</strong>, active classroom who passes the guardian gate — or its teacher, who may post while it is
+      locked. The time and the moderation columns cannot be supplied. A deletion is a stamp
+      (<code>app.delete_space_message</code>), never a <code>DELETE</code>: members stop reading the row, the teacher keeps
+      it for review. <code>classroom_space.chat_locked</code> joins the owner's column grant; <code>enrollment.muted_at</code>
+      is written by <code>app.set_student_muted</code>. Deleting an account does not delete its messages
+      (<code>author_id</code> is <code>ON DELETE RESTRICT</code>, owner decision 2026-10-05).
     </div>
 
     <!-- ════════════════════════ ASSESSMENT ════════════════════════ -->
@@ -759,7 +783,7 @@ erDiagram
     <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
     <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
     superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.
-    <strong>95</strong> policy objects are live on a shadow database built from all 31 migrations and on the live
+    <strong>98</strong> policy objects are live on a shadow database built from all 32 migrations and on the live
     database (2026-10-05); the groups
     below summarise them by domain and are not the complete list — database.md is.</p>
 
@@ -825,7 +849,7 @@ erDiagram
       <table>
         <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
         <tr><td><code>classroom_space</code></td><td><code>space_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:261</span></td></tr>
-        <tr><td><code>classroom_space</code></td><td><code>space_owner_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>app.owns_space(id)</code></td><td><code>app.owns_space(id)</code> — column grant <code>(title, status)</code> only</td><td><span class="ln">20261004120000</span> §2 (replaced <code>space_owner_write</code>, B10)</td></tr>
+        <tr><td><code>classroom_space</code></td><td><code>space_owner_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>app.owns_space(id)</code></td><td><code>app.owns_space(id)</code> — column grant <code>(title, status)</code>, and <code>chat_locked</code> since <code>20261005130000</code></td><td><span class="ln">20261004120000</span> §2 (replaced <code>space_owner_write</code>, B10)</td></tr>
         <tr><td><code>join_code</code></td><td><code>join_code_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>— no write grant</td><td><span class="ln">20261004120000</span> §3 (replaced <code>join_code_owner</code>)</td></tr>
         <tr><td><code>enrollment</code></td><td><code>enrollment_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid() OR app.owns_space(space_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:281</span></td></tr>
         <tr><td colspan="6"><em><code>enrollment_student_join</code> (INSERT into any space) and <code>enrollment_leave</code> (no WITH CHECK) were
@@ -852,9 +876,12 @@ erDiagram
         <tr><td><code>submission_file</code></td><td><code>subfile_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code> AND the submission is turned in — both stated, not inherited</td><td>—</td><td><span class="ln">20261004150000:182</span></td></tr>
         <tr><td><code>submission_link</code></td><td><code>link_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261005120000:59</span></td></tr>
         <tr><td><code>submission_link</code></td><td><code>link_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td>the file rule: taught student <strong>and</strong> turned in</td><td>—</td><td><span class="ln">20261005120000:63</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code> — deleted messages too</td><td>—</td><td><span class="ln">20261005130000:120</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>deleted_at IS NULL AND space_id IN (SELECT app.my_member_space_ids())</code></td><td>—</td><td><span class="ln">20261005130000:126</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>author_id = cuid() AND app.can_post_message(space_id)</code></td><td><span class="ln">20261005130000:130</span></td></tr>
         <tr><td colspan="6"><em>No write policy on <code>assignment_submission</code>, <code>submission_grade</code> or
-        <code>submission_file</code> or <code>submission_link</code>, no DELETE policy on <code>assignment</code>, and no INSERT or UPDATE policy on
-        <code>material_attachment</code>: every such change is a function (below).</em></td></tr>
+        <code>submission_file</code> or <code>submission_link</code>, no DELETE policy on <code>assignment</code>, no INSERT or UPDATE policy on
+        <code>material_attachment</code>, and no UPDATE or DELETE policy on <code>space_message</code>: every such change is a function (below).</em></td></tr>
       </table>
     </details>
 
@@ -921,10 +948,10 @@ erDiagram
     <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
 
     <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
-    <h2>The <code>app.*</code> privileged functions — 67 live</h2>
-    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 31 migration files, and matched on the live
+    <h2>The <code>app.*</code> privileged functions — 71 live</h2>
+    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 32 migration files, and matched on the live
     database; the paragraph below is the 2026-08-15 account and its
-    counts are historical. None of the 67 is executable by <code>PUBLIC</code>.</em></p>
+    counts are historical. None of the 71 is executable by <code>PUBLIC</code>.</em></p>
     <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
     of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
     <strong>35 are <code>SECURITY DEFINER</code></strong> and <strong>36 carry <code>SET search_path = public, pg_temp</code></strong>
@@ -1004,6 +1031,17 @@ erDiagram
         are internal — <strong>no grant</strong>.</em></td></tr>
         <tr><td><code>app.add_submission_link(uuid, text)</code> <span class="ln">20261005120000:72</span></td><td><code>POST /api/assignments/{id}/submission/links</code></td><td><code>added</code> (also for a link already there) · <code>forbidden</code> · <code>invalid_url</code> · <code>graded</code> · <code>turned_in</code> · <code>too_many_links</code> (5)</td></tr>
         <tr><td><code>app.remove_submission_link(uuid)</code> <span class="ln">20261005120000:121</span></td><td><code>DELETE /api/submission-links/{id}</code></td><td><code>removed</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code></td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the class chat (<span class="ln">20261005130000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.can_post_message(uuid)</code> <span class="ln">20261005130000:89</span></td><td>the <code>space_message_insert</code> policy; <code>GET</code> / <code>POST /api/spaces/{id}/messages</code></td><td><code>true</code> · <code>false</code> — the teacher always (even locked); otherwise unlocked, an active unmuted member, the guardian gate passed; fails closed. Granted, because a policy calls it</td></tr>
+        <tr><td><code>app.delete_space_message(uuid)</code> <span class="ln">20261005130000:137</span></td><td><code>DELETE /api/messages/{id}</code></td><td><code>deleted</code> · <code>already_deleted</code> · <code>forbidden</code> — soft, retained; works on an archived classroom</td></tr>
+        <tr><td><code>app.set_student_muted(uuid, uuid, boolean)</code> <span class="ln">20261005130000:165</span></td><td><code>PUT /api/spaces/{id}/members/{student_id}/mute</code></td><td><code>true</code> · <code>false</code> — the teacher, an active member only; survives leaving and rejoining</td></tr>
+        <tr><td><code>app.space_message_tombstones(uuid, timestamptz)</code> <span class="ln">20261005130000:184</span></td><td><code>GET /api/spaces/{id}/messages</code></td><td>ids deleted since a time — never content — for the teacher and current members</td></tr>
       </table>
     </details>
 
@@ -1096,7 +1134,7 @@ erDiagram
       <tr>
         <td><strong>Chat is owner-only</strong></td>
         <td>A minor's chat is private. No teacher, parent or admin path, and no privileged function touches the three tables. Re-verified; holds.
-        The class-public <strong>classroom</strong> chat brought into v1 on 2026-10-03 is a separate table (<code>space_message</code>, classroom Phase 7) and must never reuse these.</td>
+        The class-public <strong>classroom</strong> chat brought into v1 on 2026-10-03 is a separate table (<code>space_message</code>, <code>20261005130000</code>) and must never reuse these.</td>
         <td><span class="ln">20260801120100:432-465</span></td>
       </tr>
       <tr>
@@ -1118,6 +1156,11 @@ erDiagram
         <td><strong>A stored file is authorized by its row, and its key is held to its owner</strong></td>
         <td>A download — or a five-minute view link (Phase 6b), for PDF and images only — is handed out only after the file's row is read under Row-Level Security; the bucket is private with no <code>storage.objects</code> policy. <code>ck_material_key</code> / <code>ck_subfile_key</code> refuse a key outside the owner's prefix. Objects are deleted only after the deleting transaction commits, so a rollback can orphan an object, never a row.</td>
         <td><span class="ln">20261004150000</span></td>
+      </tr>
+      <tr>
+        <td><strong>Who may post in the class chat is the insert policy</strong></td>
+        <td>A muted student, a locked chat, an archived classroom, a student who left and a Class 9–10 student without a verified guardian are each refused by PostgreSQL through <code>app.can_post_message</code>. A deletion is a stamp, never a <code>DELETE</code>. Do not add an UPDATE or DELETE grant, a member read path to deleted rows, or a second way to post.</td>
+        <td><span class="ln">20261005130000</span></td>
       </tr>
     </table>
 

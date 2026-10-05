@@ -110,6 +110,12 @@ CLASSROOM_JOIN_LIMIT = Limit(max_requests=10, window_seconds=300)
 # so it is metered more tightly than an ordinary read.
 FILE_UPLOAD_LIMIT = Limit(max_requests=30, window_seconds=3600)
 FILE_DOWNLOAD_LIMIT = Limit(max_requests=60, window_seconds=60)
+# The class chat (Phase 7), per user. A poll every 5 s is 12 a minute per open
+# tab; 60 leaves room for two tabs, catching up and loading older messages.
+# Posting is rate-limited because prd.md CL-5 requires it: 10 a minute is a
+# conversation, not a flood.
+CHAT_POLL_LIMIT = Limit(max_requests=60, window_seconds=60)
+CHAT_POST_LIMIT = Limit(max_requests=10, window_seconds=60)
 
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)

@@ -327,13 +327,19 @@ export type SpaceSummary = {
 export type SpaceDetail = SpaceSummary & {
   /** The live join code — the database returns it to a scoped owner only. */
   join_code: string | null
+  /** While true only the teacher posts in the class chat (Phase 7). */
+  chat_locked: boolean
 }
 
 export type SpaceListResponse = { spaces: SpaceSummary[] }
 
 export type SpaceCreateRequest = { title: string; subject_id: string }
 
-export type SpaceUpdateRequest = { title?: string; status?: SpaceStatus }
+export type SpaceUpdateRequest = {
+  title?: string
+  status?: SpaceStatus
+  chat_locked?: boolean
+}
 
 export type JoinCodeResponse = { join_code: string | null }
 
@@ -575,3 +581,36 @@ export type LinkRefusalReason = 'too_many_links' | 'graded' | 'turned_in'
  * service's own domain. A bearer pass until `expires_at`: open it, never keep it.
  */
 export type ViewLink = { url: string; expires_at: string }
+
+// Phase 7 — the class chat
+
+/** One message in a classroom's chat. Plain text: never rendered as HTML. */
+export type ChatMessage = {
+  id: string
+  author_id: string
+  body: string
+  created_at: string
+  /** True only in the teacher's view: a member never receives a deleted message. */
+  deleted: boolean
+}
+
+/** GET /spaces/{id}/messages. */
+export type ChatPage = {
+  /** Oldest first. */
+  messages: ChatMessage[]
+  /** Deleted since `after` — remove them (a member), or mark them deleted (the teacher). */
+  deleted_ids: string[]
+  /** Pass as `before` for the page of older messages; null when there are none. */
+  older_cursor: string | null
+  /** The DATABASE clock: the next poll's `after`. */
+  server_time: string
+  /** The catch-up was too far behind: replace what is shown with `messages`. */
+  reset: boolean
+  chat_locked: boolean
+  can_post: boolean
+  /** The caller's own mute, so the screen can say why they cannot post. */
+  muted: boolean
+}
+
+/** `details.reason` on a 400 from POST /spaces/{id}/messages. */
+export type ChatRefusalReason = 'archived' | 'muted' | 'chat_locked'

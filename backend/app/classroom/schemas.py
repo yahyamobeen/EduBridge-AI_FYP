@@ -52,6 +52,8 @@ class SpaceDetail(SpaceSummary):
     # row to anyone else, so a member gets None from the DATABASE, not from a
     # check in this file.
     join_code: str | None
+    # While true only the teacher posts in the class chat (Phase 7).
+    chat_locked: bool
 
 
 class SpaceCreateRequest(BaseModel):
@@ -69,6 +71,8 @@ class SpaceCreateRequest(BaseModel):
 class SpaceUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     status: SpaceStatus | None = None
+    # Phase 7: lock or unlock the class chat.
+    chat_locked: bool | None = None
 
     @field_validator("title")
     @classmethod
@@ -77,10 +81,10 @@ class SpaceUpdateRequest(BaseModel):
 
     def validate_at_least_one_field(self) -> None:
         """An empty PATCH is a 400, not a silent 200 (the MeUpdateRequest rule)."""
-        if self.title is None and self.status is None:
+        if self.title is None and self.status is None and self.chat_locked is None:
             raise validation_error(
                 message="Provide at least one field to update.",
-                details={"fields": {"title": "Provide this or status."}},
+                details={"fields": {"title": "Provide this, status or chat_locked."}},
             )
 
 
@@ -423,3 +427,50 @@ class CalendarResponse(BaseModel):
     items: list[CalendarItem]
     # True when the range held more than the 500-entry cap.
     truncated: bool
+
+
+# ── Phase 7: the class chat ─────────────────────────────────────────────────
+
+
+class ChatMessage(BaseModel):
+    id: UUID
+    author_id: UUID
+    body: str
+    created_at: datetime
+    # Only the classroom's teacher ever receives a deleted message (retained for
+    # review); a member's query never returns one (space_message_member_read).
+    deleted: bool
+
+
+class ChatPage(BaseModel):
+    # Oldest first.
+    messages: list[ChatMessage]
+    # Messages deleted since `after`: a member cannot read a deleted row, so this
+    # is how one disappears from their screen. Empty unless `after` was sent.
+    deleted_ids: list[UUID]
+    # Pass as `before` for the page of older messages; None when there are none,
+    # and on a catch-up poll.
+    older_cursor: str | None
+    # The DATABASE clock when this answer was read: the next poll's `after`.
+    server_time: datetime
+    # True when a catch-up poll was too far behind: `messages` is then the newest
+    # page, and the client starts again from it instead of merging.
+    reset: bool
+    chat_locked: bool
+    # Whether the caller may post now, and — for a student — whether they are
+    # muted, so the screen can say why not.
+    can_post: bool
+    muted: bool
+
+
+class MessageCreateRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("body")
+    @classmethod
+    def strip_body(cls, value: str) -> str:
+        return _strip_nonempty(value)
+
+
+class MuteRequest(BaseModel):
+    muted: bool

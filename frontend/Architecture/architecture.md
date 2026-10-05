@@ -15,11 +15,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 |---|---|---|
 | Pages | **29** (4 added by classroom Phase 2, 2 by Phase 5) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **41** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **43** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **739**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **770**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-05 (classroom Phase 6c).*
+*Re-measured 2026-10-05 (classroom Phase 7).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -156,8 +156,9 @@ entry — each list page links to its calendar. Components live in `components/c
   session role.** A teacher whose subject scope was revoked is still `owner` but gets no controls and
   is told why. Not the security boundary — the database is — but `prd.md` §4.2 forbids rendering a
   control the caller cannot use. Since classroom Phase 3 its sections are tabs — **Stream** (the
-  default), **Classwork** (Phase 4) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
-  `TABS` constant.
+  default), **Classwork** (Phase 4), **Chat** (Phase 7) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
+  `TABS` constant. On People the owner can also **mute** a student in the chat (and unmute them);
+  the "Muted in chat" label comes from the server's `muted`, which only the owner receives.
 - **`StreamTab.tsx`** (classroom Phase 3) — announcements, newest first. **Nothing here filters
   scheduled posts**: a member never receives one, because the database withholds it
   (`announcement_member_read`), so the owner alone sees the "Scheduled for" badge. Bodies render as
@@ -192,6 +193,27 @@ entry — each list page links to its calendar. Components live in `components/c
   refused before sending; "Save and return" sends `return_to_student: true`, and the row updates in
   place from the response. In an archived classroom the work is still readable and grading is
   hidden, matching the database, which refuses it.
+- **`ChatTab.tsx`** (classroom Phase 7) — the class chat. It **says it is class-public** above the
+  messages ("Everyone in this class can read what is written here"). Names come from the roster
+  (`getPeople`), the one place the database releases them; an author the roster no longer lists
+  refreshes it **once** and is then a "former member". ⚠️ **The Teacher badge comes from
+  `people.owner.user_id`, never from a name**, so a student who calls themselves "Sir Ahmed" gets
+  none. Bodies are plain text (`whitespace-pre-wrap`). Enter sends and Shift+Enter starts a new
+  line — never while an input method is composing, which matters for Urdu. A student who cannot
+  post sees why instead of the box: archived, muted, or locked; a post refused before the next poll
+  noticed (`details.reason`) shows the same reason, and a `RATE_LIMITED` one how long to wait; a
+  failed send keeps the draft. The owner gets a per-message Delete behind `ConfirmInline` — the
+  message stays on their screen, marked deleted, because the server keeps it for them — and a
+  Lock / Unlock chat button (`PATCH /spaces/{id}` with `chat_locked`), and can still post while
+  locked.
+- **`useChatPoll.ts`** (classroom Phase 7) — the poll behind it. A `setTimeout` **chain**, never
+  `setInterval`, every 5 s (`POLL_MS`), so two polls never overlap on a slow connection; nothing
+  while the tab is hidden, and an immediate catch-up when it is shown again. The cursor is the
+  server's `server_time` — the database clock, never this device's. Messages are a `Map` by id, so
+  the overlap window's repeats merge away; `deleted_ids` removes a member's copy and marks the
+  teacher's; `reset` replaces everything with the newest page. A 429 waits as long as `retry_after`
+  says; a 403 (removed, gated) stops polling and says the chat is unavailable; anything else keeps
+  what is on screen and tries again.
 - **`JoinClassForm.tsx`** — branches on `details.reason` (`invalid_code`, `class_mismatch` with the
   class named, `classroom_full`) and on `GATE_PENDING` / `RATE_LIMITED`; never on `message`.
 - **`CreateClassForm.tsx`** — board → class → subject from `/reference/enums` and
@@ -567,7 +589,7 @@ burned attempt. On `/auth/login` a 401 means the password was wrong, so refreshi
 ### File transfer — raw bodies and blobs (classroom Phase 6)
 
 Two options on `ApiRequestInit` (`client.ts:195`), used only by the file wrappers in
-`endpoints.ts:515-580`:
+`endpoints.ts:517-582`:
 
 - **`rawBody`** (`:203`) sends a `Blob` — a `File` — **as-is**: no JSON encoding and no JSON
   `Content-Type`; the caller sets the type (`:226-242`). Uploads are never multipart, because the
@@ -629,7 +651,7 @@ The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot rea
 
 The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:230`) on every call.
 
-`startSession` (`endpoints.ts:288-290`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:290-292`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -655,7 +677,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **739 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–6c added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734 and 739).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **770 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739 and 770).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -916,7 +938,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:292-301`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:299`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:294-303`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:301`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

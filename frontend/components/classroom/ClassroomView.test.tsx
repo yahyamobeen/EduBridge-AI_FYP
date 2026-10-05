@@ -34,6 +34,8 @@ const getPeople = vi.fn()
 const leaveSpace = vi.fn()
 const removeMember = vi.fn()
 const changeJoinCode = vi.fn()
+const setMemberMuted = vi.fn()
+const getMessages = vi.fn()
 let me: MeResponse
 vi.mock('@/lib/api/endpoints', () => ({
   getMe: () => Promise.resolve(me),
@@ -49,6 +51,9 @@ vi.mock('@/lib/api/endpoints', () => ({
   // Classwork, opened directly by a calendar link (Phase 5).
   getAssignment: (...a: unknown[]) => getAssignment(...a),
   listAssignments: () => Promise.resolve({ items: [], next_cursor: null }),
+  // The class chat and its moderation (Phase 7).
+  getMessages: (...a: unknown[]) => getMessages(...a),
+  setMemberMuted: (...a: unknown[]) => setMemberMuted(...a),
 }))
 
 const getAssignment = vi.fn()
@@ -81,6 +86,7 @@ function space(overrides: Partial<SpaceDetail> = {}): SpaceDetail {
     member_count: null,
     joined_at: '2026-10-01T10:00:00Z',
     join_code: null,
+    chat_locked: false,
     ...overrides,
   }
 }
@@ -121,6 +127,16 @@ async function peopleSection() {
 beforeEach(() => {
   vi.clearAllMocks()
   getPeople.mockResolvedValue(PEOPLE)
+  getMessages.mockResolvedValue({
+    messages: [],
+    deleted_ids: [],
+    older_cursor: null,
+    server_time: '2026-10-05T10:00:00+00:00',
+    reset: false,
+    chat_locked: false,
+    can_post: true,
+    muted: false,
+  })
 })
 
 describe('a member', () => {
@@ -139,7 +155,21 @@ describe('a member', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText(en.classroom.code.heading)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: en.classroom.people.remove })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.classroom.people.mute })).toBeNull()
     expect(screen.queryByRole('button', { name: en.classroom.manage.archive })).toBeNull()
+  })
+
+  it('opens the class chat from its tab', async () => {
+    wrap(<StudentClassroom spaceId={SPACE_ID} />)
+    await userEvent.click(
+      await screen.findByRole('tab', { name: en.classroom.tabs.chat }, LOADED),
+    )
+    expect(
+      await screen.findByRole('heading', { name: en.classroom.chat.heading }, LOADED),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(getMessages).toHaveBeenCalledWith(SPACE_ID, {}, expect.anything()),
+    )
   })
 
   it('leaves only after confirming, then returns to the list', async () => {
@@ -201,6 +231,35 @@ describe('the owner', () => {
     expect(removeMember).toHaveBeenCalledWith(SPACE_ID, 's-1')
     const people = await peopleSection()
     await waitFor(() => expect(within(people).queryByText('Aisha Khan')).toBeNull())
+  })
+
+  it('mutes a student in the chat and unmutes them', async () => {
+    setMemberMuted.mockResolvedValue(undefined)
+    wrap(<TeacherClassroom spaceId={SPACE_ID} />)
+    const people = await peopleSection()
+    await userEvent.click(
+      await within(people).findByRole('button', { name: en.classroom.people.mute }, LOADED),
+    )
+    expect(setMemberMuted).toHaveBeenCalledWith(SPACE_ID, 's-1', true)
+    expect(await within(people).findByText(en.classroom.people.muted)).toBeInTheDocument()
+    await userEvent.click(
+      within(people).getByRole('button', { name: en.classroom.people.unmute }),
+    )
+    expect(setMemberMuted).toHaveBeenLastCalledWith(SPACE_ID, 's-1', false)
+    await waitFor(() =>
+      expect(within(people).queryByText(en.classroom.people.muted)).toBeNull(),
+    )
+  })
+
+  it('says when muting fails and leaves the student as they were', async () => {
+    setMemberMuted.mockRejectedValue(new Error('offline'))
+    wrap(<TeacherClassroom spaceId={SPACE_ID} />)
+    const people = await peopleSection()
+    await userEvent.click(
+      await within(people).findByRole('button', { name: en.classroom.people.mute }, LOADED),
+    )
+    expect(await within(people).findByText(en.classroom.people.muteFailed)).toBeInTheDocument()
+    expect(within(people).queryByText(en.classroom.people.muted)).toBeNull()
   })
 })
 

@@ -15,6 +15,8 @@ from app.classroom.schemas import (
     GradeRequest,
     JoinRequest,
     LinkRequest,
+    MessageCreateRequest,
+    MuteRequest,
     SpaceCreateRequest,
     SpaceUpdateRequest,
     SubmissionDraftRequest,
@@ -46,6 +48,10 @@ class TestSpaceUpdateRequest:
 
     def test_status_alone_is_enough(self):
         SpaceUpdateRequest(status="archived").validate_at_least_one_field()
+
+    def test_the_chat_lock_alone_is_enough(self):
+        # False is a value, not an absence: unlocking is an update.
+        SpaceUpdateRequest(chat_locked=False).validate_at_least_one_field()
 
     def test_unknown_status_is_refused(self):
         with pytest.raises(ValidationError):
@@ -167,3 +173,25 @@ class TestGradeRequest:
             "feedback": "Good start",
             "return_to_student": False,
         }
+
+
+class TestMessageCreateRequest:
+    def test_body_is_stripped(self):
+        assert MessageCreateRequest(body="  Is the test on Monday?\n").body == (
+            "Is the test on Monday?"
+        )
+
+    @pytest.mark.parametrize("bad", ["", "   ", "\n\t", "x" * 1001])
+    def test_blank_or_over_long_is_refused(self, bad):
+        # Blank would reach ck_space_message_body as a 500; 1000 is its bound.
+        with pytest.raises(ValidationError):
+            MessageCreateRequest(body=bad)
+
+    def test_a_thousand_characters_is_allowed(self):
+        assert len(MessageCreateRequest(body="x" * 1000).body) == 1000
+
+
+class TestMuteRequest:
+    def test_muted_is_required(self):
+        with pytest.raises(ValidationError):
+            MuteRequest()

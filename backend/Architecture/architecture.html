@@ -136,7 +136,7 @@
       <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
       <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
       the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
-      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, and a student's links — classroom Phases 2–6b), <code>app/core/</code> (configuration, the
+      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, a student's links, and the class chat — classroom Phases 2–7), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -146,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">42</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:75</span></div></div>
-        <div class="stat"><div class="n">59</div><div class="l">implemented routes · 21 auth + 38 classroom</div></div>
-        <div class="stat"><div class="n">28</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 59</div></div>
-        <div class="stat"><div class="n">31</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">51</div><div class="l">test files · 22 unit + 29 integration</div></div>
+        <div class="stat"><div class="n">43</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:82</span></div></div>
+        <div class="stat"><div class="n">63</div><div class="l">implemented routes · 21 auth + 42 classroom</div></div>
+        <div class="stat"><div class="n">24</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 63</div></div>
+        <div class="stat"><div class="n">32</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">52</div><div class="l">test files · 22 unit + 30 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -190,7 +190,7 @@ flowchart TB
     H["GET /health<br/><span class='ln'>main.py:126 · outside /api, unlimited</span>"]
   end
   subgraph L4["4 · Rate limit"]
-    RL["enforce(...)<br/><span class='ln'>core/ratelimit.py:154 · in-process, single instance</span>"]
+    RL["enforce(...)<br/><span class='ln'>core/ratelimit.py:160 · in-process, single instance</span>"]
   end
   subgraph L5["5 · Identity"]
     AU["authenticated<br/><span class='ln'>auth/dependencies.py:29 · binds app.current_user_id</span>"]
@@ -259,26 +259,26 @@ flowchart TB
       <strong>Known defect D16:</strong> it is unauthenticated, unrate-limited, and reports
       <code>settings.environment</code> <span class="ln">main.py:131</span>.</p>
 
-      <h3>4 · Rate limiter <span class="ln">core/ratelimit.py:154</span></h3>
+      <h3>4 · Rate limiter <span class="ln">core/ratelimit.py:160</span></h3>
       <p><code>enforce(request, bucket=…, limit=…, subject=…)</code> is the first statement of every rate-limited
       handler. It is an <strong>in-process fixed-window counter</strong> over a module-level dictionary guarded by a
-      <code>threading.Lock</code> <span class="ln">ratelimit.py:114-115</span>. Its own docstring states the limit of that
+      <code>threading.Lock</code> <span class="ln">ratelimit.py:120-121</span>. Its own docstring states the limit of that
       design, quoted rather than paraphrased:</p>
       <blockquote>SCOPE, STATED PLAINLY: this is an IN-PROCESS fixed-window counter. It is a real control for a
       single-process deployment and it is NOT sufficient for several workers or several instances, because each keeps
       its own counters — N workers means N times the allowance. <code>REDIS_URL</code> is already in the environment
       template for exactly this reason; moving the store there is the upgrade, and the interface here does not change
       when it happens. <span class="ln">core/ratelimit.py:9-14</span></blockquote>
-      <p>Two keying strategies <span class="ln">ratelimit.py:118</span>. <strong>Pre-authentication</strong> buckets
+      <p>Two keying strategies <span class="ln">ratelimit.py:124</span>. <strong>Pre-authentication</strong> buckets
       (<code>register</code>, <code>login</code>, <code>refresh</code>) key on <code>request.client.host</code>; behind a
       proxy that is the proxy, and <code>X-Forwarded-For</code> is deliberately <em>not</em> trusted because any caller
-      can set it <span class="ln">ratelimit.py:129-133</span>. <strong>Authenticated</strong> buckets pass
+      can set it <span class="ln">ratelimit.py:135-139</span>. <strong>Authenticated</strong> buckets pass
       <code>subject=str(ctx.user_id)</code> so the bucket is per-user — the deployment target is Pakistani school
       laboratories and mobile carriers, where a whole cohort shares one public address, so an address key would let
       fifteen students polling the guardian screen exhaust the allowance for the building
-      <span class="ln">ratelimit.py:119-127</span>.</p>
+      <span class="ln">ratelimit.py:125-133</span>.</p>
       <p>The 2FA endpoints carry a second, per-account layer: the address ceilings are deliberately loose and the real
-      bound is <code>enforce_subject</code> <span class="ln">ratelimit.py:164</span>, called from inside the service once
+      bound is <code>enforce_subject</code> <span class="ln">ratelimit.py:170</span>, called from inside the service once
       a token has identified whose account it is <span class="ln">service.py:720, :802, :923, :1042</span>.</p>
       <table>
         <thead><tr><th>Bucket</th><th>Address limit</th><th>Per-account limit</th><th>Defined at</th></tr></thead>
@@ -299,7 +299,7 @@ flowchart TB
           <tr><td><code>password_reset</code></td><td>60 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:76</span></td></tr>
         </tbody>
       </table>
-      <p><code>rate_limited_with_retry</code> <span class="ln">ratelimit.py:172</span> puts a real
+      <p><code>rate_limited_with_retry</code> <span class="ln">ratelimit.py:178</span> puts a real
       <code>retry_after</code> into <code>details</code> so the client's countdown is honest.
       <strong>Known defect E3:</strong> it goes into the JSON body, not the HTTP <code>Retry-After</code> header that
       <code>tdd.md</code> §7.3 specifies.</p>
@@ -339,7 +339,7 @@ flowchart TB
       statement's <em>shape</em> from fixed literals and mark it <code># noqa: S608</code>: <code>auth/service.py</code>
       <code>update_me</code>, and <code>classroom/service.py</code> <code>require_owner</code> and <code>update_space</code>.</p>
 
-      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–6)</h3>
+      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–7)</h3>
       <p>Same layers, one difference: <strong>the database decides which classroom a caller may touch.</strong> The
       dependency decides only <em>who</em> may call — <code>participant</code> and <code>gated_student</code> wrap
       <code>require_guardian_verified</code>; leaving uses <code>require_role('student')</code> alone, because leaving is a
@@ -349,7 +349,8 @@ flowchart TB
       <code>403 FORBIDDEN_SCOPE</code>; a SQLSTATE <code>42501</code> reaching the service is logged and answered as 403
       (<code>rls_refusal_as_forbidden</code>, <span class="ln">classroom/service.py:55</span>). Buckets
       <code>classroom_read</code>, <code>classroom_write</code> and <code>classroom_join</code> (10 per 5 minutes), and for files
-      <code>file_upload</code> (30 per hour) and <code>file_download</code> (60 per minute), all per user.
+      <code>file_upload</code> (30 per hour) and <code>file_download</code> (60 per minute), and for the chat
+      <code>chat_poll</code> (60 per minute) and <code>chat_post</code> (10 per minute), all per user.
       Route table: <a href="api-endpoints.md">api-endpoints.md §2.8</a>.</p>
       <p>The stream (classroom Phase 3, <code>classroom/announcements.py</code>) adds two rules. <strong>Scheduling is the
       database's job</strong>: a future <code>publish_at</code> hides a post from members through the read policy
@@ -382,6 +383,17 @@ flowchart TB
       read under the file's policy (<code>classroom/links.py</code>) — and <strong>viewing</strong>: after the same row read
       as a download, <code>file_service.view_link</code> signs a five-minute link that opens a PDF or an image on the
       storage service's domain, never in the application's pages. Office files are download-only.</p>
+      <p>The <strong>class chat</strong> (classroom Phase 7, <code>classroom/chat.py</code>,
+      <span class="ln">20261005130000</span>) is class-public and is never the tutor conversation. <strong>Who may post
+      is the insert policy</strong>: a student writes <code>space_message</code> directly, through a column-limited
+      <code>INSERT</code> that <code>space_message_insert</code> holds to the caller and to <code>app.can_post_message</code>
+      (unmuted, unlocked, active, guardian gate passed — the teacher always); the service asks the same function first so
+      a member's refusal carries a <code>details.reason</code> — <code>archived</code>, <code>muted</code>,
+      <code>chat_locked</code>. <strong>Polling uses the database's clock</strong>: the cursor is the reading
+      transaction's <code>now()</code>, each catch-up re-reads a 15-second overlap and the client merges by id;
+      deletions reach a member as ids only (<code>app.space_message_tombstones</code>). <strong>Moderation is retained
+      and audited</strong>: the teacher's delete is a stamp they can still read, mute is <code>enrollment.muted_at</code>,
+      and the lock is <code>classroom_space.chat_locked</code> through the existing <code>PATCH</code>.</p>
     </section>
 
     <section class="prose">
@@ -547,7 +559,7 @@ sequenceDiagram
   participant C as Client
   participant M as Middleware<br/>main.py:100,:108
   participant R as Route<br/>auth/routes.py
-  participant L as Rate limiter<br/>ratelimit.py:154
+  participant L as Rate limiter<br/>ratelimit.py:160
   participant A as authenticated<br/>dependencies.py:29
   participant S as Service<br/>auth/service.py
   participant D as PostgreSQL<br/>as app_backend

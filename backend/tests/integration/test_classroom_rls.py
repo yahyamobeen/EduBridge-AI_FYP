@@ -1227,3 +1227,215 @@ class TestLinkBoundary:
         db.execute(text("SELECT * FROM app.delete_assignment(:a)"), {"a": lab})
         _as(db, member)
         assert _count(db, "SELECT count(*) FROM submission_link", {}) == 0
+
+
+# ── Phase 7: the class chat (20261005130000) ────────────────────────────────
+
+
+def _say(db, user_id: str, space_id: UUID, body: str = "hello") -> UUID:
+    """A message inserted as its author — the direct path the policy governs."""
+    _as(db, user_id)
+    return db.execute(
+        text(
+            "INSERT INTO space_message (space_id, author_id, body) VALUES (:s, :u, :b) RETURNING id"
+        ),
+        {"s": space_id, "u": user_id, "b": body},
+    ).scalar_one()
+
+
+def _say_refused(db, user_id: str, space_id: UUID, *, author: str | None = None) -> str:
+    _as(db, user_id)
+    return _refused(
+        db,
+        "INSERT INTO space_message (space_id, author_id, body) VALUES (:s, :u, 'hi')",
+        {"s": space_id, "u": author or user_id},
+    )
+
+
+def _messages_seen(db, user_id: str, space_id: UUID) -> int:
+    _as(db, user_id)
+    return _count(db, "SELECT count(*) FROM space_message WHERE space_id = :s", {"s": space_id})
+
+
+def _mute(db, teacher_id: str, space_id: UUID, student: str, muted: bool = True) -> bool:
+    return _call(
+        db,
+        teacher_id,
+        "SELECT app.set_student_muted(:s, :u, :m)",
+        {"s": space_id, "u": student, "m": muted},
+    )
+
+
+class TestChatBoundary:
+    def test_a_member_and_the_teacher_post_and_the_whole_class_reads(
+        self, db, teacher, classroom, member
+    ):
+        space_id, code = classroom
+        _say(db, member, space_id)
+        _say(db, teacher, space_id)
+        classmate = _user(db, role="student")
+        assert _join(db, classmate, code) == "joined"
+        assert _messages_seen(db, classmate, space_id) == 2
+        assert _messages_seen(db, teacher, space_id) == 2
+
+    def test_nobody_posts_as_someone_else(self, db, teacher, classroom, member):
+        message = _say_refused(db, member, classroom[0], author=teacher)
+        assert "row-level security" in message
+
+    def test_the_time_and_the_moderation_columns_cannot_be_written(self, db, classroom, member):
+        space_id = classroom[0]
+        for column, value in (("created_at", "now() - interval '1 day'"), ("deleted_at", "now()")):
+            _as(db, member)
+            message = _refused(
+                db,
+                f"INSERT INTO space_message (space_id, author_id, body, {column}) "  # noqa: S608 -- test literals
+                f"VALUES (:s, :u, 'hi', {value})",
+                {"s": space_id, "u": member},
+            )
+            assert "permission denied" in message
+        mid = _say(db, member, space_id)
+        for statement in (
+            "UPDATE space_message SET body = 'edited' WHERE id = :m",
+            "DELETE FROM space_message WHERE id = :m",
+        ):
+            assert "permission denied" in _refused(db, statement, {"m": mid})
+
+    def test_an_outsider_neither_reads_nor_posts(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        _say(db, member, space_id)
+        outsider = _user(db, role="student")
+        assert "row-level security" in _say_refused(db, outsider, space_id)
+        assert _messages_seen(db, outsider, space_id) == 0
+        other_teacher = _user(db, role="teacher")
+        assert "row-level security" in _say_refused(db, other_teacher, space_id)
+        assert _messages_seen(db, other_teacher, space_id) == 0
+
+    def test_a_student_who_left_neither_reads_nor_posts(self, db, classroom, member):
+        space_id = classroom[0]
+        _say(db, member, space_id)
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": space_id})
+        assert _messages_seen(db, member, space_id) == 0
+        assert "row-level security" in _say_refused(db, member, space_id)
+
+    def test_a_muted_student_reads_but_cannot_post(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        assert _mute(db, teacher, space_id, member) is True
+        assert "row-level security" in _say_refused(db, member, space_id)
+        _say(db, teacher, space_id)
+        assert _messages_seen(db, member, space_id) == 1
+        assert _mute(db, teacher, space_id, member, False) is True
+        _say(db, member, space_id)
+
+    def test_a_mute_survives_leaving_and_rejoining(self, db, teacher, classroom, member):
+        space_id, code = classroom
+        _mute(db, teacher, space_id, member)
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": space_id})
+        assert _join(db, member, code) == "joined"
+        assert "row-level security" in _say_refused(db, member, space_id)
+
+    def test_only_the_owning_teacher_mutes_and_only_a_current_member(
+        self, db, teacher, classroom, member
+    ):
+        space_id, code = classroom
+        classmate = _user(db, role="student")
+        _join(db, classmate, code)
+        assert _mute(db, classmate, space_id, member) is False
+        assert _mute(db, _user(db, role="teacher"), space_id, member) is False
+        assert _mute(db, teacher, space_id, _user(db, role="student")) is False
+        _say(db, member, space_id)  # still unmuted
+
+    def test_a_locked_chat_takes_posts_from_its_teacher_only(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        _as(db, teacher)
+        db.execute(
+            text("UPDATE classroom_space SET chat_locked = true WHERE id = :s"), {"s": space_id}
+        )
+        assert "row-level security" in _say_refused(db, member, space_id)
+        _say(db, teacher, space_id)
+        assert _messages_seen(db, member, space_id) == 1  # a lock silences, it does not hide
+
+    def test_a_student_cannot_lock_or_unlock_the_chat(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        _as(db, member)
+        locked = db.execute(
+            text("UPDATE classroom_space SET chat_locked = true WHERE id = :s"), {"s": space_id}
+        ).rowcount
+        assert locked == 0
+        _say(db, member, space_id)
+
+    def test_an_archived_classroom_takes_no_posts(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        _say(db, member, space_id)
+        _as(db, teacher)
+        db.execute(
+            text("UPDATE classroom_space SET status = 'archived' WHERE id = :s"), {"s": space_id}
+        )
+        assert "row-level security" in _say_refused(db, member, space_id)
+        assert "row-level security" in _say_refused(db, teacher, space_id)
+        assert _messages_seen(db, member, space_id) == 1  # still readable
+
+    def test_a_class_9_student_whose_consent_was_withdrawn_cannot_post(
+        self, db, teacher, make_link
+    ):
+        space_id, code = _space(db, teacher, _subject(db, "Physics", level=9))
+        student = _user(db, role="student", class_level=9)
+        parent = _user(db, role="parent")
+        make_link(parent_id=parent, student_id=student, status="verified")
+        assert _join(db, student, code) == "joined"
+        _say(db, student, space_id)
+        _as(db, parent)
+        db.execute(
+            text("UPDATE guardian_link SET status = 'revoked' WHERE student_id = :s"),
+            {"s": student},
+        )
+        assert "row-level security" in _say_refused(db, student, space_id)
+
+    def test_a_deleted_message_is_hidden_from_the_class_and_kept_for_the_teacher(
+        self, db, teacher, classroom, member
+    ):
+        space_id = classroom[0]
+        mid = _say(db, member, space_id)
+        delete = "SELECT app.delete_space_message(:m)"
+        assert _call(db, teacher, delete, {"m": mid}) == "deleted"
+        assert _call(db, teacher, delete, {"m": mid}) == "already_deleted"
+        assert _messages_seen(db, member, space_id) == 0
+        _as(db, teacher)
+        row = (
+            db.execute(
+                text("SELECT body, deleted_at, deleted_by FROM space_message WHERE id = :m"),
+                {"m": mid},
+            )
+            .mappings()
+            .one()
+        )
+        assert row["body"] == "hello" and row["deleted_at"] is not None
+        assert str(row["deleted_by"]) == teacher
+
+    def test_only_the_owning_teacher_deletes_a_message(self, db, teacher, classroom, member):
+        space_id, code = classroom
+        mid = _say(db, member, space_id)
+        classmate = _user(db, role="student")
+        _join(db, classmate, code)
+        delete = "SELECT app.delete_space_message(:m)"
+        for other in (member, classmate, _user(db, role="teacher")):
+            assert _call(db, other, delete, {"m": mid}) == "forbidden"
+        assert _messages_seen(db, classmate, space_id) == 1
+
+    def test_moderation_continues_on_an_archived_classroom(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        mid = _say(db, member, space_id)
+        _as(db, teacher)
+        db.execute(
+            text("UPDATE classroom_space SET status = 'archived' WHERE id = :s"), {"s": space_id}
+        )
+        assert _call(db, teacher, "SELECT app.delete_space_message(:m)", {"m": mid}) == "deleted"
+        assert _mute(db, teacher, space_id, member) is True
+
+    def test_tombstones_reach_the_class_and_nobody_else(self, db, teacher, classroom, member):
+        space_id = classroom[0]
+        mid = _say(db, member, space_id)
+        _call(db, teacher, "SELECT app.delete_space_message(:m)", {"m": mid})
+        since = "SELECT count(*) FROM app.space_message_tombstones(:s, now() - interval '1 hour')"
+        assert _call(db, member, since, {"s": space_id}) == 1
+        assert _call(db, teacher, since, {"s": space_id}) == 1
+        assert _call(db, _user(db, role="student"), since, {"s": space_id}) == 0
