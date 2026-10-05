@@ -212,6 +212,21 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
             >
               <div className="whitespace-pre-wrap">{msg.content}</div>
 
+              {msg.error && (
+                <div className="mt-2 flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
+                      if (lastUserMsg) handleSend(lastUserMsg.content)
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold underline hover:opacity-80"
+                  >
+                    {t('retry')}
+                  </button>
+                </div>
+              )}
+
               {/* Citations Preview Chips */}
               {msg.pages && msg.pages.length > 0 && (
                 <div className="mt-3 border-t border-outline-variant/30 pt-2">
@@ -297,6 +312,7 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
               <button
                 type="button"
                 onClick={() => setPreviewPage(null)}
+                aria-label="Close"
                 className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-surface-variant"
               >
                 <CloseIcon className="h-4 w-4" />

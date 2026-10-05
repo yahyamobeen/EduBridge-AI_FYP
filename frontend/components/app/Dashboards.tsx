@@ -27,14 +27,14 @@ function classSummary(me: MeResponse): string {
   return `${profile.board} · ${profile.class_level} · ${profile.student_group}`
 }
 
-function StudentDashboardContent({ me }: { me: MeResponse }) {
+function StudentCards({ me }: { me: MeResponse }) {
   const t = useTranslations('dashboard.student')
   const tc = useTranslations('dashboard.cards')
   const { openTutor } = useTutor()
   const isClass9 = me.profile?.class_level === 9
 
   return (
-    <DashboardShell me={me} subtitle={classSummary(me)}>
+    <>
       <header className="mb-8">
         <h1 className="font-headline text-headline-lg text-on-background">
           {t('welcome', { name: firstName(me) })}
@@ -64,6 +64,14 @@ function StudentDashboardContent({ me }: { me: MeResponse }) {
           href="/coming-soon/my-classes"
         />
       </div>
+    </>
+  )
+}
+
+export function StudentDashboardContent({ me }: { me: MeResponse }) {
+  return (
+    <DashboardShell me={me} subtitle={classSummary(me)}>
+      <StudentCards me={me} />
     </DashboardShell>
   )
 }
