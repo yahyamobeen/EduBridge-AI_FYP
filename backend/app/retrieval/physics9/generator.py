@@ -51,11 +51,11 @@ class PhysicsGenerator:
     def __init__(
         self,
         api_key: str = "",
-        model_name: str = "gemini-2.5-flash",
+        model_name: str = "gemini-3.6-flash",
         pages_dir: Path | None = None,
     ):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "").strip()
-        self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
         self.pages_dir = pages_dir
 
     def generate(
@@ -146,24 +146,41 @@ class PhysicsGenerator:
             },
         }
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+        models_to_try = [self.model_name]
+        for fallback_m in ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"]:
+            if fallback_m not in models_to_try:
+                models_to_try.append(fallback_m)
+
+        last_error = ""
         with httpx.Client(timeout=30.0) as client:
-            resp = client.post(
-                url,
-                params={"key": self.api_key},
-                json=payload,
-            )
+            for m in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+                for attempt in range(2):
+                    try:
+                        resp = client.post(
+                            url,
+                            params={"key": self.api_key},
+                            json=payload,
+                        )
+                        if resp.status_code == 200:
+                            res_data = resp.json()
+                            candidates = res_data.get("candidates", [])
+                            if not candidates:
+                                return "", time.time() - t0, "No candidates returned by Gemini"
+                            reply = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            return reply.strip(), time.time() - t0, None
+                        elif resp.status_code in (503, 429):
+                            last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                            time.sleep(1.0)
+                            continue
+                        else:
+                            last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                            break
+                    except Exception as exc:
+                        last_error = str(exc)
+                        time.sleep(0.5)
 
-        if resp.status_code != 200:
-            raise RuntimeError(f"Gemini API returned HTTP {resp.status_code}: {resp.text[:200]}")
-
-        res_data = resp.json()
-        candidates = res_data.get("candidates", [])
-        if not candidates:
-            return "", time.time() - t0, "No candidates returned by Gemini"
-
-        reply = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        return reply.strip(), time.time() - t0, None
+        raise RuntimeError(f"Gemini API generation failed: {last_error}")
 
     def _fallback_grounded_answer(
         self,

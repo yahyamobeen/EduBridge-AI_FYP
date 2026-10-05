@@ -180,7 +180,7 @@ class Settings(BaseSettings):
 
     # Class 9 Physics Visual Retrieval Tutor (PCTB)
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-3.6-flash", validation_alias="GEMINI_MODEL")
     physics_embeddings_path: str = Field(default="", validation_alias="PHYSICS_EMBEDDINGS_PATH")
     physics_pages_dir: str = Field(default="", validation_alias="PHYSICS_PAGES_DIR")
 
