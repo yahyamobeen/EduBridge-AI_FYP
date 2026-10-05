@@ -13,13 +13,13 @@ Every count here has the command that produced it beside it. Run from `frontend/
 
 | Measure | Value | Command |
 |---|---|---|
-| Pages | **29** (4 added by classroom Phase 2, 2 by Phase 5) | `find app -name "page.tsx" \| wc -l` |
+| Pages | **30** (4 added by classroom Phase 2, 2 by Phase 5, 1 by Phase 8) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **43** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **44** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **770**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **787**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-05 (classroom Phase 7).*
+*Re-measured 2026-10-05 (classroom Phase 8).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -141,6 +141,7 @@ page (`setRequestLocale`, the `settings/page.tsx` pattern) rendering a client co
 | `/teacher/classroom/[spaceId]` | `(app)/teacher/classroom/[spaceId]/page.tsx` | `TeacherClassroom` | `['teacher']` |
 | `/classroom/calendar` | `(app)/classroom/calendar/page.tsx` | `StudentCalendar` (classroom Phase 5) | `['student']` |
 | `/teacher/classroom/calendar` | `(app)/teacher/classroom/calendar/page.tsx` | `TeacherCalendar` (classroom Phase 5) | `['teacher']` |
+| `/parent/classroom` | `(app)/parent/classroom/page.tsx` | `ParentClassrooms` (classroom Phase 8) — read-only | `['parent']` |
 
 The two list pages prerender in all three locales; the two `[spaceId]` pages have no
 `generateStaticParams` and render on demand, because the id is per user and the data is fetched in
@@ -280,6 +281,19 @@ Files (classroom Phases 6 and 6b):
   and not a window opened after an await — cuts `opener`, then points the tab at the fetched link;
   if the link cannot be had, it closes the blank tab.
 
+The parent's overview (classroom Phase 8):
+
+- **`components/classroom/ParentClassrooms.tsx`** — `/parent/classroom`, `allow={['parent']}`. One
+  call, `GET /parent/classrooms`, rendered as each child, then each classroom (subject and teacher,
+  an "Archived" label where it applies), then its assignments: deadline, the server-derived status
+  (`StatusChip`, shared with Classwork) and a grade **only as the server sends it**, which is once
+  returned. ⚠️ **Nothing to click**: no link into a classroom, no tab, no button — a classroom's own
+  pages carry the stream, the chat and classmates' names, none of which a parent may see — and a
+  test asserts there is no link, button or tab on the page. It says, above everything, what it
+  never shows. A linked child in no classroom, and a parent with no linked child, each get a sentence
+  saying so. The sidebar marks it current by the longest-prefix rule (`/parent/classroom` beats the
+  dashboard's `/parent`).
+
 The dashboards are shells. `Dashboards.tsx:9-22` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:188`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary — and, **since classroom Phase 6c, the classroom card**: `ClassroomsCard` (`components/app/ClassroomsCard.tsx:24`) replaced the student's "My classes" and the teacher's "My classrooms" placeholders, which kept saying "Not available yet" for a feature built in Phase 2. It lists up to three active classrooms from `GET /api/spaces` (the teacher's with member counts), says what to do when there are none — join with a code, or create the first — and, if the request fails, still offers the way in; it never shows the pill. The teacher's "Class roster" placeholder is unchanged, pending the owner's decision (its body promises "who has not joined yet", which the API cannot know; each classroom's People tab is the roster).
 
 ---
@@ -408,15 +422,15 @@ The transport client carries the same rule at a lower level: a 403 `SUBSCRIPTION
 
 > THIS FILE IS AN RBAC BOUNDARY, not a styling concern.
 
-`NAV_BY_ROLE` (`:44-75`) is a `Record<Role, NavItem[]>`. `DashboardShell` builds every sidebar from it (`components/app/DashboardShell.tsx:41`, rendered at `:69-85`) and from nothing else. That single-source construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no per-role markup to paste into.
+`NAV_BY_ROLE` (`:50-115`) is a `Record<Role, NavItem[]>`. `DashboardShell` builds every sidebar from it (`components/app/DashboardShell.tsx:41`, rendered at `:69-85`) and from nothing else. That single-source construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no per-role markup to paste into.
 
 Three decisions it encodes, each of which a shared component tree makes easy to get wrong:
 
-**(a) The parent surface is read-only.** `:67-73` — dashboard, my child, progress, how to help, settings, help. No tutor, no session replay, no planner write. The supplied mockups shipped **one student sidebar pasted into all three dashboards**, which handed parents a "Play Session" button that replays a child's AI tutor conversation. `GET /api/tutor/sessions/{id}` is student-owner-only and the requirements forbid a parent reading chat content — so that control was not a dead link, it was a privacy violation with a button on it.
+**(a) The parent surface is read-only.** `:76-86` — dashboard, my child, classrooms (the read-only overview, classroom Phase 8), progress, how to help, settings, help. No tutor, no session replay, no planner write. The supplied mockups shipped **one student sidebar pasted into all three dashboards**, which handed parents a "Play Session" button that replays a child's AI tutor conversation. `GET /api/tutor/sessions/{id}` is student-owner-only and the requirements forbid a parent reading chat content — so that control was not a dead link, it was a privacy violation with a button on it.
 
-**(b) The teacher surface has no tutor entry.** `:56-66`. The requirements once granted teachers tutor access "for own testing" while `POST /api/tutor/ask` has always been scoped to gate-verified students. The technical design document won.
+**(b) The teacher surface has no tutor entry.** `:64-75`. The requirements once granted teachers tutor access "for own testing" while `POST /api/tutor/ask` has always been scoped to gate-verified students. The technical design document won.
 
-**(c) The student surface must expose My Classes.** `:52`. Students are guaranteed the right to see who can view them and to leave any space at any time. No mockup had an entry for it, and a right with no route to it is not a right.
+**(c) The student surface must expose My Classes.** `:60`. Students are guaranteed the right to see who can view them and to leave any space at any time. No mockup had an entry for it, and a right with no route to it is not a right.
 
 **Classroom Phase 2 (2026-10-04)** moved the four things the comment at `navigation.ts:40-45` says
 move together: student `myClasses` → `/classroom`, teacher `mySpaces` → `/teacher/classroom`
@@ -427,9 +441,9 @@ gained `classroom` — **after** it had failed naming `myClasses`, the order its
 `Dashboards.tsx` card links were repointed in the same change (`/coming-soon/my-classes` would have
 become a silent 404).
 
-`lib/auth/navigation.test.ts` is described in its own header (`:8-18`) as *the highest-value regression test in the frontend*. `:19-34` asserts the parent navigation contains no href and no key matching `/tutor/`, `/session|replay|play/`, `/planner/`, `/practice/`, `/quiz/` or `/subject|curriculum/`. `:36-46` asserts the teacher surface has no tutor entry. `:48-54` asserts the student surface has My Classes. `:67-81` asserts every key has a translated label in all three locales.
+`lib/auth/navigation.test.ts` is described in its own header (`:8-18`) as *the highest-value regression test in the frontend*. `:19-42` asserts the parent navigation contains no href and no key matching `/tutor/`, `/session|replay|play/`, `/planner/`, `/practice/`, `/quiz/`, `/subject|curriculum/` or — since classroom Phase 8 — `/chat/`, and that it does reach the read-only `/parent/classroom`. `:44-54` asserts the teacher surface has no tutor entry. `:56-62` asserts the student surface has My Classes. `:80-94` asserts every key has a translated label in all three locales.
 
-`ROLE_ACCENT` (`:78-83`) sits in the same file and *is* styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is here because it is keyed by `Role`, and keeping every role-keyed record together is what makes an incomplete role obvious.
+`ROLE_ACCENT` (`:118-123`) sits in the same file and *is* styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is here because it is keyed by `Role`, and keeping every role-keyed record together is what makes an incomplete role obvious.
 
 ---
 
@@ -589,7 +603,7 @@ burned attempt. On `/auth/login` a 401 means the password was wrong, so refreshi
 ### File transfer — raw bodies and blobs (classroom Phase 6)
 
 Two options on `ApiRequestInit` (`client.ts:195`), used only by the file wrappers in
-`endpoints.ts:517-582`:
+`endpoints.ts:518-583`:
 
 - **`rawBody`** (`:203`) sends a `Blob` — a `File` — **as-is**: no JSON encoding and no JSON
   `Content-Type`; the caller sets the type (`:226-242`). Uploads are never multipart, because the
@@ -651,7 +665,7 @@ The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot rea
 
 The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:230`) on every call.
 
-`startSession` (`endpoints.ts:290-292`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:291-293`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -677,7 +691,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **770 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739 and 770).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **787 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -938,7 +952,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:294-303`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:301`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:295-304`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:302`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 

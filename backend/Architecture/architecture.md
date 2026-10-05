@@ -29,7 +29,7 @@ The backend is a **single FastAPI application** with two routers. All server log
 | Package | Contents |
 |---|---|
 | `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
-| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–7), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), a student's links (`links.py`), and the class chat (`chat.py`) — §2.8, §9.5 |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–8), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), a student's links (`links.py`), the class chat (`chat.py`), and the parent's read-only overview (`parent.py`) — §2.8, §9.5 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -46,16 +46,16 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **43** | `find backend/app -type f -name "*.py" \| wc -l` |
-| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:82`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **63** (21 + 42) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Python source files | **44** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:85`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **64** (21 + 43) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
 | Routes specified in `tdd.md` | **87** (83 in v0.4.0, plus Phase 6b's 4) | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **24** | 87 − 63 |
-| Applied migrations | **32** (all applied; `20261005130000`, the class chat, on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **52** (22 unit, 30 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **55 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 52; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61`, or `app.can_post_message`, which follows one in `classroom/chat.py:60` |
+| Specified but **not** implemented | **23** | 87 − 64 |
+| Applied migrations | **33** (all applied; `20261005140000`, the parent overview, on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **53** (22 unit, 31 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **56 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 53; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61`, or `app.can_post_message`, which follows one in `classroom/chat.py:60` |
 
-*Re-measured 2026-10-05 (classroom Phase 7); the rest of this page is the 2026-08-15 account unless a
+*Re-measured 2026-10-05 (classroom Phase 8); the rest of this page is the 2026-08-15 account unless a
 section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5. Citations into
 `main.py`, `core/ratelimit.py` and `core/config.py` were re-verified on 2026-10-05, when Phase 6
 moved all three — most had drifted well before that.*
@@ -259,7 +259,7 @@ choice between two function names) and mark it `# noqa: S608` with the reason: `
 `update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
 bound parameter.
 
-### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–7)
+### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–8)
 
 Same layers as above, with one difference that matters: **the database decides which classroom a
 caller may touch.** The route's dependency decides only *who* may call
@@ -352,6 +352,15 @@ is never the tutor conversation (invariant 8 in [database.md](database.md)). Thr
   (`app.delete_space_message`) and keeps it readable to them; mute is `enrollment.muted_at`
   (`app.set_student_muted`); lock is `classroom_space.chat_locked`, through the existing `PATCH`.
   Deleting and muting write `audit_log` rows.
+
+The parent's overview (classroom Phase 8, `classroom/parent.py`, `20261005140000`) is the one
+classroom route a parent reaches (`require_role('parent')` — the guardian gate is a student rule).
+It reads **one function and no table**: `app.guardian_classroom_overview()` takes no parameters,
+so it is anchored on the caller and cannot be aimed at another family, and it returns only what
+`prd.md` CL-10 allows — a verified child's classrooms and teachers, published assignments and
+deadlines, and a grade once returned. A function rather than parent read policies, because a
+policy releases whole rows: the feedback beside the grade, the work beside the turn-in time. The
+service derives each status from the turn-in time with `status.py` and does not send the time.
 
 Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`),
 `file_upload` (30 per hour) / `file_download` (60 per minute, `:111-112`), and `chat_poll` (60 per

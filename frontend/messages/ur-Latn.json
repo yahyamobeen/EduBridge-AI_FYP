@@ -29,6 +29,7 @@
       "reports": "Reportein",
       "slo": "SLO naqsha",
       "myChild": "Mera bacha",
+      "classrooms": "Classroom",
       "howToHelp": "Madad kaise karein",
       "curriculum": "Nisaab",
       "security": "Security",
@@ -835,6 +836,24 @@
       "lock": "Chat band karen",
       "unlock": "Chat kholein",
       "lockFailed": "Chat mein tabdeeli nahin ho saki. Dobara koshish karen."
+    },
+    "parent": {
+      "title": "Classroom",
+      "subtitle": "Aap ke bachay ki classein, aakhri tareekhein aur wapas kiye gaye number.",
+      "privacy": "Aap aakhri tareekhein, kaam jama hua ya nahin, aur ustad ke wapas karne ke baad number dekhte hain — aap ke bachay ke jawabat, ustad ke tabsaray, hum jamaat ya class chat kabhi nahin.",
+      "loading": "Load ho raha hai…",
+      "unavailable": "Classroom load nahin ho sake. Dobara koshish ke liye page refresh karen.",
+      "noChildren": "Abhi koi bacha munsalik nahin. Jab aap ka bacha aap ko dawat de aur aap qubool karen, to us ke classroom yahan nazar aayenge.",
+      "noClassrooms": "{name} abhi kisi classroom mein nahin.",
+      "classroomLine": "{subject} · {teacher}",
+      "unknownTeacher": "Ustad",
+      "archived": "Archive",
+      "noAssignments": "Pichhle 120 dinon mein kuch nahin diya gaya.",
+      "due": "Aakhri tareekh: {date}",
+      "noDue": "Koi aakhri tareekh nahin",
+      "grade": "{grade} / {points}",
+      "gradeOnly": "Number: {grade}",
+      "unnamedChild": "Aap ka bacha"
     },
     "people": {
       "heading": "Afraad",

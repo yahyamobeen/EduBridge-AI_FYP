@@ -29,6 +29,7 @@
       "reports": "Reports",
       "slo": "SLO Mapping",
       "myChild": "My Child",
+      "classrooms": "Classrooms",
       "howToHelp": "How to Help",
       "curriculum": "Curriculum",
       "security": "Security",
@@ -835,6 +836,24 @@
       "lock": "Lock chat",
       "unlock": "Unlock chat",
       "lockFailed": "The chat could not be changed. Try again."
+    },
+    "parent": {
+      "title": "Classrooms",
+      "subtitle": "Your child's classes, deadlines and returned grades.",
+      "privacy": "You see deadlines, whether work was handed in, and grades once the teacher returns them — never your child's answers, the teacher's comments, their classmates or the class chat.",
+      "loading": "Loading…",
+      "unavailable": "Classrooms could not be loaded. Refresh the page to try again.",
+      "noChildren": "No child is linked yet. When your child invites you and you accept, their classrooms appear here.",
+      "noClassrooms": "{name} is not in a classroom yet.",
+      "classroomLine": "{subject} · {teacher}",
+      "unknownTeacher": "Teacher",
+      "archived": "Archived",
+      "noAssignments": "Nothing set in the last 120 days.",
+      "due": "Due {date}",
+      "noDue": "No due date",
+      "grade": "{grade} / {points}",
+      "gradeOnly": "Grade: {grade}",
+      "unnamedChild": "Your child"
     },
     "people": {
       "heading": "People",

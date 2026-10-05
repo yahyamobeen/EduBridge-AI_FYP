@@ -110,13 +110,13 @@
     <h1>Database</h1>
     <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql
-    · classroom sections re-measured 2026-10-05 on branch add-classroom (32 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, 20261005120000, submission links, and 20261005130000, the class chat, on 2026-10-05)</p>
+    · classroom sections re-measured 2026-10-05 on branch add-classroom (33 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, 20261005120000, submission links, 20261005130000, the class chat, and 20261005140000, the parent overview, on 2026-10-05)</p>
 
     <div class="grid">
       <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
       <div class="stat"><div class="n">53</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
       <div class="stat"><div class="n">98</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
-      <div class="stat"><div class="n">71</div><div class="l">live <code>app.*</code> functions · 69 are SECURITY DEFINER</div></div>
+      <div class="stat"><div class="n">72</div><div class="l">live <code>app.*</code> functions · 70 are SECURITY DEFINER</div></div>
     </div>
 
     <section class="prose">
@@ -783,7 +783,7 @@ erDiagram
     <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
     <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
     superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.
-    <strong>98</strong> policy objects are live on a shadow database built from all 32 migrations and on the live
+    <strong>98</strong> policy objects are live on a shadow database built from all 33 migrations and on the live
     database (2026-10-05); the groups
     below summarise them by domain and are not the complete list — database.md is.</p>
 
@@ -948,10 +948,10 @@ erDiagram
     <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
 
     <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
-    <h2>The <code>app.*</code> privileged functions — 71 live</h2>
-    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 32 migration files, and matched on the live
+    <h2>The <code>app.*</code> privileged functions — 72 live</h2>
+    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 33 migration files, and matched on the live
     database; the paragraph below is the 2026-08-15 account and its
-    counts are historical. None of the 71 is executable by <code>PUBLIC</code>.</em></p>
+    counts are historical. None of the 72 is executable by <code>PUBLIC</code>.</em></p>
     <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
     of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
     <strong>35 are <code>SECURITY DEFINER</code></strong> and <strong>36 carry <code>SET search_path = public, pg_temp</code></strong>
@@ -1042,6 +1042,14 @@ erDiagram
         <tr><td><code>app.delete_space_message(uuid)</code> <span class="ln">20261005130000:137</span></td><td><code>DELETE /api/messages/{id}</code></td><td><code>deleted</code> · <code>already_deleted</code> · <code>forbidden</code> — soft, retained; works on an archived classroom</td></tr>
         <tr><td><code>app.set_student_muted(uuid, uuid, boolean)</code> <span class="ln">20261005130000:165</span></td><td><code>PUT /api/spaces/{id}/members/{student_id}/mute</code></td><td><code>true</code> · <code>false</code> — the teacher, an active member only; survives leaving and rejoining</td></tr>
         <tr><td><code>app.space_message_tombstones(uuid, timestamptz)</code> <span class="ln">20261005130000:184</span></td><td><code>GET /api/spaces/{id}/messages</code></td><td>ids deleted since a time — never content — for the teacher and current members</td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the parent's overview (<span class="ln">20261005140000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Returns</th></tr>
+        <tr><td><code>app.guardian_classroom_overview()</code> <span class="ln">20261005140000:29</span></td><td><code>GET /api/parent/classrooms</code></td><td>No parameters — anchored on the caller. A verified child's current classrooms (archived ones labelled), teachers, published assignments due in the last 120 days or undated, the turn-in time, and a grade once returned. Never feedback, work, files, links, chat or classmates; a parent has no read policy on any classroom table</td></tr>
       </table>
     </details>
 
@@ -1161,6 +1169,11 @@ erDiagram
         <td><strong>Who may post in the class chat is the insert policy</strong></td>
         <td>A muted student, a locked chat, an archived classroom, a student who left and a Class 9–10 student without a verified guardian are each refused by PostgreSQL through <code>app.can_post_message</code>. A deletion is a stamp, never a <code>DELETE</code>. Do not add an UPDATE or DELETE grant, a member read path to deleted rows, or a second way to post.</td>
         <td><span class="ln">20261005130000</span></td>
+      </tr>
+      <tr>
+        <td><strong>A parent reads the classroom through one function, never through a policy</strong></td>
+        <td>Row-Level Security is per row: a parent policy on the submission or the grade would hand over the answer and the private feedback with them. <code>app.guardian_classroom_overview()</code> returns only what CL-10 allows and is anchored on the caller. Do not add a parent read policy to a classroom table.</td>
+        <td><span class="ln">20261005140000</span></td>
       </tr>
     </table>
 

@@ -27,9 +27,17 @@ describe('the parent surface is read-only', () => {
     ['practice', /practice/],
     ['quizzes', /quiz/],
     ['subjects', /subject|curriculum/],
+    // Classroom Phase 8: the parent reaches the classrooms, never the class chat.
+    ['class chat', /chat/],
   ])('exposes no %s control', (_label, pattern) => {
     expect(parentHrefs.filter((h) => pattern.test(h))).toEqual([])
     expect(parentKeys.filter((k) => pattern.test(k))).toEqual([])
+  })
+
+  it("reaches the child's classrooms through the read-only overview (classroom Phase 8)", () => {
+    // prd.md CL-10: deadlines, turn-in status and returned grades — and its own
+    // page, never a classroom's, so no classroom control comes with it.
+    expect(navFor('parent')).toContainEqual({ key: 'classrooms', href: '/parent/classroom' })
   })
 })
 

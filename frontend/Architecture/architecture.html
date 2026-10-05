@@ -109,10 +109,10 @@
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 (branch fix-epic-1) · Source of truth: the code. Update in the same change (see /CLAUDE.md).</p>
 
     <div class="grid">
-      <div class="stat"><div class="n">29</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-04)</div></div>
+      <div class="stat"><div class="n">30</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-05)</div></div>
       <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
-      <div class="stat"><div class="n">43</div><div class="l">test files (Vitest)</div></div>
-      <div class="stat"><div class="n">3 × 770</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">44</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 787</div><div class="l">locales × leaf message keys</div></div>
       <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
     </div>
 
@@ -212,7 +212,7 @@ flowchart TB
     </section>
 
     <section class="prose">
-      <h2>Routes — 29 pages</h2>
+      <h2>Routes — 30 pages</h2>
       <p>A route group adds <strong>no path segment</strong>. <code>/login</code> is <code>/login</code>
         whether or not it sits inside <code>(auth)</code>. The split exists purely so the three surfaces can
         have different chrome.</p>
@@ -239,6 +239,7 @@ flowchart TB
           <tr><td><code>(app)</code></td><td><code>/teacher/classroom</code></td><td><code>TeacherClassrooms</code> — list + create form, <code>allow={['teacher']}</code></td></tr>
           <tr><td><code>(app)</code></td><td><code>/teacher/classroom/[spaceId]</code></td><td><code>TeacherClassroom</code> — join code, rename/archive, people with remove (each behind <code>ConfirmInline</code>); Stream and People tabs since Phase 3, Classwork (assignments, submissions, grading) since Phase 4; file attachments on posts, assignments and work since Phase 6 (<code>Files.tsx</code> — always saved through <code>lib/download.ts</code>, never opened in the app's own pages); since Phase 6b files while creating an assignment, a student's files and links in one list with a "+ Add" menu (<code>WorkAttachments.tsx</code>), and <strong>View</strong> for a PDF or an image in a new tab through a five-minute link; since Phase 7 a <strong>Chat</strong> tab (<code>ChatTab.tsx</code>, polled by <code>useChatPoll.ts</code>) — class-public and saying so, the Teacher badge from the owner's id never a name, the reason shown when a student cannot post, and for the owner delete, lock and (on People) mute</td></tr>
           <tr><td><code>(app)</code></td><td><code>/classroom/calendar</code>, <code>/teacher/classroom/calendar</code></td><td><code>StudentCalendar</code> / <code>TeacherCalendar</code> — month grid of deadlines and (teacher) scheduled posts; entries link back with <code>?assignment=</code>. Classroom Phase 5</td></tr>
+          <tr><td><code>(app)</code></td><td><code>/parent/classroom</code></td><td><code>ParentClassrooms</code> — the parent's read-only overview, <code>allow={['parent']}</code>: each child, their classrooms and teachers, deadlines, status and returned grades — no link, tab or button. Classroom Phase 8</td></tr>
           <tr><td><code>(auth)</code></td><td><code>/admin-login</code></td><td>Reachable ONLY through the <code>proxy.ts</code> rewrite from the unlisted <code>ADMIN_LOGIN_PATH</code>; the ordinary path answers 404</td></tr>
         </tbody>
       </table>
@@ -384,7 +385,7 @@ flowchart TB
     <section class="prose">
       <h2><code>navigation.ts</code> is a Role-Based Access Control boundary <span class="ln">lib/auth/navigation.ts</span></h2>
       <p>Its header says so in the first sentence <span class="ln">:3-31</span>: <em>"THIS FILE IS AN RBAC
-        BOUNDARY, not a styling concern."</em> <code>NAV_BY_ROLE</code> <span class="ln">:44-75</span> is a
+        BOUNDARY, not a styling concern."</em> <code>NAV_BY_ROLE</code> <span class="ln">:50-115</span> is a
         <code>Record&lt;Role, NavItem[]&gt;</code>. <code>DashboardShell</code> builds every sidebar from it
         <span class="ln">DashboardShell.tsx:41, :69-85</span> and from nothing else. That single-source
         construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no
@@ -393,7 +394,7 @@ flowchart TB
         <thead><tr><th>Decision</th><th>Why it is a boundary, not a layout choice</th></tr></thead>
         <tbody>
           <tr>
-            <td><strong>The parent surface is read-only</strong> <span class="ln">:67-73</span></td>
+            <td><strong>The parent surface is read-only</strong> <span class="ln">:76-86</span></td>
             <td>The supplied mockups shipped <em>one student sidebar pasted into all three dashboards</em>,
               which handed parents a "Play Session" button that replays a child's AI tutor conversation.
               <code>GET /api/tutor/sessions/{id}</code> is student-owner-only and a parent may never read
@@ -401,26 +402,27 @@ flowchart TB
               button on it</strong>.</td>
           </tr>
           <tr>
-            <td><strong>The teacher surface has no tutor entry</strong> <span class="ln">:56-66</span></td>
+            <td><strong>The teacher surface has no tutor entry</strong> <span class="ln">:64-75</span></td>
             <td>The requirements once granted teachers tutor access "for own testing" while
               <code>POST /api/tutor/ask</code> has always been scoped to gate-verified students. The
               technical design document won.</td>
           </tr>
           <tr>
-            <td><strong>The student surface must expose My Classes</strong> <span class="ln">:52</span></td>
+            <td><strong>The student surface must expose My Classes</strong> <span class="ln">:60</span></td>
             <td>Students are guaranteed the right to see who can view them and to leave any space at any
               time. No mockup had an entry for it, and a right with no route to it is not a right.</td>
           </tr>
         </tbody>
       </table>
       <p><code>lib/auth/navigation.test.ts</code> calls itself <em>the highest-value regression test in the
-        frontend</em> <span class="ln">:8-18</span>. <span class="ln">:19-34</span> asserts the parent
+        frontend</em> <span class="ln">:8-18</span>. <span class="ln">:19-42</span> asserts the parent
         navigation contains no href and no key matching <code>/tutor/</code>,
         <code>/session|replay|play/</code>, <code>/planner/</code>, <code>/practice/</code>,
-        <code>/quiz/</code> or <code>/subject|curriculum/</code>. <span class="ln">:36-46</span> covers the
-        teacher surface, <span class="ln">:48-54</span> the student one, and <span class="ln">:67-81</span>
+        <code>/quiz/</code>, <code>/subject|curriculum/</code> or (classroom Phase 8) <code>/chat/</code>, and that it reaches
+        the read-only <code>/parent/classroom</code>. <span class="ln">:44-54</span> covers the
+        teacher surface, <span class="ln">:56-62</span> the student one, and <span class="ln">:80-94</span>
         asserts every key has a translated label in all three locales.</p>
-      <p><code>ROLE_ACCENT</code> <span class="ln">:78-83</span> sits in the same file and <em>is</em>
+      <p><code>ROLE_ACCENT</code> <span class="ln">:118-123</span> sits in the same file and <em>is</em>
         styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is
         here because it is keyed by <code>Role</code>, and keeping every role-keyed record together is what
         makes an incomplete role obvious.</p>
@@ -568,8 +570,8 @@ function resolve(path: string): string {
         <code>rawRequest</code> directly so there is no loop.
         <span class="ln">client.test.ts:96-105</span> asserts the original path is hit exactly twice and then
         gives up. <code>noRetry</code> <span class="ln">:105-113</span> has four call sites —
-        <code>login</code> <span class="ln">endpoints.ts:92</span>, <code>adminLogin</code> <span class="ln">:108</span>,
-        <code>twoFactorConfirm</code> <span class="ln">:178</span> and <code>changePassword</code> <span class="ln">:276</span> —
+        <code>login</code> <span class="ln">endpoints.ts:93</span>, <code>adminLogin</code> <span class="ln">:109</span>,
+        <code>twoFactorConfirm</code> <span class="ln">:179</span> and <code>changePassword</code> <span class="ln">:277</span> —
         because on each a 401 can mean a wrong credential, and refreshing would fire a guaranteed-to-fail request on
         every typo. <a href="architecture.md">architecture.md</a> gives the reason for each.</p>
 
@@ -580,7 +582,7 @@ function resolve(path: string): string {
         refresh-and-retry stays safe. <code>responseType: 'blob'</code> <span class="ln">:208</span> returns a
         <strong>successful</strong> body as a <code>Blob</code> <span class="ln">:246</span>, while an error is still
         the JSON envelope and an <code>ApiError</code>. The token travels in the header, never in a URL; the wrappers
-        are <span class="ln">endpoints.ts:517-582</span>.</p>
+        are <span class="ln">endpoints.ts:518-583</span>.</p>
 
       <h3>Transport-level onboarding redirects <span class="ln">:182-198</span></h3>
       <table>
@@ -663,7 +665,7 @@ function resolve(path: string): string {
     <section class="prose">
       <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
       <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
-        <code>ur-Latn</code> — with <strong>770 leaf message keys each (2026-10-05), identical across all three</strong>, and in the same order.
+        <code>ur-Latn</code> — with <strong>787 leaf message keys each (2026-10-05), identical across all three</strong>, and in the same order.
         <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
         <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
         — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had
@@ -881,7 +883,7 @@ export function dirFor(locale) { return isRtl(locale) ? 'rtl' : 'ltr' }  // :78-
           public site and nothing more; the endpoint's role check is the lock.
           <code>proxy.test.ts</code> covers all three branches — including that ordinary locale routing is
           unchanged, which is the assertion worth having, because a middleware that stops calling next-intl
-          takes down all 29 pages at once.</p>
+          takes down all 30 pages at once.</p>
       </div>
 
       <div class="card">
@@ -910,8 +912,8 @@ URL.revokeObjectURL(url)     // :50 — synchronous, immediately after</pre>
   router.replace('/login')
 }                            // DashboardShell.tsx:45-48</pre>
         <p>No <code>try</code>/<code>catch</code>. <code>logout()</code>
-          <span class="ln">endpoints.ts:294-303</span> uses <code>try</code>/<strong><code>finally</code></strong>,
-          not <code>catch</code> — the local session is dropped at <span class="ln">:301</span>, but the error
+          <span class="ln">endpoints.ts:295-304</span> uses <code>try</code>/<strong><code>finally</code></strong>,
+          not <code>catch</code> — the local session is dropped at <span class="ln">:302</span>, but the error
           still propagates. So on a network failure: the token is cleared, <code>await logout()</code>
           rejects, and <code>router.replace('/login')</code> <span class="ln">:47</span> <strong>never
           executes</strong>. The user is left looking at a dashboard that appears signed in, with no token

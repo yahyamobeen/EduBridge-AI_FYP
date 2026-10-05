@@ -1439,3 +1439,147 @@ class TestChatBoundary:
         assert _call(db, member, since, {"s": space_id}) == 1
         assert _call(db, teacher, since, {"s": space_id}) == 1
         assert _call(db, _user(db, role="student"), since, {"s": space_id}) == 0
+
+
+# ── Phase 8: the parent's read-only overview (20261005140000) ───────────────
+
+_OVERVIEW = "SELECT * FROM app.guardian_classroom_overview()"
+
+
+def _overview(db, user_id: str) -> list[dict]:
+    _as(db, user_id)
+    return [dict(r) for r in db.execute(text(_OVERVIEW)).mappings().all()]
+
+
+@pytest.fixture
+def family(db, make_link, member) -> str:
+    """A parent with a VERIFIED link to `member` (Class 11, where linking is optional)."""
+    parent = _user(db, role="parent")
+    make_link(parent_id=parent, student_id=member, status="verified")
+    return parent
+
+
+class TestParentOverview:
+    def test_a_verified_parent_sees_the_classroom_its_teacher_and_its_classwork(
+        self, db, classroom, member, family, lab
+    ):
+        [row] = _overview(db, family)
+        assert (str(row["student_id"]), row["space_id"], row["assignment_id"]) == (
+            member,
+            classroom[0],
+            lab,
+        )
+        assert (row["space_title"], row["subject_name"], str(row["space_status"])) == (
+            "Test class",
+            "Physics",
+            "active",
+        )
+        assert row["teacher_name"].startswith("teacher ")
+        assert row["student_name"].startswith("student ")
+
+    def test_it_carries_no_feedback_no_work_no_chat_and_no_classmate(
+        self, db, classroom, member, family, lab
+    ):
+        _as(db, family)
+        columns = set(db.execute(text(_OVERVIEW)).keys())
+        assert columns == {
+            "student_id",
+            "student_name",
+            "space_id",
+            "space_title",
+            "space_status",
+            "subject_name",
+            "teacher_name",
+            "assignment_id",
+            "assignment_title",
+            "due_at",
+            "points",
+            "turned_in_at",
+            "grade",
+            "returned_at",
+        }
+        classmate = _user(db, role="student")
+        assert _join(db, classmate, classroom[1]) == "joined"
+        assert {str(r["student_id"]) for r in _overview(db, family)} == {member}
+
+    def test_a_grade_appears_only_once_returned(self, db, teacher, member, family, lab):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        save = "SELECT app.save_grade(:a, :u, 7, 'a private note', :ret)"
+        _call(db, teacher, save, {"a": lab, "u": member, "ret": False})
+        [row] = _overview(db, family)
+        assert row["turned_in_at"] is not None
+        assert (row["grade"], row["returned_at"]) == (None, None)
+        _call(db, teacher, save, {"a": lab, "u": member, "ret": True})
+        [row] = _overview(db, family)
+        assert row["grade"] == 7 and row["returned_at"] is not None
+
+    def test_scheduled_and_long_past_assignments_are_left_out(self, db, teacher, classroom, family):
+        _assign(db, teacher, classroom[0], scheduled=True)
+        _as(db, teacher)
+        db.execute(
+            text(
+                "INSERT INTO assignment "
+                "  (space_id, subject_id, author_id, title, publish_at, due_at) "
+                "SELECT s.id, s.subject_id, :a, 'Old', now() - interval '200 days', "
+                "       now() - interval '121 days' FROM classroom_space s WHERE s.id = :s"
+            ),
+            {"s": classroom[0], "a": teacher},
+        )
+        # The classroom is still there, with nothing current in it.
+        assert [r["assignment_id"] for r in _overview(db, family)] == [None]
+
+    def test_an_archived_classroom_stays_labelled(self, db, teacher, classroom, family):
+        _as(db, teacher)
+        db.execute(
+            text("UPDATE classroom_space SET status = 'archived' WHERE id = :s"),
+            {"s": classroom[0]},
+        )
+        assert [str(r["space_status"]) for r in _overview(db, family)] == ["archived"]
+
+    def test_a_pending_or_revoked_link_shows_nothing(self, db, make_link, member, classroom):
+        for status in ("pending", "revoked"):
+            parent = _user(db, role="parent")
+            make_link(parent_id=parent, student_id=member, status=status)
+            assert _overview(db, parent) == [], status
+
+    def test_another_family_sees_none_of_this_child(self, db, make_link, classroom, member, family):
+        other_child = _user(db, role="student")
+        assert _join(db, other_child, classroom[1]) == "joined"
+        other_parent = _user(db, role="parent")
+        make_link(parent_id=other_parent, student_id=other_child, status="verified")
+        assert {str(r["student_id"]) for r in _overview(db, other_parent)} == {other_child}
+        assert {str(r["student_id"]) for r in _overview(db, family)} == {member}
+
+    def test_nobody_but_a_parent_gets_a_row(self, db, teacher, member, family):
+        for user in (teacher, member):
+            assert _overview(db, user) == []
+
+    def test_a_classroom_the_child_left_drops_out_but_the_child_stays(
+        self, db, classroom, member, family
+    ):
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": classroom[0]})
+        assert [(str(r["student_id"]), r["space_id"]) for r in _overview(db, family)] == [
+            (member, None)
+        ]
+
+    def test_a_parent_reads_no_classroom_table_directly(
+        self, db, teacher, classroom, member, family, lab
+    ):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        _call(
+            db, teacher, "SELECT app.save_grade(:a, :u, 7, 'note', true)", {"a": lab, "u": member}
+        )
+        _say(db, member, classroom[0])
+        _as(db, family)
+        for table in (
+            "classroom_space",
+            "enrollment",
+            "announcement",
+            "assignment",
+            "assignment_submission",
+            "submission_grade",
+            "submission_file",
+            "submission_link",
+            "space_message",
+        ):
+            assert _count(db, f"SELECT count(*) FROM {table}", {}) == 0, table  # noqa: S608 -- fixed list

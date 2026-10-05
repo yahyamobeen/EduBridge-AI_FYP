@@ -474,3 +474,37 @@ class MessageCreateRequest(BaseModel):
 
 class MuteRequest(BaseModel):
     muted: bool
+
+
+# ── Phase 8: the parent's read-only overview ────────────────────────────────
+
+
+class ParentAssignment(BaseModel):
+    id: UUID
+    title: str
+    due_at: datetime | None
+    points: int | None
+    # Derived from the turn-in time, the deadline and the return — the times
+    # themselves are not sent.
+    status: WorkStatus
+    # Only once the teacher has returned it; never the feedback.
+    grade: float | None
+
+
+class ParentClassroom(BaseModel):
+    space_id: UUID
+    title: str
+    status: SpaceStatus
+    subject_name: str
+    teacher_name: str | None
+    assignments: list[ParentAssignment]
+
+
+class ParentChild(BaseModel):
+    student_id: UUID
+    full_name: str | None
+    classrooms: list[ParentClassroom]
+
+
+class ParentOverviewResponse(BaseModel):
+    children: list[ParentChild]

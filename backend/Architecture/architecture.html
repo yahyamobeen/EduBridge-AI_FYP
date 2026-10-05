@@ -136,7 +136,7 @@
       <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
       <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
       the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
-      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, a student's links, and the class chat — classroom Phases 2–7), <code>app/core/</code> (configuration, the
+      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, a student's links, the class chat, and the parent's read-only overview — classroom Phases 2–8), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -146,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">43</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:82</span></div></div>
-        <div class="stat"><div class="n">63</div><div class="l">implemented routes · 21 auth + 42 classroom</div></div>
-        <div class="stat"><div class="n">24</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 63</div></div>
-        <div class="stat"><div class="n">32</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">52</div><div class="l">test files · 22 unit + 30 integration</div></div>
+        <div class="stat"><div class="n">44</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:85</span></div></div>
+        <div class="stat"><div class="n">64</div><div class="l">implemented routes · 21 auth + 43 classroom</div></div>
+        <div class="stat"><div class="n">23</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 64</div></div>
+        <div class="stat"><div class="n">33</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">53</div><div class="l">test files · 22 unit + 31 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -339,7 +339,7 @@ flowchart TB
       statement's <em>shape</em> from fixed literals and mark it <code># noqa: S608</code>: <code>auth/service.py</code>
       <code>update_me</code>, and <code>classroom/service.py</code> <code>require_owner</code> and <code>update_space</code>.</p>
 
-      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–7)</h3>
+      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–8)</h3>
       <p>Same layers, one difference: <strong>the database decides which classroom a caller may touch.</strong> The
       dependency decides only <em>who</em> may call — <code>participant</code> and <code>gated_student</code> wrap
       <code>require_guardian_verified</code>; leaving uses <code>require_role('student')</code> alone, because leaving is a
@@ -394,6 +394,12 @@ flowchart TB
       deletions reach a member as ids only (<code>app.space_message_tombstones</code>). <strong>Moderation is retained
       and audited</strong>: the teacher's delete is a stamp they can still read, mute is <code>enrollment.muted_at</code>,
       and the lock is <code>classroom_space.chat_locked</code> through the existing <code>PATCH</code>.</p>
+      <p>The <strong>parent's overview</strong> (classroom Phase 8, <code>classroom/parent.py</code>,
+      <span class="ln">20261005140000</span>) is the one classroom route a parent reaches. It reads <strong>one
+      function and no table</strong>: <code>app.guardian_classroom_overview()</code> takes no parameters, so it is
+      anchored on the caller, and returns only what CL-10 allows — a verified child's classrooms, teachers, deadlines
+      and returned grades. A function rather than parent read policies, because a policy releases whole rows: the
+      feedback beside the grade, the work beside the turn-in time.</p>
     </section>
 
     <section class="prose">

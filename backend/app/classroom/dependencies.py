@@ -41,6 +41,8 @@ def gated_student(ctx: Annotated[AuthContext, Depends(require_guardian_verified)
 Participant = Annotated[AuthContext, Depends(participant)]
 GatedStudent = Annotated[AuthContext, Depends(gated_student)]
 Teacher = Annotated[AuthContext, Depends(require_role(UserRole.teacher.value))]
+# The read-only overview (Phase 8). Not guardian-gated: the gate is a STUDENT rule.
+Parent = Annotated[AuthContext, Depends(require_role(UserRole.parent.value))]
 # Leaving is a consent right (prd.md §4.2): a student whose guardian link was
 # later revoked must still be able to leave, so this is role-gated and NOT
 # guardian-gated.

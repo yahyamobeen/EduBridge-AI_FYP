@@ -614,3 +614,35 @@ export type ChatPage = {
 
 /** `details.reason` on a 400 from POST /spaces/{id}/messages. */
 export type ChatRefusalReason = 'archived' | 'muted' | 'chat_locked'
+
+// Phase 8 — the parent's read-only overview (prd.md CL-10)
+
+/** One assignment as a parent sees it: a deadline, a derived status, a returned grade. */
+export type ParentAssignment = {
+  id: string
+  title: string
+  due_at: string | null
+  points: number | null
+  status: WorkStatus
+  /** Only once the teacher has returned it. Feedback never comes. */
+  grade: number | null
+}
+
+export type ParentClassroom = {
+  space_id: string
+  title: string
+  status: SpaceStatus
+  subject_name: string
+  teacher_name: string | null
+  assignments: ParentAssignment[]
+}
+
+export type ParentChild = {
+  student_id: string
+  full_name: string | null
+  /** Empty for a linked child who is in no classroom yet. */
+  classrooms: ParentClassroom[]
+}
+
+/** GET /parent/classrooms — one entry per child with a VERIFIED link. */
+export type ParentOverviewResponse = { children: ParentChild[] }

@@ -76,6 +76,10 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   parent: [
     { key: 'dashboard', href: '/parent' },
     { key: 'myChild', href: '/coming-soon/my-child' },
+    // Built in classroom Phase 8: deadlines, turn-in status and returned grades
+    // (prd.md CL-10) on a page of its own — never a link into a classroom, so
+    // no chat, stream or classmate comes with it.
+    { key: 'classrooms', href: '/parent/classroom' },
     { key: 'progress', href: '/coming-soon/progress' },
     { key: 'howToHelp', href: '/coming-soon/how-to-help' },
     ...SETTINGS,

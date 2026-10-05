@@ -4,9 +4,10 @@
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
 > **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
-> sections re-measured **2026-10-05 on branch `add-classroom`** (32 migration files, all applied with `supabase db push` and re-verified on the live database —
+> sections re-measured **2026-10-05 on branch `add-classroom`** (33 migration files, all applied with `supabase db push` and re-verified on the live database —
 > the four earlier `20261004…` files on 2026-10-04; `20261004150000` (classroom files),
-> `20261005120000` (submission links) and `20261005130000` (class chat) on 2026-10-05).
+> `20261005120000` (submission links), `20261005130000` (class chat) and `20261005140000`
+> (parent overview) on 2026-10-05).
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
 > [Migration rules](#migration-rules) for why they can.
@@ -22,7 +23,7 @@ Run from the repository root.
 
 | Measure | Value | Command |
 |---|---|---|
-| Migration files | **32** (all applied; `20261005130000` on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| Migration files | **33** (all applied; `20261005140000` on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
 | `CREATE TABLE` statements | **55** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
 | …of which DEFAULT partitions | **2** | `grep -hE '^CREATE TABLE.*PARTITION OF' supabase/migrations/*.sql \| wc -l` |
 | Base tables (55 − 2) | **53** | derived from the two rows above |
@@ -32,18 +33,18 @@ Run from the repository root.
 | Triggers | **17** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
 | `CREATE POLICY` occurrences | **114** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
 | …real `CREATE POLICY` statements | **111** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| **Policy objects the migrations produce** | **98** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 32 files, and the same 98 on the live database after `supabase db push` (95 before `20261005130000`, which creates 3; 93 before `20261005120000`, which creates 2; 88 before `20261004150000`, which creates 5; 80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
-| `CREATE OR REPLACE FUNCTION` statements | **84** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| Distinct `app.*` function names ever defined | **72** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
-| **Live `app.*` functions** (72 − 1 retired) | **71** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow, and 71 on the live database (2026-10-05; 67 before `20261005130000`, which adds 4); `issue_token_for_email` is the one dropped for good |
-| `SECURITY DEFINER` lines | **84** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| `SET search_path` lines | **84** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
-| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **73** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| `GRANT EXECUTE … TO app_backend` | **71** — lines, not functions; no longer equal to the revokes, because the classroom's internal helpers (`submittable_space`, `lock_submission`, `space_storage_bytes`, `lock_space_files`) are revoked and deliberately never granted (plan R9) | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
+| **Policy objects the migrations produce** | **98** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 33 files, and the same 98 on the live database (`20261005140000` creates none; 95 before `20261005130000`, which creates 3; 93 before `20261005120000`, which creates 2; 88 before `20261004150000`, which creates 5; 80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
+| `CREATE OR REPLACE FUNCTION` statements | **85** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| Distinct `app.*` function names ever defined | **73** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
+| **Live `app.*` functions** (73 − 1 retired) | **72** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow, and 72 on the live database (2026-10-05; 71 before `20261005140000`, which adds 1; 67 before `20261005130000`, which added 4); `issue_token_for_email` is the one dropped for good |
+| `SECURITY DEFINER` lines | **85** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
+| `SET search_path` lines | **85** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
+| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **74** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| `GRANT EXECUTE … TO app_backend` | **72** — lines, not functions; no longer equal to the revokes, because the classroom's internal helpers (`submittable_space`, `lock_submission`, `space_storage_bytes`, `lock_space_files`) are revoked and deliberately never granted (plan R9) | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
 | `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
-| Implemented HTTP endpoints | **63** (21 auth + 42 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Implemented HTTP endpoints | **64** (21 auth + 43 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
 
-**Measured from the catalogue (shadow database built from all 32 files, 2026-10-05): 70 of the 71 live `app.*` functions
+**Measured from the catalogue (shadow database built from all 33 files, 2026-10-05): 71 of the 72 live `app.*` functions
 carry `search_path`.** The exception is `app.set_updated_at()`
 (`20260801120000_initial_schema.sql:85`), a plain trigger function that is not `SECURITY DEFINER`
 and therefore has nothing to escalate. Two functions are not `SECURITY DEFINER`: that trigger, and
@@ -338,7 +339,7 @@ never silently grant free access forever.
 
 ## The complete Row-Level Security policy catalogue
 
-**All 98 live policy objects** (shadow and live agree, 2026-10-05). Every one is `TO app_backend`; no other role has a policy. An empty
+**All 98 live policy objects** (shadow and live agree, 2026-10-05; the parent overview, `20261005140000`, adds none). Every one is `TO app_backend`; no other role has a policy. An empty
 cell means the clause is absent from the policy, which is not the same as `true` — an absent
 `WITH CHECK` on an `UPDATE` policy means PostgreSQL falls back to the `USING` expression, and an
 absent `USING` on an `INSERT` policy is simply not applicable.
@@ -546,7 +547,7 @@ path.
 
 ## The `app.*` privileged functions
 
-**71 live** (shadow and live agree, 2026-10-05), from 72 distinct names
+**72 live** (shadow and live agree, 2026-10-05), from 73 distinct names
 ever defined — `app.issue_token_for_email` was dropped as a byte-for-byte duplicate of `app.insert_auth_token` (`20260803160000:151-153`).
 
 All are in the `app` schema. All but two are `SECURITY DEFINER`; all but one carry
@@ -703,6 +704,23 @@ its teacher only, and a student cannot lock it; an archived classroom takes no p
 moderated; a Class 9 student whose guardian withdrew consent cannot post; a deleted message is hidden
 from the class and kept for the teacher; only the owning teacher deletes; and tombstones reach the
 class and nobody else.
+
+### Classroom — the parent's overview
+
+`20261005140000` (classroom Phase 8, `prd.md` CL-10). A parent has **no read policy on any
+classroom table**; this one function is their whole view.
+
+| Function | Calling endpoint | Returns | Notes |
+|---|---|---|---|
+| `app.guardian_classroom_overview() → (student_id, student_name, space_id, space_title, space_status, subject_name, teacher_name, assignment_id, assignment_title, due_at, points, turned_in_at, grade, returned_at)` | `GET /api/parent/classrooms` | one row per child × classroom × assignment | **No parameters**: the parent is `app.current_user_id()` (the `change_password` pattern), so it cannot be aimed at another family. Verified links only; an active student account; the child's **current** classrooms (one they left drops out; an archived one stays, with its status); published assignments due in the last 120 days or undated; `grade` only once `returned_at` is set. A verified child in no classroom is one row with the classroom columns `NULL`. Never feedback, the work, files, links, the chat or a classmate. `20261005140000:29` |
+
+`TestParentOverview` (10 tests, `test_classroom_rls.py`) pins it: a verified parent sees the
+classroom, its teacher and its classwork; the result has exactly these columns and no classmate; a
+grade appears only once returned; scheduled and long-past assignments are left out; an archived
+classroom stays labelled; a pending or revoked link shows nothing; another family sees none of
+this child; a teacher or a student gets no row; a classroom the child left drops out while the
+child stays; and a parent reads **no** classroom table directly — not the classroom, the roster,
+the stream, the assignments, the work, the grades, the files, the links or the chat.
 
 ### The trigger function
 
@@ -1031,6 +1049,16 @@ by PostgreSQL, whatever the service does. The service asks the same function fir
 refusal is a reason the student can act on. A deletion is a stamp, never a `DELETE`: members stop
 reading the row, the teacher keeps it for review. **Do not add an UPDATE or DELETE grant, a member
 read path to deleted rows, or a second way to post.**
+
+### 14. A parent reads the classroom through one function, never through a policy
+
+Since `20261005140000`, a parent's whole view of a child's classrooms is
+`app.guardian_classroom_overview()` — anchored on the caller, with no parameters. Row-Level Security
+is per **row**: a parent read policy on `assignment_submission` or `submission_grade` would hand
+over the student's answer and the teacher's private feedback along with the turn-in time and the
+grade, and the service would be all that stood between them and the parent (`prd.md` CL-10 forbids
+both). **Do not add a parent read policy to a classroom table**; add a column to the function
+instead, if CL-10 ever allows one.
 
 ---
 

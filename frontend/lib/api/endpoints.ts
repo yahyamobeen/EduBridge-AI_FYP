@@ -32,6 +32,7 @@ import type {
   MeResponse,
   MeUpdateRequest,
   MySubmission,
+  ParentOverviewResponse,
   PasswordChangeRequest,
   PasswordForgotRequest,
   PasswordResetRequest,
@@ -623,4 +624,10 @@ export function setMemberMuted(
     method: 'PUT',
     body: { muted },
   })
+}
+
+// Phase 8 — the parent's read-only overview
+
+export function getParentClassrooms(signal?: AbortSignal): Promise<ParentOverviewResponse> {
+  return apiFetch<ParentOverviewResponse>('/parent/classrooms', withSignal(signal))
 }

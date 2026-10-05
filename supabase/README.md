@@ -13,10 +13,10 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**32 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-05). The seven classroom files from
+**33 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-05). The eight classroom files from
 `20261004120000` on were dry-run on a shadow database first, then applied by the owner with
-`supabase db push` — four on 2026-10-04, `20261004150000`, `20261005120000` and `20261005130000` on
-2026-10-05 — and re-verified on the live database.
+`supabase db push` — four on 2026-10-04, `20261004150000`, `20261005120000`, `20261005130000` and
+`20261005140000` on 2026-10-05 — and re-verified on the live database.
 
 | # | File | Contents |
 |---|---|---|
@@ -52,6 +52,7 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 | 30 | `20261004150000_classroom_files.sql` | **Classroom Phase 6**. `material_attachment` (a teacher's file on one announcement or assignment) and `submission_file` (a student's file on their submission) — metadata only; the bytes live in the private `classroom-files` bucket, which this file also creates (skipped on a plain PostgreSQL shadow; a **WARNING**, not an error, if the role lacks the privilege — then create it by hand: private, 9 MB, PDF/PNG/JPEG/DOCX/PPTX). CHECK constraints hold every object key to its owner's prefix. Five policies: a member sees an attachment once its post is live; a teacher sees a student's file once turned in and while the student is a member. Three writing functions with quotas (5 files and 20 MiB per submission, 10 per post, 2 GiB per classroom) under one advisory lock per classroom; `app.delete_assignment` now returns every stored key. *Applied 2026-10-05; the migration created the bucket* |
 | 31 | `20261005120000_submission_links.sql` | **Classroom Phase 6b**. `submission_link`: up to five https links on a student's work, each its own row, readable exactly like a submission file (the student always; the teacher once turned in and while the student is a member). Written only by `app.add_submission_link` (the file's gate and lock; a repeated link is the same row) and `app.remove_submission_link`. The old single `assignment_submission.link_url` is copied in and cleared; the column stays, unread. *Applied 2026-10-05; the live database held no old link to move* |
 | 32 | `20261005130000_classroom_chat.sql` | **Classroom Phase 7**. The class chat: `space_message` (class-public, never the tutor `message` table) and `classroom_space.chat_locked`. A member posts with a column-limited `INSERT (space_id, author_id, body)` held by `space_message_insert` to the caller and to `app.can_post_message` — an active, unmuted member of an unlocked, active classroom who passes the guardian gate, or its teacher (who may post while locked). Members read what is not deleted; the teacher (and an administrator) also reads what was. `app.delete_space_message` (soft, retained), `app.set_student_muted` (writes `enrollment.muted_at`) and `app.space_message_tombstones` (deleted ids for the poll). `author_id` is `ON DELETE RESTRICT`: deleting an account keeps its messages. *Applied 2026-10-05; re-verified on the live database* |
+| 33 | `20261005140000_guardian_classroom_overview.sql` | **Classroom Phase 8**. `app.guardian_classroom_overview()`, the parent's whole view of a child's classrooms (`GET /api/parent/classrooms`): no parameters, so it is anchored on the caller; verified links only; the child's current classrooms (archived ones labelled), teachers, published assignments due in the last 120 days or undated, and a grade once returned — never feedback, work, files, links, the chat or classmates. A function, not parent read policies, because a policy releases whole rows. No table, policy or grant changes. *Applied 2026-10-05; re-verified on the live database* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.
@@ -166,8 +167,8 @@ Verbatim at `backend/app/core/db.py:33-59`. Two things there are load-bearing:
 If the variable is never set, `app.current_user_id()` returns `NULL` and owner-scoped policies deny
 — fail-closed by design. Endpoints that run *before* a session exists (login, refresh, email
 verification, password reset, two-factor, the guardian flow) therefore cannot use a plain query;
-they call one of the narrow `SECURITY DEFINER` functions instead. All 71 `app.*` functions
-(measured 2026-10-05 on a shadow database built from all 32 files, and on the live database) are catalogued, with their call
+they call one of the narrow `SECURITY DEFINER` functions instead. All 72 `app.*` functions
+(measured 2026-10-05 on a shadow database built from all 33 files, and on the live database) are catalogued, with their call
 sites, in
 [`../backend/Architecture/database.md`](../backend/Architecture/database.md#the-app-privileged-functions).
 

@@ -1,7 +1,8 @@
 """
 Classroom routes — `tdd.md` §3.6: spaces, codes and membership (Phase 2), the
 stream (Phase 3), assignments, submissions and grades (Phase 4), the calendar
-(Phase 5), files (Phase 6) and the class chat (Phase 7).
+(Phase 5), files (Phase 6), the class chat (Phase 7) and the parent's
+read-only overview (Phase 8).
 
 Thin by design: rate limit first, then one service call. Who may call is
 decided by the dependency on each route (app/classroom/dependencies.py); which
@@ -27,10 +28,11 @@ from app.classroom import (
     chat,
     file_service,
     links,
+    parent,
     service,
     storage,
 )
-from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
+from app.classroom.dependencies import AnyStudent, GatedStudent, Parent, Participant, Teacher
 from app.classroom.files import download_headers, read_bounded_body
 from app.classroom.schemas import (
     Announcement,
@@ -56,6 +58,7 @@ from app.classroom.schemas import (
     MessageCreateRequest,
     MuteRequest,
     MySubmission,
+    ParentOverviewResponse,
     PeopleResponse,
     SpaceCreateRequest,
     SpaceDetail,
@@ -540,3 +543,12 @@ def mute_member_endpoint(
 ) -> None:
     _write(request, ctx)
     chat.set_muted(ctx.session, ctx.user_id, space_id, student_id, payload.muted)
+
+
+# ── Phase 8: the parent's read-only overview ────────────────────────────────
+
+
+@router.get("/parent/classrooms", response_model=ParentOverviewResponse)
+def parent_classrooms_endpoint(request: Request, ctx: Parent) -> ParentOverviewResponse:
+    _read(request, ctx)
+    return ParentOverviewResponse(**parent.overview(ctx.session))
