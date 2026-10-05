@@ -29,7 +29,7 @@ The backend is a **single FastAPI application** with two routers. All server log
 | Package | Contents |
 |---|---|
 | `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
-| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–6), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`) — §2.8, §9.5 |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–6b), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), and a student's links (`links.py`) — §2.8, §9.5 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -46,16 +46,16 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **41** | `find backend/app -type f -name "*.py" \| wc -l` |
-| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:64`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **55** (21 + 34) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
-| Routes specified in `tdd.md` v0.4.0 | **83** | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **28** | 83 − 55 |
-| Applied migrations | **30** | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **50** (22 unit, 28 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **49 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 47; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), or `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61` |
+| Python source files | **42** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:75`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **59** (21 + 38) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Routes specified in `tdd.md` | **87** (83 in v0.4.0, plus Phase 6b's 4) | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
+| Specified but **not** implemented | **28** | 87 − 59 |
+| Applied migrations | **31** | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **51** (22 unit, 29 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **51 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 49; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), or `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61` |
 
-*Re-measured 2026-10-05 (classroom Phase 6); the rest of this page is the 2026-08-15 account unless a
+*Re-measured 2026-10-05 (classroom Phase 6b); the rest of this page is the 2026-08-15 account unless a
 section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5. Citations into
 `main.py`, `core/ratelimit.py` and `core/config.py` were re-verified on 2026-10-05, when Phase 6
 moved all three — most had drifted well before that.*
@@ -259,7 +259,7 @@ choice between two function names) and mark it `# noqa: S608` with the reason: `
 `update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
 bound parameter.
 
-### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–6)
+### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–6b)
 
 Same layers as above, with one difference that matters: **the database decides which classroom a
 caller may touch.** The route's dependency decides only *who* may call
@@ -325,6 +325,14 @@ Files (classroom Phase 6) split three ways, so each rule sits where it can be te
   every database step still runs in the threadpool (`run_in_threadpool`), like the synchronous
   routes. A cheap membership or ownership check runs **before** the body is read, so an outsider
   never gets to send 5 MB.
+
+Phase 6b adds two things on the same rules. **Links** (`classroom/links.py`) are rows of their own
+(`20261005120000`), up to five per piece of work, written only by `app.add_submission_link` /
+`app.remove_submission_link` and read under the file's policy — so the student's draft keeps no
+`link_url` any more. **Viewing** (`file_service.view_link`) reads the file's row exactly as a
+download does, then signs a five-minute link to the storage service (§9.5): the browser opens
+the file on Supabase's domain, never in the application's own pages, and only a PDF or an image —
+Office files are download-only (owner decision 2026-10-05).
 
 Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`)
 and `file_upload` (30 per hour) / `file_download` (60 per minute, `:111-112`), all per user. Route
@@ -854,7 +862,7 @@ factory functions build the catalogued errors — `validation_error` (`:27`), `u
 `guardian_not_found` (`:89`), `two_factor_invalid` (`:93`), `pending_token_expired` (`:97`),
 `token_expired` (`:105`).
 
-**No endpoint invents a code.** `tdd.md` §7.3 (line 1107) states the rule, and the code follows it at
+**No endpoint invents a code.** `tdd.md` §7.3 (line 1110) states the rule, and the code follows it at
 `service.py:1057-1065`: `/2fa/resend` against a TOTP enrolment answers `400 VALIDATION_ERROR` with
 `details.fields`, not a bespoke `INVALID_METHOD`, because a code outside the catalogue reaches the
 client as an unrecognised string and renders as "something went wrong".
@@ -953,28 +961,37 @@ verification iterates the unused hashes (`service.py:974-986`) instead of doing 
 > mail**. The TOTP check passes a float where a `datetime` is expected. Backup-code download can
 > silently produce no file, and the codes are shown once and then lost.
 
-### 9.5 Object storage — `app/classroom/storage.py` (classroom Phase 6)
+### 9.5 Object storage — `app/classroom/storage.py` (classroom Phases 6 and 6b)
 
-The same shape as the email seam, and for the same reason: a `Protocol` (`storage.py:46`) with
-`put`, `open` and `delete_many`; `InMemoryObjectStorage` (`:57`) for tests and local work;
-`S3ObjectStorage` (`:77`) — Supabase Storage over the S3 protocol through `boto3`, path-style
+The same shape as the email seam, and for the same reason: a `Protocol` (`storage.py:47`) with
+`put`, `open`, `delete_many` and `view_url`; `InMemoryObjectStorage` (`:63`) for tests and local work;
+`S3ObjectStorage` (`:87`) — Supabase Storage over the S3 protocol through `boto3`, path-style
 addressing, checksums only when an operation requires one (botocore 1.36+ otherwise adds headers
 an S3-compatible service may refuse), imported only when `STORAGE_PROVIDER=s3`; and a cached
-factory, `get_object_storage` (`:150`). Downloads stream in 64 KiB chunks, and `open` fails
+factory, `get_object_storage` (`:181`). Downloads stream in 64 KiB chunks, and `open` fails
 **before** the first byte if the object is missing.
+
+**`view_url` (Phase 6b)** signs a GET locally — no request is made — for five minutes, with
+`response-content-disposition` set to `inline` under the cleaned name, `response-content-type` to
+the sniffed type and `response-cache-control` to `private, no-store`. The client sets
+`signature_version="s3v4"` explicitly: left to its default, botocore pre-signs with Signature
+Version 2, which Supabase refuses (`403 "Missing signature"`); requests were already Version 4.
+Measured on the real bucket (2026-10-05): the link answered 200 inline with the overrides honoured,
+a tampered key was refused (403) and an expired link was refused (400). `InMemoryObjectStorage`
+answers `memory://<key>`, so local viewing needs `STORAGE_PROVIDER=s3`.
 
 **Storage follows the database transaction** — finding D1's lesson, applied to objects:
 
 | Helper | When the object is deleted |
 |---|---|
-| `delete_now` (`:179`) | At once: the object was stored a moment ago and the database refused its row |
-| `track_upload` (`:185`) | Only if the transaction **rolls back** — the row it belongs to never existed |
-| `delete_after_commit` (`:190`) | Only once the deleting transaction **commits** — a failed request never loses a file whose row survived |
+| `delete_now` (`:210`) | At once: the object was stored a moment ago and the database refused its row |
+| `track_upload` (`:216`) | Only if the transaction **rolls back** — the row it belongs to never existed |
+| `delete_after_commit` (`:221`) | Only once the deleting transaction **commits** — a failed request never loses a file whose row survived |
 
-Two `Session` event hooks carry it out: `after_commit` (`:196`) and `after_soft_rollback` (`:203`,
+Two `Session` event hooks carry it out: `after_commit` (`:227`) and `after_soft_rollback` (`:234`,
 not `after_rollback`, for the reason given in `email.py`). Deletion runs on a two-worker pool after
 the response, and a failure is **logged, never raised**: an orphaned object costs storage, while
-a crashed worker would lose every later deletion silently. `drain_storage_cleanup` (`:211`) is
+a crashed worker would lose every later deletion silently. `drain_storage_cleanup` (`:242`) is
 called from the lifespan at shutdown (`main.py:72-75`), next to the email drain.
 
 ⚠️ **Callers go through `storage.get_object_storage()`**, never a name imported from the module:
@@ -987,7 +1004,7 @@ so no test can reach real storage — and a captured reference would slip past i
 - **A batch delete must say its body is XML.** botocore sends `DeleteObjects` with no
   `Content-Type`; Supabase then does not read the body and answers `400 "must have required
   property 'Body'"`. Every deletion failed — and, by design, only in a log line. `_label_xml_body`
-  (`:137`) adds `Content-Type: application/xml` before the request is signed.
+  (`:168`) adds `Content-Type: application/xml` before the request is signed.
 - **A missing object is recognised by its 404, not its code.** Supabase sends
   `<Code>NoSuchKey</Code>` inside a namespaced `<Error>` element, which botocore parses to an
   **empty** code, so `open` tests the HTTP status.
@@ -1001,7 +1018,7 @@ Both are pinned by `TestS3Requests` in `tests/unit/test_classroom_files.py`, wit
 | Document | What it is | Where |
 |---|---|---|
 | `prd.md` | Product Requirements Document — the four roles, the monetisation model, §4.3 the parental-consent gate (line 275), MON-2 the fail-closed subscription rule | [`../../prd.md`](../../prd.md) |
-| `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 168), §6.8 Row-Level Security (line 892), §6.9 two-factor authentication (line 927), §6.11 client-side security (line 1022), §7.2 the consolidated endpoint catalogue (line 1060), §7.3 the error model (line 1077) | [`../../tdd.md`](../../tdd.md) |
+| `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 168), §6.8 Row-Level Security (line 895), §6.9 two-factor authentication (line 930), §6.11 client-side security (line 1025), §7.2 the consolidated endpoint catalogue (line 1063), §7.3 the error model (line 1080) | [`../../tdd.md`](../../tdd.md) |
 | `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | outside the repository: `Desktop\EduBridge-AI_FYP-planning\user-stories.md` |
 | `database.html` / `database.md` | Tables by domain, the **complete Row-Level Security policy catalogue**, the `app.*` privileged functions with signature and grant, and findings B1–B27 | [database.html](database.html) |
 | `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 28 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |

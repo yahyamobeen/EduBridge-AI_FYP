@@ -4,8 +4,9 @@
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
 > **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
-> sections re-measured **2026-10-05 on branch `add-classroom`** (30 migration files, all applied with `supabase db push` and re-verified on the live database —
-> the four earlier `20261004…` files on 2026-10-04, `20261004150000` (classroom files) on 2026-10-05).
+> sections re-measured **2026-10-05 on branch `add-classroom`** (31 migration files, all applied with `supabase db push` and re-verified on the live database —
+> the four earlier `20261004…` files on 2026-10-04; `20261004150000` (classroom files) and
+> `20261005120000` (submission links) on 2026-10-05).
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
 > [Migration rules](#migration-rules) for why they can.
@@ -21,28 +22,28 @@ Run from the repository root.
 
 | Measure | Value | Command |
 |---|---|---|
-| Migration files | **30** (all applied; `20261004150000` on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
-| `CREATE TABLE` statements | **53** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
+| Migration files | **31** (all applied; `20261005120000` on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| `CREATE TABLE` statements | **54** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
 | …of which DEFAULT partitions | **2** | `grep -hE '^CREATE TABLE.*PARTITION OF' supabase/migrations/*.sql \| wc -l` |
-| Base tables (53 − 2) | **51** | derived from the two rows above |
+| Base tables (54 − 2) | **52** | derived from the two rows above |
 | Views | **1** | `grep -hE '^CREATE VIEW' supabase/migrations/*.sql \| wc -l` |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
-| Indexes | **57** (56 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
+| Indexes | **59** (58 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
 | Triggers | **17** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
-| `CREATE POLICY` occurrences | **109** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| …real `CREATE POLICY` statements | **106** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| **Policy objects the migrations produce** | **93** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 30 files, and the same 93 on the live database after `supabase db push` on 2026-10-05 (88 before `20261004150000`, which creates 5; 80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
-| `CREATE OR REPLACE FUNCTION` statements | **78** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| Distinct `app.*` function names ever defined | **66** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
-| **Live `app.*` functions** (66 − 1 retired) | **65** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow, and 65 on the live database (2026-10-05); `issue_token_for_email` is the one dropped for good |
-| `SECURITY DEFINER` lines | **78** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| `SET search_path` lines | **78** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
-| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **67** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| `GRANT EXECUTE … TO app_backend` | **65** — lines, not functions; no longer equal to the revokes, because the classroom's internal helpers (`submittable_space`, `lock_submission`, `space_storage_bytes`, `lock_space_files`) are revoked and deliberately never granted (plan R9) | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
+| `CREATE POLICY` occurrences | **111** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| …real `CREATE POLICY` statements | **108** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| **Policy objects the migrations produce** | **95** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 31 files, and the same 95 on the live database after `supabase db push` (93 before `20261005120000`, which creates 2; 88 before `20261004150000`, which creates 5; 80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
+| `CREATE OR REPLACE FUNCTION` statements | **80** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| Distinct `app.*` function names ever defined | **68** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
+| **Live `app.*` functions** (68 − 1 retired) | **67** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow, and 67 on the live database (2026-10-05); `issue_token_for_email` is the one dropped for good |
+| `SECURITY DEFINER` lines | **80** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
+| `SET search_path` lines | **80** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
+| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **69** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| `GRANT EXECUTE … TO app_backend` | **67** — lines, not functions; no longer equal to the revokes, because the classroom's internal helpers (`submittable_space`, `lock_submission`, `space_storage_bytes`, `lock_space_files`) are revoked and deliberately never granted (plan R9) | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
 | `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
-| Implemented HTTP endpoints | **55** (21 auth + 34 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Implemented HTTP endpoints | **59** (21 auth + 38 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
 
-**Measured from the catalogue (shadow database built from all 30 files, 2026-10-05): 64 of the 65 live `app.*` functions
+**Measured from the catalogue (shadow database built from all 31 files, 2026-10-05): 66 of the 67 live `app.*` functions
 carry `search_path`.** The exception is `app.set_updated_at()`
 (`20260801120000_initial_schema.sql:85`), a plain trigger function that is not `SECURITY DEFINER`
 and therefore has nothing to escalate. Two functions are not `SECURITY DEFINER`: that trigger, and
@@ -259,10 +260,11 @@ subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempo
 | `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. Since `20261004120000`: `removed_at` (set by the teacher; a removed student cannot rejoin with the code, one who left can — `ck_enrollment_removed_has_left`) and `muted_at` (written by the chat phase; survives leave and rejoin). **Written only by `app.join_space_by_code`, `app.leave_space` and `app.remove_student`.** |
 | `announcement` | `:364` | Space-scoped, author-attributed. Since `20261004130000`: `updated_at` (with `trg_announcement_updated`), `publish_at` (default `now()`; a future value **schedules** the post and the member read policy hides it until then — no job publishes it), `ck_announcement_body` (1–5000 characters after trimming), `ix_announcement_feed (space_id, publish_at DESC, id DESC)` for the keyset-paginated stream (replaces `ix_announcement_space`) and `ix_announcement_author` for the `ON DELETE RESTRICT` check. The owner may `UPDATE` only `body` and `publish_at`; INSERT and DELETE stay table-level and are held by the policies. Since `20261004150000`: `uq_announcement_id_space (id, space_id)`, the target of an attachment's composite key. |
 | `assignment` | `20261004140000:59` | Owner content, like `announcement`: author-attributed, scheduled by `publish_at` (members cannot read a future one). `subject_id` is denormalised for per-subject reports and held to the classroom's by the composite key `fk_assignment_space_subject (space_id, subject_id)`; the optional `chapter_id` is held to the same subject by `fk_assignment_chapter_subject (chapter_id, subject_id)` — a chapter from another subject is a foreign-key violation, not a service check. `ck_assignment_title` (1–200), `ck_assignment_instructions` (≤ 10 000), `ck_assignment_points` (1–1000 or NULL), `ck_assignment_due_after_publish`. The owner may `UPDATE` only `title, instructions, due_at, points, chapter_id, publish_at`; INSERT is table-level and held by `assignment_insert`; **no DELETE grant** — `app.delete_assignment` only. |
-| `assignment_submission` | `20261004140000:93` | One per (assignment, student) — `uq_submission_one_per_student`. `turned_in_at` (NULL = draft, stamped with `clock_timestamp()`) is the only state: **late, missing and graded are derived** (`app/classroom/status.py`), never stored. `ck_submission_link` allows `https://` only. `uq_submission_id_space_student` is the target for submission files (Phase 6). **No write grant**: written only by `app.save_submission_draft`, `app.turn_in_submission` and `app.unsubmit_submission`. |
+| `assignment_submission` | `20261004140000:93` | One per (assignment, student) — `uq_submission_one_per_student`. `turned_in_at` (NULL = draft, stamped with `clock_timestamp()`) is the only state: **late, missing and graded are derived** (`app/classroom/status.py`), never stored. `link_url` (with `ck_submission_link`) is **superseded since `20261005120000`** — copied into `submission_link`, cleared, and kept unread, because `app.save_submission_draft` still takes `p_link` (the service passes `NULL`). `uq_submission_id_space_student` is the target for submission files and links. **No write grant**: written only by `app.save_submission_draft`, `app.turn_in_submission` and `app.unsubmit_submission`. |
 | `submission_grade` | `20261004140000:117` | The teacher's grade (`numeric(6,2)`) and private feedback, keyed `(assignment_id, student_id)`. **A separate table, not a column on the submission**: every user shares one database role, so a teacher-owned column on a student-owned row would be writable by both. `returned_at` is when the student may see it — set once, never cleared. **No write grant**: written only by `app.save_grade`. |
 | `material_attachment` | `20261004150000:43` | A teacher's file on an announcement **or** an assignment — exactly one (`ck_material_one_parent`), each by a composite key `(announcement_id, space_id)` / `(assignment_id, space_id)` so the row's `space_id` is always its parent's. **`ck_material_key`**: the object key must be `s/<space_id>/<32 hex>` — a key naming another classroom is a CHECK violation. `ck_material_type` (PDF, PNG, JPEG, DOCX, PPTX), `ck_material_size` (1 byte to 9 MiB), `ck_material_filename` (1–255), `ck_material_sha` (SHA-256 hex). Cascades with its parent. Grants: `SELECT`, and `DELETE` for the owner under `material_owner_delete`; **written only by `app.add_material_attachment`**; no `UPDATE` — a row is immutable. |
 | `submission_file` | `20261004150000:76` | A student's file on their submission. `fk_subfile_submission (submission_id, space_id, student_id)` targets `uq_submission_id_space_student`, so a file can only ever belong to its own student's submission in its own classroom. **`ck_subfile_key`**: `u/<space_id>/<student_id>/<32 hex>`. Same type, size, filename and hash checks. **`SELECT` only**: written only by `app.add_submission_file` and `app.remove_submission_file`. |
+| `submission_link` | `20261005120000:25` | A link on a student's work (classroom Phase 6b) — up to five, each its own row. `fk_sublink_submission (submission_id, space_id, student_id)` targets `uq_submission_id_space_student`, like a file. `ck_sublink_url`: `https://` and no whitespace, at most 2048 characters; `uq_sublink_url (submission_id, url)` — the same link twice is one row. **`SELECT` only**: written only by `app.add_submission_link` and `app.remove_submission_link`. |
 
 ### Assessment
 
@@ -335,7 +337,7 @@ never silently grant free access forever.
 
 ## The complete Row-Level Security policy catalogue
 
-**All 93 live policy objects** (shadow and live agree, 2026-10-05). Every one is `TO app_backend`; no other role has a policy. An empty
+**All 95 live policy objects** (shadow and live agree, 2026-10-05). Every one is `TO app_backend`; no other role has a policy. An empty
 cell means the clause is absent from the policy, which is not the same as `true` — an absent
 `WITH CHECK` on an `UPDATE` policy means PostgreSQL falls back to the `USING` expression, and an
 absent `USING` on an `INSERT` policy is simply not applicable.
@@ -423,6 +425,8 @@ The six `*_read` policies below were created by the `FOREACH` loop at `202608011
 | `material_attachment` | `material_owner_delete` | DELETE | `app.owns_active_space(space_id)` | — | `20261004150000:168` |
 | `submission_file` | `subfile_read_own` | SELECT | `student_id = cuid()` | — | `20261004150000:175` |
 | `submission_file` | `subfile_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students()) AND EXISTS (turned-in submission)` — both conditions stated here, not inherited from `submission_teacher_read` through a subquery | — | `20261004150000:182` |
+| `submission_link` | `link_read_own` | SELECT | `student_id = cuid()` | — | `20261005120000:59` |
+| `submission_link` | `link_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students()) AND EXISTS (turned-in submission)` — the file rule, stated in full | — | `20261005120000:63` |
 
 `enrollment_student_join` (INSERT into **any** space) and `enrollment_leave` (UPDATE with no
 `WITH CHECK`) were **dropped** by `20261004120000` §4 — finding **B9** — and `app_backend` holds no
@@ -532,7 +536,7 @@ path.
 
 ## The `app.*` privileged functions
 
-**65 live** (shadow and live agree, 2026-10-05), from 66 distinct names
+**67 live** (shadow and live agree, 2026-10-05), from 68 distinct names
 ever defined — `app.issue_token_for_email` was dropped as a byte-for-byte duplicate of `app.insert_auth_token` (`20260803160000:151-153`).
 
 All are in the `app` schema. All but two are `SECURITY DEFINER`; all but one carry
@@ -625,7 +629,7 @@ on the route; `20261004140000:202`) and `app.lock_submission(p_assignment, p_stu
 either as `app_backend` is `permission denied`, which `test_classroom_rls.py` asserts.
 `TestAssignmentBoundary` (17 tests) pins every row of this section.
 
-### Classroom — file functions
+### Classroom — file and link functions
 
 `20261004150000` (classroom Phase 6). The **only** writers of `submission_file` and the only way to
 add a `material_attachment`. Each takes the **full object key**, already stored by the backend —
@@ -640,6 +644,8 @@ a limit.
 | `app.add_submission_file(p_assignment, p_object_key, p_filename, p_content_type, p_size, p_sha256) → (outcome, new_file_id)` | `POST /api/assignments/{id}/submission/files` | `added` · `forbidden` · `graded` · `turned_in` · `too_many_files` · `submission_quota` · `classroom_quota` | Same gate as a draft (`app.submittable_space`, guardian gate included) and the same `app.lock_submission`; creates the draft row if there is none. 5 files and 20 MiB per submission, 2 GiB per classroom. `20261004150000:191` |
 | `app.remove_submission_file(p_file uuid) → (outcome, removed_object_key)` | `DELETE /api/submission-files/{id}` | `removed` · `forbidden` · `graded` · `turned_in` | The caller's own file only; the key comes back for deletion **after** commit. `20261004150000:241` |
 | `app.add_material_attachment(p_announcement, p_assignment, p_object_key, …) → (outcome, new_file_id)` | `POST /api/announcements/{id}/attachments`, `POST /api/assignments/{id}/attachments` | `added` · `forbidden` · `too_many_files` · `classroom_quota` | Exactly one parent; owner of an **active** classroom. 10 files per post, 2 GiB per classroom. `20261004150000:271` |
+| `app.add_submission_link(p_assignment uuid, p_url text) → (outcome, new_link_id)` | `POST /api/assignments/{id}/submission/links` | `added` · `forbidden` · `invalid_url` · `graded` · `turned_in` · `too_many_links` | Classroom Phase 6b. The file's gate and lock; checks the URL itself (a CHECK violation would be a 500); the same link twice returns the existing row. 5 links per submission. Stamps `clock_timestamp()`, so links list in the order added. `20261005120000:72` |
+| `app.remove_submission_link(p_link uuid) → text` | `DELETE /api/submission-links/{id}` | `removed` · `forbidden` · `graded` · `turned_in` | The caller's own link, while the work is an ungraded draft. `20261005120000:121` |
 
 Two more **internal** helpers with **no grant** (plan R9): `app.space_storage_bytes(p_space)`
 (`20261004150000:134`, the 2 GiB sum) and `app.lock_space_files(p_space)` (`20261004150000:146`). A teacher removes
@@ -647,7 +653,16 @@ an attachment with a plain `DELETE … RETURNING object_key` under `material_own
 object follows after commit. `TestFileBoundary` (10 tests, `test_classroom_rls.py`) pins this
 section: no direct write, a forged key refused, the draft and leaving rules, a scheduled post's
 attachment, the sixth file, the locks after turn-in and grading, the helpers' missing grant, and
-`delete_assignment` returning the keys of a student who left.
+`delete_assignment` returning the keys of a student who left. `TestLinkBoundary` (9 tests) pins the
+link rows the same way: no direct write, https only, the draft and leaving rules, a classmate sees
+nothing, one row for a repeated link and a refused sixth, the locks, no link on a scheduled
+assignment, and the cascade with the assignment.
+
+**The single link moved** (`20261005120000:162-168`): under the migration role, which bypasses RLS (as
+`20260817120000`'s top-level `UPDATE` of `auth_token` did — the live role reports
+`rolbypassrls`), every `link_url` is copied into `submission_link` and then cleared, so a re-run
+copies nothing. Proved on the shadow with a seeded old-style link; the live database held none
+(2026-10-05).
 
 **The bucket.** `20261004150000:387` inserts `classroom-files` into `storage.buckets` — private, 9 MiB,
 the same five types — so it is not a dashboard step that exists in one environment and no
@@ -966,8 +981,10 @@ Since `20261004150000`, the bytes live in a private bucket that only the backend
 decide who may see each object, and a download is served only after its row has been read under
 Row-Level Security. The object key **is** the storage boundary, so `ck_material_key` and
 `ck_subfile_key` hold it to `s/<space>/…` and `u/<space>/<student>/…`: a service bug that passes
-another student's key is a CHECK violation, not a leak. **Do not add a `storage.objects` policy or a
-signed-URL path that skips the row read**, and do not loosen either CHECK. Objects are stored before
+another student's key is a CHECK violation, not a leak. **Do not add a `storage.objects` policy, or
+any link path that skips the row read**, and do not loosen either CHECK. The one link that exists
+(classroom Phase 6b, `file_service.view_link`) is minted only **after** that read, for PDF and images
+only, and lives five minutes: it is a bearer pass to one object, never stored or logged. Objects are stored before
 their row and deleted only **after** the deleting transaction commits — so a rollback can orphan an
 object, never a row (`backend/app/classroom/storage.py`).
 

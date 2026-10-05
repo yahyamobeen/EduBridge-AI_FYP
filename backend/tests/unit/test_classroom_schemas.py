@@ -14,6 +14,7 @@ from app.classroom.schemas import (
     AssignmentUpdateRequest,
     GradeRequest,
     JoinRequest,
+    LinkRequest,
     SpaceCreateRequest,
     SpaceUpdateRequest,
     SubmissionDraftRequest,
@@ -120,26 +121,34 @@ class TestAssignmentRequests:
 
 
 class TestSubmissionDraftRequest:
-    def test_an_https_link_is_kept(self):
-        link = "https://example.com/my-work?id=1"
-        assert SubmissionDraftRequest(link_url=f"  {link} ").link_url == link
+    def test_a_draft_carries_no_link_any_more(self):
+        # Phase 6b: links are their own rows (submission_link), added one at a
+        # time. A stale client's `link_url` is ignored, never stored.
+        assert "link_url" not in SubmissionDraftRequest.model_fields
+        assert SubmissionDraftRequest(body="x", link_url="https://example.com").body == "x"
 
-    def test_a_blank_link_means_none(self):
-        assert SubmissionDraftRequest(link_url="  ").link_url is None
+
+class TestLinkRequest:
+    def test_an_https_link_is_kept_trimmed(self):
+        link = "https://example.com/my-work?id=1"
+        assert LinkRequest(url=f"  {link} ").url == link
 
     @pytest.mark.parametrize(
         "bad",
         [
+            "",  # a link is required here
+            "   ",
             "http://example.com",  # not https
             "javascript:alert(1)",  # the reason this check exists
             "https://",  # no host
             "https://exa mple.com",  # whitespace
             "example.com",  # no scheme
+            "https://example.com/" + "a" * 2048,  # over ck_sublink_url's 2048
         ],
     )
     def test_anything_but_a_full_https_link_is_refused(self, bad):
         with pytest.raises(ValidationError):
-            SubmissionDraftRequest(link_url=bad)
+            LinkRequest(url=bad)
 
 
 class TestGradeRequest:

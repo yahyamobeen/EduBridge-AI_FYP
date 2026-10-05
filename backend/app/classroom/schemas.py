@@ -174,6 +174,25 @@ class FileMeta(BaseModel):
     created_at: datetime
 
 
+class LinkMeta(BaseModel):
+    """A link on a student's work (classroom Phase 6b). Always https (ck_sublink_url)."""
+
+    id: UUID
+    url: str
+    created_at: datetime
+
+
+class ViewLink(BaseModel):
+    """
+    A short-lived link that shows a file in the browser (classroom Phase 6b). A
+    bearer pass until `expires_at`: handed out only after the file's row is read
+    under RLS, and never logged.
+    """
+
+    url: str
+    expires_at: datetime
+
+
 class Announcement(BaseModel):
     id: UUID
     body: str
@@ -276,14 +295,14 @@ class MySubmission(BaseModel):
     """The calling student's own work. `grade` and `feedback` only once returned."""
 
     body: str
-    link_url: str | None
     turned_in_at: datetime | None
     status: WorkStatus
     grade: float | None
     feedback: str | None
     returned_at: datetime | None
-    # The student's own uploaded files (Phase 6).
+    # The student's own uploaded files (Phase 6) and links (Phase 6b).
     files: list[FileMeta] = []
+    links: list[LinkMeta] = []
 
 
 class AssignmentSummary(BaseModel):
@@ -319,19 +338,22 @@ class AssignmentDetail(AssignmentSummary):
 
 
 class SubmissionDraftRequest(BaseModel):
+    # Links are their own rows since Phase 6b (`LinkRequest`); a stale client's
+    # `link_url` is ignored, never stored.
     body: str = Field(default="", max_length=20000)
-    link_url: str | None = Field(default=None, max_length=2048)
 
-    @field_validator("link_url")
+
+class LinkRequest(BaseModel):
+    url: str = Field(max_length=2048)
+
+    @field_validator("url")
     @classmethod
-    def https_only(cls, value: str | None) -> str | None:
+    def https_only(cls, value: str) -> str:
         """
         `https://` and nothing else — never `javascript:`, never `http:`. The
-        database repeats the rule (ck_submission_link), and the client renders
-        the link with rel="noopener noreferrer".
+        database repeats the rule (ck_sublink_url), and the client renders the
+        link with rel="noopener noreferrer".
         """
-        if value is None or not value.strip():
-            return None
         value = value.strip()
         parts = urlsplit(value)
         if parts.scheme != "https" or not parts.netloc or any(ch.isspace() for ch in value):
@@ -373,10 +395,11 @@ class SubmissionsResponse(BaseModel):
 class StudentWork(SubmissionRow):
     # None until the student turns the work in: a draft is theirs alone.
     body: str | None
-    link_url: str | None
     feedback: str
-    # Empty until turned in, for the same reason (subfile_teacher_read).
+    # Empty until turned in, for the same reason (subfile_teacher_read,
+    # link_teacher_read).
     files: list[FileMeta] = []
+    links: list[LinkMeta] = []
 
 
 # ── Phase 5: the calendar ───────────────────────────────────────────────────

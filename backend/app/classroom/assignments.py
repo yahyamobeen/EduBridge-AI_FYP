@@ -20,7 +20,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.classroom import file_service, storage
+from app.classroom import file_service, links, storage
 from app.classroom.pagination import decode_cursor, encode_cursor
 from app.classroom.scheduling import check_schedule, db_now
 from app.classroom.schemas import (
@@ -43,7 +43,7 @@ _SELECT = (
     "SELECT a.id, a.space_id, a.title, a.instructions, a.due_at, a.points, a.publish_at, "
     "       a.publish_at > now() AS scheduled, a.created_at, a.updated_at, "
     "       c.id AS chapter_id, c.number AS chapter_number, c.title AS chapter_title, "
-    "       s.body, s.link_url, s.turned_in_at, g.grade, g.feedback, g.returned_at, "
+    "       s.body, s.turned_in_at, g.grade, g.feedback, g.returned_at, "
     "       now() AS db_now, "
     "       (SELECT count(*) FROM assignment_submission x "
     "         WHERE x.assignment_id = a.id AND x.turned_in_at IS NOT NULL) AS turned_in_count "
@@ -78,7 +78,6 @@ def _grade(value: Any) -> float | None:
 def _my_submission(r: Any) -> dict:
     return {
         "body": r["body"] or "",
-        "link_url": r["link_url"],
         "turned_in_at": r["turned_in_at"],
         "status": derive_status(
             turned_in_at=r["turned_in_at"],
@@ -165,6 +164,7 @@ def get_assignment(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
             {
                 **_my_submission(row),
                 "files": file_service.files_for_submission(db, assignment_id, user_id),
+                "links": links.links_for_submission(db, assignment_id, user_id),
             }
             if role == "member"
             else None
@@ -339,7 +339,7 @@ def my_submission(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
     row = (
         db.execute(
             text(
-                "SELECT a.due_at, s.body, s.link_url, s.turned_in_at, "
+                "SELECT a.due_at, s.body, s.turned_in_at, "
                 "       g.grade, g.feedback, g.returned_at, now() AS db_now "
                 "  FROM assignment a "
                 "  LEFT JOIN assignment_submission s "
@@ -357,15 +357,18 @@ def my_submission(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
     return {
         **_my_submission(row),
         "files": file_service.files_for_submission(db, assignment_id, user_id),
+        "links": links.links_for_submission(db, assignment_id, user_id),
     }
 
 
 def save_draft(
     db: Session, user_id: UUID, assignment_id: UUID, payload: SubmissionDraftRequest
 ) -> dict:
+    # p_link is always NULL since Phase 6b: links are rows of their own
+    # (links.py), and assignment_submission.link_url is superseded.
     outcome = db.execute(
-        text("SELECT app.save_submission_draft(:a, :b, :l)"),
-        {"a": assignment_id, "b": payload.body, "l": payload.link_url},
+        text("SELECT app.save_submission_draft(:a, :b, NULL)"),
+        {"a": assignment_id, "b": payload.body},
     ).scalar_one()
     if outcome != "saved":
         raise _refuse(outcome)
@@ -395,7 +398,7 @@ def unsubmit(db: Session, user_id: UUID, assignment_id: UUID) -> dict:
 # Every ACTIVE member (app.space_people), with their turned-in work and grade
 # where RLS shows one. A draft is invisible, so it reads as not turned in.
 _WORK = (
-    "SELECT p.user_id AS student_id, p.full_name, s.turned_in_at, s.body, s.link_url, "
+    "SELECT p.user_id AS student_id, p.full_name, s.turned_in_at, s.body, "
     "       g.grade, g.feedback, g.returned_at, (g.student_id IS NOT NULL) AS graded, "
     "       a.due_at, now() AS db_now "
     "  FROM app.space_people(:sid) p "
@@ -462,10 +465,10 @@ def student_work(db: Session, assignment_id: UUID, student_id: UUID) -> dict:
     return {
         **_row(r),
         "body": r["body"],
-        "link_url": r["link_url"],
         "feedback": r["feedback"] or "",
         # RLS returns nothing until the work is turned in, like the body.
         "files": file_service.files_for_submission(db, assignment_id, student_id),
+        "links": links.links_for_submission(db, assignment_id, student_id),
     }
 
 

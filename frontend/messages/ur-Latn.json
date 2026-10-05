@@ -493,7 +493,14 @@
       "endpointLogsTitle": "Rozana endpoint rasai logs",
       "endpointLogsBody": "Kin endpoints ko, kitne accounts ne aur kitni baar istemal kiya. Sirf metadata.",
       "adminPrivacyTitle": "Admin kya nahi dekh sakta",
-      "adminPrivacyBody": "Aap audit record, rasai logs aur istemal ka metadata dekh sakte hain. Aap kisi bhi tuition guftagu ka mawad nahi parh sakte — bah lihaz-e-design admin ke liye us tak koi raasta mojood hi nahi."
+      "adminPrivacyBody": "Aap audit record, rasai logs aur istemal ka metadata dekh sakte hain. Aap kisi bhi tuition guftagu ka mawad nahi parh sakte — bah lihaz-e-design admin ke liye us tak koi raasta mojood hi nahi.",
+      "classesLoading": "Aap ki classein load ho rahi hain…",
+      "classesEmptyStudent": "Aap abhi kisi class mein shamil nahin hue.",
+      "classesEmptyTeacher": "Aap ka abhi koi classroom nahin hai.",
+      "joinClass": "Code se class mein shamil hon",
+      "createClassroom": "Apna pehla classroom banayein",
+      "allClassrooms": "Tamam classroom",
+      "memberCount": "{count, plural, one {# talib ilm} other {# talaba}}"
     }
   },
   "settings": {
@@ -552,13 +559,11 @@
     "loading": "Load ho raha hai…",
     "student": {
       "title": "Meri classein",
-      "subtitle": "Talib ilm dashboard",
       "intro": "Woh classein jin mein aap shamil hain. Aap dekh sakte hain ke aap ko kaun dekh sakta hai, aur kisi bhi waqt koi bhi class chhor sakte hain.",
       "empty": "Aap abhi kisi class mein shamil nahin hue. Apne ustad se class code maangein."
     },
     "teacher": {
       "title": "Mere classroom",
-      "subtitle": "Ustad dashboard",
       "intro": "Jo mazmoon aap parhate hain us ka classroom banayein aur us ka code apne talaba ko dein.",
       "empty": "Aap ne abhi koi classroom nahin banaya."
     },
@@ -696,8 +701,6 @@
     "submission": {
       "heading": "Aap ka kaam",
       "bodyLabel": "Aap ka jawab",
-      "linkLabel": "Link (ikhtiyari)",
-      "linkHint": "Mukammal https:// link, maslan kisi dastawez ka.",
       "save": "Masauda mehfooz karen",
       "saving": "Mehfooz ho raha hai…",
       "saved": "Masauda mehfooz ho gaya.",
@@ -712,7 +715,6 @@
       "feedbackHeading": "Aap ke ustad ki raaye",
       "locked": "Aap ke ustad ne is kaam ki jaanch shuru kar di hai, is liye ab ise tabdeel nahin kiya ja sakta.",
       "unsubmitFirst": "Tarmeem se pehle kaam wapas lein.",
-      "linkInvalid": "https:// se shuru hone wala mukammal link istemal karen.",
       "failed": "Yeh mehfooz nahin ho saka. Dobara koshish karen."
     },
     "grading": {
@@ -725,7 +727,6 @@
       "close": "Band karen",
       "workHeading": "{name} ka kaam",
       "notTurnedIn": "Abhi jama nahin karwaya gaya.",
-      "link": "Munsalik link",
       "gradeLabel": "Number ({points} mein se)",
       "noPoints": "Is assignment ke koi number nahin, is liye sirf raaye di ja sakti hai.",
       "feedbackLabel": "Niji raaye",
@@ -764,12 +765,14 @@
     },
     "files": {
       "attachments": "Munsalikaat",
-      "yourFiles": "Aap ki files",
-      "studentFiles": "Files",
+      "yourAttachments": "Aap ki files aur links",
+      "studentAttachments": "Files aur links",
       "add": "File shamil karen",
       "uploading": "Upload ho raha hai…",
       "hint": "PDF, PNG, JPEG, Word ya PowerPoint, zyada se zyada 5 MB.",
       "download": "{name} download karen",
+      "view": "Dekhein",
+      "viewLabel": "{name} dekhein",
       "remove": "Hatayein",
       "removeLabel": "{name} hatayein",
       "removeConfirm": "{name} hatayein? Ise wapas nahin laya ja sakega.",
@@ -785,7 +788,24 @@
       "turnedIn": "Files tabdeel karne se pehle kaam wapas lein.",
       "uploadFailed": "File shamil nahin ho saki. Dobara koshish karen.",
       "removeFailed": "File hatayi nahin ja saki. Dobara koshish karen.",
-      "downloadFailed": "File download nahin ho saki. Dobara koshish karen."
+      "downloadFailed": "File download nahin ho saki. Dobara koshish karen.",
+      "viewFailed": "File khul nahin saki. Dobara koshish karen.",
+      "addMenu": "Shamil karen",
+      "addFile": "File",
+      "addLink": "Link",
+      "linkLabel": "Link",
+      "addLinkButton": "Link shamil karen",
+      "adding": "Shamil ho raha hai…",
+      "cancel": "Mansookh karen",
+      "linkInvalid": "https:// se shuru hone wala mukammal link istemal karen.",
+      "tooManyLinks": "Yahan mazeed links shamil nahin kiye ja sakte.",
+      "linkFailed": "Link shamil nahin ho saka. Dobara koshish karen.",
+      "linkRemoveFailed": "Link hataya nahin ja saka. Dobara koshish karen.",
+      "removeLinkLabel": "Link {url} hatayein",
+      "removeLinkConfirm": "Yeh link hatayein?",
+      "workHint": "Files: PDF, PNG, JPEG, Word ya PowerPoint, zyada se zyada 5 MB. Links: https:// se shuru hone wale mukammal pate.",
+      "addingFiles": "Files shamil ho rahi hain…",
+      "notAttached": "Assignment ban gayi, lekin yeh files shamil nahin ho sakin: {names}. Inhein neeche dobara shamil karen."
     },
     "people": {
       "heading": "Afraad",

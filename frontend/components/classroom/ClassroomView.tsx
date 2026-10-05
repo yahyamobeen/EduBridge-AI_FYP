@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
-import { DashboardShell } from '@/components/app/DashboardShell'
-import { SessionGuard } from '@/components/app/SessionGuard'
+import { RequireRole } from '@/components/app/SessionGuard'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowLeftIcon, CheckCircleIcon, KeyIcon, UsersIcon } from '@/components/ui/Icon'
 import { tabId, tabPanelId, Tabs } from '@/components/ui/Tabs'
@@ -17,7 +16,7 @@ import {
   updateSpace,
 } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
-import type { MeResponse, PeopleResponse, SpaceDetail } from '@/lib/api/types'
+import type { PeopleResponse, SpaceDetail } from '@/lib/api/types'
 import { ClassworkTab } from './ClassworkTab'
 import { ConfirmInline } from './ConfirmInline'
 import { StreamTab } from './StreamTab'
@@ -56,41 +55,33 @@ type ClassroomRouteProps = {
 
 export function StudentClassroom({ spaceId, assignmentId }: ClassroomRouteProps) {
   return (
-    <SessionGuard allow={['student']}>
-      {(me) => (
-        <ClassroomView
-          me={me}
-          spaceId={spaceId}
-          listPath="/classroom"
-          assignmentId={assignmentId}
-        />
+    <RequireRole allow={['student']}>
+      {() => (
+        <ClassroomView spaceId={spaceId} listPath="/classroom" assignmentId={assignmentId} />
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
 export function TeacherClassroom({ spaceId, assignmentId }: ClassroomRouteProps) {
   return (
-    <SessionGuard allow={['teacher']}>
-      {(me) => (
+    <RequireRole allow={['teacher']}>
+      {() => (
         <ClassroomView
-          me={me}
           spaceId={spaceId}
           listPath="/teacher/classroom"
           assignmentId={assignmentId}
         />
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
 export function ClassroomView({
-  me,
   spaceId,
   listPath,
   assignmentId,
 }: {
-  me: MeResponse
   spaceId: string
   listPath: string
   assignmentId?: string
@@ -116,10 +107,9 @@ export function ClassroomView({
   const openAssignment = assignmentId && UUID_RE.test(assignmentId) ? assignmentId : undefined
   const [tab, setTab] = useState<ClassroomTab>(openAssignment ? 'classwork' : 'stream')
   const isOwner = space?.viewer_role === 'owner' && space.can_manage
-  const role = me.role === 'teacher' ? 'teacher' : 'student'
 
   return (
-    <DashboardShell me={me} subtitle={t(`${role}.subtitle`)}>
+    <>
       <Link
         href={listPath}
         className="mb-6 inline-flex items-center gap-2 text-body-sm font-semibold text-primary hover:underline"
@@ -216,7 +206,7 @@ export function ClassroomView({
           </div>
         </>
       )}
-    </DashboardShell>
+    </>
   )
 }
 

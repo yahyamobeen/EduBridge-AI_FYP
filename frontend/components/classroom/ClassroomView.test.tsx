@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MeResponse, PeopleResponse, SpaceDetail } from '@/lib/api/types'
 import en from '@/messages/en.json'
+import { AppFrame } from '@/components/app/AppFrame'
 import { StudentClassroom, TeacherClassroom } from './ClassroomView'
 
 /**
@@ -96,7 +97,8 @@ function wrap(node: React.ReactNode) {
   // zone, so a formatted date would otherwise log ENVIRONMENT_FALLBACK.
   return render(
     <NextIntlClientProvider locale="en" messages={en} timeZone="Asia/Karachi">
-      {node}
+      {/* The (app) layout's frame: the identity check and the sidebar (Phase 6c). */}
+      <AppFrame>{node}</AppFrame>
     </NextIntlClientProvider>,
   )
 }

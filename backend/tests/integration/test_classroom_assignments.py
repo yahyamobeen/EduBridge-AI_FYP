@@ -208,10 +208,10 @@ class TestCreateAndRead:
 
 class TestStudentWork:
     def test_draft_turn_in_and_unsubmit(self, client, student, lab):
-        link = "https://example.com/my-lab"
-        saved = _submit(client, student, lab["id"], "save", body="My answer", link_url=link)
+        # Links are their own rows since Phase 6b (test_classroom_links.py).
+        saved = _submit(client, student, lab["id"], "save", body="My answer")
         assert saved.status_code == 200
-        assert (saved.json()["status"], saved.json()["link_url"]) == ("assigned", link)
+        assert (saved.json()["status"], saved.json()["links"]) == ("assigned", [])
 
         turned = _submit(client, student, lab["id"], "turn-in")
         assert turned.json()["status"] == "turned_in"
@@ -227,11 +227,6 @@ class TestStudentWork:
             "assigned",
             "My answer",
         )
-
-    def test_only_an_https_link_is_accepted(self, client, student, lab):
-        resp = _submit(client, student, lab["id"], "save", link_url="javascript:alert(1)")
-        assert resp.status_code == 400
-        assert "link_url" in _error(resp)["details"]["fields"]
 
     def test_missing_and_late_are_derived(self, client, db, teacher, space, student):
         overdue = _overdue(db, teacher, space)

@@ -22,7 +22,9 @@ const createAssignment = vi.fn()
 const getAssignment = vi.fn()
 const listChapters = vi.fn()
 const listSubmissions = vi.fn()
+const uploadAssignmentAttachment = vi.fn()
 vi.mock('@/lib/api/endpoints', () => ({
+  uploadAssignmentAttachment: (...a: unknown[]) => uploadAssignmentAttachment(...a),
   listAssignments: (...a: unknown[]) => listAssignments(...a),
   createAssignment: (...a: unknown[]) => createAssignment(...a),
   getAssignment: (...a: unknown[]) => getAssignment(...a),
@@ -111,13 +113,13 @@ describe('a member', () => {
         my_status: 'assigned',
         my_submission: {
           body: '',
-          link_url: null,
           turned_in_at: null,
           status: 'assigned',
           grade: null,
           feedback: null,
           returned_at: null,
           files: [],
+          links: [],
         },
       }),
     )
@@ -187,6 +189,86 @@ describe('the owner', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       en.classroom.assignment.dueInvalid,
     )
+  })
+
+  async function openFormWithTitle(title: string) {
+    renderTab({ isOwner: true, canPost: true })
+    await userEvent.click(
+      await screen.findByRole('button', { name: en.classroom.classwork.create }, LOADED),
+    )
+    await userEvent.type(screen.getByLabelText(en.classroom.assignment.titleLabel), title)
+  }
+
+  const file = (name: string) => new File([new Uint8Array(10)], name)
+  const meta = (id: string, filename: string) => ({
+    id,
+    filename,
+    content_type: 'application/pdf',
+    size_bytes: 10,
+    created_at: '2026-10-05T09:00:00Z',
+  })
+
+  it('attaches the files picked while creating, once the assignment exists', async () => {
+    createAssignment.mockResolvedValue(detail({ id: 'as-9', title: 'Lab 2' }))
+    uploadAssignmentAttachment
+      .mockResolvedValueOnce(meta('f-1', 'sheet.pdf'))
+      .mockResolvedValueOnce(meta('f-2', 'diagram.pdf'))
+    await openFormWithTitle('Lab 2')
+    await userEvent.upload(screen.getByLabelText(en.classroom.files.add), [
+      file('sheet.pdf'),
+      file('diagram.pdf'),
+    ])
+    expect(screen.getByText('sheet.pdf')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: en.classroom.assignment.create }))
+
+    expect(await screen.findByRole('button', { name: /Lab 2/ })).toBeInTheDocument()
+    expect(
+      uploadAssignmentAttachment.mock.calls.map((c) => [c[0], (c[1] as File).name]),
+    ).toEqual([
+      ['as-9', 'sheet.pdf'],
+      ['as-9', 'diagram.pdf'],
+    ])
+    expect(createAssignment.mock.invocationCallOrder[0]).toBeLessThan(
+      uploadAssignmentAttachment.mock.invocationCallOrder[0]!,
+    )
+  })
+
+  it('opens the new assignment naming any file that could not be attached', async () => {
+    createAssignment.mockResolvedValue(detail({ id: 'as-9', title: 'Lab 2' }))
+    getAssignment.mockResolvedValue(
+      detail({ id: 'as-9', title: 'Lab 2', attachments: [meta('f-1', 'sheet.pdf')] }),
+    )
+    uploadAssignmentAttachment
+      .mockResolvedValueOnce(meta('f-1', 'sheet.pdf'))
+      .mockRejectedValueOnce(
+        new ApiError(400, 'VALIDATION_ERROR', 'x', { reason: 'classroom_quota' }),
+      )
+    await openFormWithTitle('Lab 2')
+    await userEvent.upload(screen.getByLabelText(en.classroom.files.add), [
+      file('sheet.pdf'),
+      file('big.pdf'),
+    ])
+    await userEvent.click(screen.getByRole('button', { name: en.classroom.assignment.create }))
+
+    // The assignment exists; it opens with the failure named, and the
+    // attachment section's own "Add a file" is the retry.
+    expect(
+      await screen.findByText(/these files could not be added: big\.pdf/, {}, LOADED),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText(en.classroom.files.add)).toBeInTheDocument()
+  })
+
+  it('never holds a file it knows will be refused', async () => {
+    createAssignment.mockResolvedValue(detail({ id: 'as-9', title: 'Lab 2' }))
+    await openFormWithTitle('Lab 2')
+    await userEvent.upload(screen.getByLabelText(en.classroom.files.add), file('virus.exe'), {
+      applyAccept: false,
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(en.classroom.files.unsupportedType)
+    expect(screen.queryByText('virus.exe')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: en.classroom.assignment.create }))
+    expect(await screen.findByRole('button', { name: /Lab 2/ })).toBeInTheDocument()
+    expect(uploadAssignmentAttachment).not.toHaveBeenCalled()
   })
 
   it('cannot create in an archived classroom, and is told why', async () => {

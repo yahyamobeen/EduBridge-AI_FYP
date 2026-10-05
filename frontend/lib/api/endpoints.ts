@@ -24,6 +24,7 @@ import type {
   GuardianStatusResponse,
   JoinCodeResponse,
   JoinResponse,
+  LinkMeta,
   LoginRequest,
   LoginResponse,
   MeResponse,
@@ -52,6 +53,7 @@ import type {
   TwoFactorStatusResponse,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponse,
+  ViewLink,
 } from './types'
 
 /**
@@ -553,4 +555,26 @@ export function deleteSubmissionFile(fileId: string): Promise<void> {
 
 export function deleteAttachment(fileId: string): Promise<void> {
   return apiFetch<void>(`/attachments/${seg(fileId)}`, { method: 'DELETE' })
+}
+
+// Phase 6b — links on a piece of work, and viewing a file in the browser.
+
+export function addSubmissionLink(assignmentId: string, url: string): Promise<LinkMeta> {
+  return apiFetch<LinkMeta>(`/assignments/${seg(assignmentId)}/submission/links`, {
+    method: 'POST',
+    body: { url },
+  })
+}
+
+export function deleteSubmissionLink(linkId: string): Promise<void> {
+  return apiFetch<void>(`/submission-links/${seg(linkId)}`, { method: 'DELETE' })
+}
+
+/** A five-minute link for a PDF or an image; Office files answer `not_viewable`. */
+export function viewSubmissionFile(fileId: string): Promise<ViewLink> {
+  return apiFetch<ViewLink>(`/submission-files/${seg(fileId)}/view`)
+}
+
+export function viewAttachment(fileId: string): Promise<ViewLink> {
+  return apiFetch<ViewLink>(`/attachments/${seg(fileId)}/view`)
 }

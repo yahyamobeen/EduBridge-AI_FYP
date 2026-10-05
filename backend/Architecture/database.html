@@ -110,13 +110,13 @@
     <h1>Database</h1>
     <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
     <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql
-    · classroom sections re-measured 2026-10-05 on branch add-classroom (30 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04, 20261004150000, classroom files, on 2026-10-05)</p>
+    · classroom sections re-measured 2026-10-05 on branch add-classroom (31 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, and 20261005120000, submission links, on 2026-10-05)</p>
 
     <div class="grid">
       <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
-      <div class="stat"><div class="n">51</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
-      <div class="stat"><div class="n">93</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
-      <div class="stat"><div class="n">65</div><div class="l">live <code>app.*</code> functions · 63 are SECURITY DEFINER</div></div>
+      <div class="stat"><div class="n">52</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
+      <div class="stat"><div class="n">95</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
+      <div class="stat"><div class="n">67</div><div class="l">live <code>app.*</code> functions · 65 are SECURITY DEFINER</div></div>
     </div>
 
     <section class="prose">
@@ -125,7 +125,7 @@
       does not exist here. Every policy instead reads a transaction-scoped session setting through
       <code>app.current_user_id()</code>, bound by <code>SELECT set_config('app.current_user_id', :uid, true)</code> at
       <span class="ln">backend/app/core/db.py:33-59</span>.</p>
-      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 51 tables cannot render
+      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 52 tables cannot render
       legibly in a single diagram, and the point of a diagram is to be read. The complete field lists, the full policy
       catalogue with every <code>USING</code> and <code>WITH CHECK</code> predicate, the invariants and the known gaps live in
       <a href="database.md">database.md</a>, which is the authoritative page; this one is its visual companion.</p>
@@ -366,6 +366,7 @@ erDiagram
     announcement    ||--o{ material_attachment : "teacher files (or)"
     assignment      ||--o{ material_attachment : "teacher files (or)"
     assignment_submission ||--o{ submission_file : "student files, max 5"
+    assignment_submission ||--o{ submission_link : "student links, max 5"
     app_user        ||--o{ enrollment      : "as student_id"
     subject         ||--o{ classroom_space : "the class's subject"
     app_user        ||--o{ teacher_subject_scope : "self-declared by app.create_space"
@@ -454,6 +455,13 @@ erDiagram
         integer size_bytes
         text sha256
     }
+    submission_link {
+        uuid id PK
+        uuid submission_id FK "(id, space, student)"
+        uuid space_id FK
+        uuid student_id FK
+        text url "https only, unique per submission"
+    }
     </div></div>
     <p><code>ck_teacher_space_has_subject</code> <span class="ln">:334</span> forces a teacher space to declare its subject,
     because subject-scoping depends on it. Join codes are never readable by students — they receive the code out of band.</p>
@@ -497,6 +505,13 @@ erDiagram
       <code>u/&lt;space&gt;/&lt;student&gt;/…</code> — a forged key is a CHECK violation. Rows are immutable; every write is a
       function, except the owner's <code>DELETE</code> of an attachment. Quotas — 5 files and 20 MiB per submission, 10 per
       post, 2 GiB per classroom — run under one advisory lock per classroom.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261005120000 — several links on a piece of work (applied 2026-10-05)</span>
+      A student's work carries up to five <code>https://</code> links, each its own <code>submission_link</code> row,
+      written only by <code>app.add_submission_link</code> / <code>app.remove_submission_link</code> and readable exactly like a
+      file: the student always, the teacher once turned in and while the student stays. The old single
+      <code>assignment_submission.link_url</code> is copied into the table and cleared; the column stays, unread.
     </div>
 
     <!-- ════════════════════════ ASSESSMENT ════════════════════════ -->
@@ -744,7 +759,7 @@ erDiagram
     <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
     <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
     superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.
-    <strong>93</strong> policy objects are live on a shadow database built from all 30 migrations and on the live
+    <strong>95</strong> policy objects are live on a shadow database built from all 31 migrations and on the live
     database (2026-10-05); the groups
     below summarise them by domain and are not the complete list — database.md is.</p>
 
@@ -835,8 +850,10 @@ erDiagram
         <tr><td><code>material_attachment</code></td><td><code>material_owner_delete</code></td><td><span class="pill del">DELETE</span></td><td><code>app.owns_active_space(space_id)</code></td><td>—</td><td><span class="ln">20261004150000:168</span></td></tr>
         <tr><td><code>submission_file</code></td><td><code>subfile_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261004150000:175</span></td></tr>
         <tr><td><code>submission_file</code></td><td><code>subfile_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code> AND the submission is turned in — both stated, not inherited</td><td>—</td><td><span class="ln">20261004150000:182</span></td></tr>
+        <tr><td><code>submission_link</code></td><td><code>link_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261005120000:59</span></td></tr>
+        <tr><td><code>submission_link</code></td><td><code>link_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td>the file rule: taught student <strong>and</strong> turned in</td><td>—</td><td><span class="ln">20261005120000:63</span></td></tr>
         <tr><td colspan="6"><em>No write policy on <code>assignment_submission</code>, <code>submission_grade</code> or
-        <code>submission_file</code>, no DELETE policy on <code>assignment</code>, and no INSERT or UPDATE policy on
+        <code>submission_file</code> or <code>submission_link</code>, no DELETE policy on <code>assignment</code>, and no INSERT or UPDATE policy on
         <code>material_attachment</code>: every such change is a function (below).</em></td></tr>
       </table>
     </details>
@@ -904,10 +921,10 @@ erDiagram
     <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
 
     <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
-    <h2>The <code>app.*</code> privileged functions — 65 live</h2>
-    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 30 migration files, and matched on the live
+    <h2>The <code>app.*</code> privileged functions — 67 live</h2>
+    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 31 migration files, and matched on the live
     database; the paragraph below is the 2026-08-15 account and its
-    counts are historical. None of the 65 is executable by <code>PUBLIC</code>.</em></p>
+    counts are historical. None of the 67 is executable by <code>PUBLIC</code>.</em></p>
     <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
     of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
     <strong>35 are <code>SECURITY DEFINER</code></strong> and <strong>36 carry <code>SET search_path = public, pg_temp</code></strong>
@@ -976,7 +993,7 @@ erDiagram
     </details>
 
     <details open>
-      <summary>Classroom — the only writers of file rows (<span class="ln">20261004150000</span>)</summary>
+      <summary>Classroom — the only writers of file and link rows (<span class="ln">20261004150000</span>, <span class="ln">20261005120000</span>)</summary>
       <table>
         <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
         <tr><td><code>app.add_submission_file(uuid, text, text, text, integer, text)</code></td><td><code>POST /api/assignments/{id}/submission/files</code></td><td><code>added</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code> · <code>too_many_files</code> (5) · <code>submission_quota</code> (20 MiB) · <code>classroom_quota</code> (2 GiB)</td></tr>
@@ -985,6 +1002,8 @@ erDiagram
         <tr><td colspan="3"><em>Each takes the full object key the backend has <strong>already stored</strong> — object first, row second,
         so no lock is held across an upload. <code>app.space_storage_bytes(uuid)</code> and <code>app.lock_space_files(uuid)</code>
         are internal — <strong>no grant</strong>.</em></td></tr>
+        <tr><td><code>app.add_submission_link(uuid, text)</code> <span class="ln">20261005120000:72</span></td><td><code>POST /api/assignments/{id}/submission/links</code></td><td><code>added</code> (also for a link already there) · <code>forbidden</code> · <code>invalid_url</code> · <code>graded</code> · <code>turned_in</code> · <code>too_many_links</code> (5)</td></tr>
+        <tr><td><code>app.remove_submission_link(uuid)</code> <span class="ln">20261005120000:121</span></td><td><code>DELETE /api/submission-links/{id}</code></td><td><code>removed</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code></td></tr>
       </table>
     </details>
 
@@ -1097,7 +1116,7 @@ erDiagram
       </tr>
       <tr>
         <td><strong>A stored file is authorized by its row, and its key is held to its owner</strong></td>
-        <td>A download is served only after the file's row is read under Row-Level Security; the bucket is private with no <code>storage.objects</code> policy. <code>ck_material_key</code> / <code>ck_subfile_key</code> refuse a key outside the owner's prefix. Objects are deleted only after the deleting transaction commits, so a rollback can orphan an object, never a row.</td>
+        <td>A download — or a five-minute view link (Phase 6b), for PDF and images only — is handed out only after the file's row is read under Row-Level Security; the bucket is private with no <code>storage.objects</code> policy. <code>ck_material_key</code> / <code>ck_subfile_key</code> refuse a key outside the owner's prefix. Objects are deleted only after the deleting transaction commits, so a rollback can orphan an object, never a row.</td>
         <td><span class="ln">20261004150000</span></td>
       </tr>
     </table>

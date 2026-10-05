@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,7 +17,11 @@ import { FileSection } from './Files'
  */
 
 const saveBlob = vi.fn()
-vi.mock('@/lib/download', () => ({ saveBlob: (...a: unknown[]) => saveBlob(...a) }))
+// `saveBlob` is watched; `openInNewTab` stays real, against a stubbed window.open.
+vi.mock('@/lib/download', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/download')>()),
+  saveBlob: (...a: unknown[]) => saveBlob(...a),
+}))
 
 const FILE: FileMeta = {
   id: 'f-1',
@@ -144,5 +148,54 @@ describe('translations', () => {
   ])('renders an editable list fully in %s with no missing keys', (locale, messages) => {
     const errors = renderFiles({ upload, remove }, locale, messages as typeof en)
     expect(errors).not.toHaveBeenCalled()
+  })
+})
+
+describe('viewing (Phase 6b)', () => {
+  const link = { url: 'https://storage.example.test/x', expires_at: '2026-10-05T09:05:00Z' }
+
+  function fakeTab() {
+    return { opener: {} as unknown, location: { href: '' }, close: vi.fn() }
+  }
+
+  it('opens the tab inside the click, then points it at the link', async () => {
+    const tab = fakeTab()
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
+    const view = vi.fn().mockResolvedValue(link)
+    renderFiles({ view })
+    await userEvent.click(screen.getByRole('button', { name: 'View Lab report.pdf' }))
+    expect(open).toHaveBeenCalledWith('', '_blank')
+    // Opened before the request, or a pop-up blocker would refuse it.
+    expect(open.mock.invocationCallOrder[0]).toBeLessThan(view.mock.invocationCallOrder[0]!)
+    await waitFor(() => expect(tab.location.href).toBe(link.url))
+    expect(tab.opener).toBeNull()
+    expect(saveBlob).not.toHaveBeenCalled()
+    open.mockRestore()
+  })
+
+  it('closes the tab and says so when no link can be had', async () => {
+    const tab = fakeTab()
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window)
+    renderFiles({ view: vi.fn().mockRejectedValue(new ApiError(403, 'FORBIDDEN_SCOPE', 'x')) })
+    await userEvent.click(screen.getByRole('button', { name: 'View Lab report.pdf' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(en.classroom.files.viewFailed)
+    expect(tab.close).toHaveBeenCalled()
+    open.mockRestore()
+  })
+
+  it('offers no View for an Office file: those are download-only', () => {
+    renderFiles({
+      view: vi.fn(),
+      files: [
+        {
+          ...FILE,
+          filename: 'Notes.docx',
+          content_type:
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        },
+      ],
+    })
+    expect(screen.getByRole('button', { name: 'Download Notes.docx' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View Notes.docx' })).toBeNull()
   })
 })

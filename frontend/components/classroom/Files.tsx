@@ -4,26 +4,23 @@ import { useId, useRef, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ApiError } from '@/lib/api/errors'
-import type { FileMeta, FileRefusalReason } from '@/lib/api/types'
-import { saveBlob } from '@/lib/download'
+import type { FileMeta, FileRefusalReason, ViewLink } from '@/lib/api/types'
+import { openInNewTab, saveBlob } from '@/lib/download'
+import { ACCEPT, earlyRefusal, isViewable } from '@/lib/files'
 import { ConfirmInline } from './ConfirmInline'
 import { LABEL, SECONDARY_BUTTON } from './styles'
 
 /**
- * A list of files with download, and — when the caller passes `upload` /
+ * A list of files with download, view and — when the caller passes `upload` /
  * `remove` — adding and removing (classroom Phase 6, prd.md CL-8). Used for a
- * teacher's attachments on a post or an assignment, a student's own files on
- * their work, and the teacher's read-only view of that work.
+ * teacher's attachments on a post or an assignment; a student's own work uses
+ * `WorkAttachments`, which shares `FileItem`.
  *
  * The SERVER is the check: it reads the type from the bytes and enforces every
- * limit. The two checks here (size, extension) only save a student waiting on
- * an upload that is certain to be refused. A file is always downloaded, never
- * opened inside the application.
+ * limit (lib/files.ts only spares a doomed upload). A download is always saved,
+ * never opened inside the application; since Phase 6b a PDF or an image can
+ * also be VIEWED, in a new tab on the storage service's own domain.
  */
-
-const MAX_BYTES = 5 * 1024 * 1024
-const ACCEPT = '.pdf,.png,.jpg,.jpeg,.docx,.pptx'
-const EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'docx', 'pptx'])
 
 const REASON_KEY: Partial<Record<FileRefusalReason, string>> = {
   unsupported_type: 'unsupportedType',
@@ -36,10 +33,129 @@ const REASON_KEY: Partial<Record<FileRefusalReason, string>> = {
   turned_in: 'turnedIn',
 }
 
+/** A `classroom.files` key for a refusal, chosen by `details.reason`, never `message`. */
+export function fileErrorKey(caught: unknown, fallback: string): string {
+  const reason =
+    caught instanceof ApiError && caught.code === 'VALIDATION_ERROR'
+      ? (caught.details.reason as FileRefusalReason | undefined)
+      : undefined
+  return (reason && REASON_KEY[reason]) || fallback
+}
+
+/** "240 KB" / "2.4 MB", in the reader's own number format. */
+export function useSizeLabel(): (bytes: number) => string {
+  const t = useTranslations('classroom.files')
+  const format = useFormatter()
+  return (bytes) =>
+    bytes < 1024 * 1024
+      ? t('sizeKb', { size: format.number(Math.max(1, Math.round(bytes / 1024))) })
+      : t('sizeMb', {
+          size: format.number(bytes / (1024 * 1024), { maximumFractionDigits: 1 }),
+        })
+}
+
+/** Download, view and (optionally) remove one file; the list around it is the caller's. */
+export function FileItem({
+  file,
+  busy,
+  download,
+  view,
+  remove,
+  onError,
+}: {
+  file: FileMeta
+  busy: boolean
+  download: (file: FileMeta) => Promise<Blob>
+  view?: (file: FileMeta) => Promise<ViewLink>
+  /** Resolves once the file is gone; the caller drops it from its list. */
+  remove?: (file: FileMeta) => Promise<void>
+  onError: (message: string | null) => void
+}) {
+  const t = useTranslations('classroom.files')
+  const sizeLabel = useSizeLabel()
+  const [confirming, setConfirming] = useState(false)
+  const [removing, setRemoving] = useState(false)
+
+  async function save() {
+    onError(null)
+    try {
+      saveBlob(await download(file), file.filename)
+    } catch {
+      onError(t('downloadFailed'))
+    }
+  }
+
+  function show() {
+    onError(null)
+    // Not awaited before the tab opens: openInNewTab must run inside the click.
+    openInNewTab(async () => (await view!(file)).url).catch(() => onError(t('viewFailed')))
+  }
+
+  async function drop() {
+    setRemoving(true)
+    onError(null)
+    try {
+      await remove!(file)
+    } catch (caught) {
+      onError(t(fileErrorKey(caught, 'removeFailed')))
+      setRemoving(false)
+    }
+  }
+
+  return (
+    <li className="px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          aria-label={t('download', { name: file.filename })}
+          className="min-w-0 text-start text-body-md text-primary underline"
+        >
+          <span className="break-all">{file.filename}</span>
+        </button>
+        <span className="flex items-center gap-3 text-body-sm text-on-surface-variant">
+          {sizeLabel(file.size_bytes)}
+          {view && isViewable(file.content_type) && (
+            <button
+              type="button"
+              onClick={show}
+              aria-label={t('viewLabel', { name: file.filename })}
+              className="text-primary underline"
+            >
+              {t('view')}
+            </button>
+          )}
+          {remove && !confirming && (
+            <button
+              type="button"
+              disabled={busy || removing}
+              onClick={() => setConfirming(true)}
+              aria-label={t('removeLabel', { name: file.filename })}
+              className="text-error underline disabled:opacity-50"
+            >
+              {t('remove')}
+            </button>
+          )}
+        </span>
+      </div>
+      {remove && confirming && (
+        <ConfirmInline
+          question={t('removeConfirm', { name: file.filename })}
+          confirmLabel={t('remove')}
+          busy={removing}
+          onConfirm={() => void drop()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </li>
+  )
+}
+
 export function FileSection({
   heading,
   files,
   download,
+  view,
   upload,
   remove,
   onChange,
@@ -47,46 +163,22 @@ export function FileSection({
   heading: string
   files: FileMeta[]
   download: (file: FileMeta) => Promise<Blob>
+  view?: (file: FileMeta) => Promise<ViewLink>
   upload?: (file: File) => Promise<FileMeta>
   remove?: (file: FileMeta) => Promise<void>
   onChange?: (files: FileMeta[]) => void
 }) {
   const t = useTranslations('classroom.files')
-  const format = useFormatter()
   const input = useRef<HTMLInputElement>(null)
   const inputId = useId()
   const [busy, setBusy] = useState(false)
-  const [confirming, setConfirming] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   if (files.length === 0 && !upload) return null
 
-  const size = (bytes: number) =>
-    bytes < 1024 * 1024
-      ? t('sizeKb', { size: format.number(Math.max(1, Math.round(bytes / 1024))) })
-      : t('sizeMb', {
-          size: format.number(bytes / (1024 * 1024), { maximumFractionDigits: 1 }),
-        })
-
-  function explain(caught: unknown, fallback: string): string {
-    const reason =
-      caught instanceof ApiError && caught.code === 'VALIDATION_ERROR'
-        ? (caught.details.reason as FileRefusalReason | undefined)
-        : undefined
-    const key = reason ? REASON_KEY[reason] : undefined
-    return key ? t(key) : t(fallback)
-  }
-
   async function add(file: File) {
     setError(null)
-    const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-    const early = !EXTENSIONS.has(extension)
-      ? 'unsupportedType'
-      : file.size > MAX_BYTES
-        ? 'tooLarge'
-        : file.size === 0
-          ? 'empty'
-          : null
+    const early = earlyRefusal(file)
     if (early) {
       setError(t(early))
       if (input.current) input.current.value = ''
@@ -97,33 +189,10 @@ export function FileSection({
       const stored = await upload!(file)
       onChange?.([...files, stored])
     } catch (caught) {
-      setError(explain(caught, 'uploadFailed'))
+      setError(t(fileErrorKey(caught, 'uploadFailed')))
     } finally {
       setBusy(false)
       if (input.current) input.current.value = ''
-    }
-  }
-
-  async function drop(file: FileMeta) {
-    setBusy(true)
-    setError(null)
-    try {
-      await remove!(file)
-      setConfirming(null)
-      onChange?.(files.filter((f) => f.id !== file.id))
-    } catch (caught) {
-      setError(explain(caught, 'removeFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function save(file: FileMeta) {
-    setError(null)
-    try {
-      saveBlob(await download(file), file.filename)
-    } catch {
-      setError(t('downloadFailed'))
     }
   }
 
@@ -133,41 +202,21 @@ export function FileSection({
       {files.length > 0 && (
         <ul className="divide-y divide-outline-variant rounded border border-outline-variant">
           {files.map((f) => (
-            <li key={f.id} className="px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => void save(f)}
-                  aria-label={t('download', { name: f.filename })}
-                  className="min-w-0 text-start text-body-md text-primary underline"
-                >
-                  <span className="break-all">{f.filename}</span>
-                </button>
-                <span className="flex items-center gap-3 text-body-sm text-on-surface-variant">
-                  {size(f.size_bytes)}
-                  {remove && confirming !== f.id && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setConfirming(f.id)}
-                      aria-label={t('removeLabel', { name: f.filename })}
-                      className="text-error underline disabled:opacity-50"
-                    >
-                      {t('remove')}
-                    </button>
-                  )}
-                </span>
-              </div>
-              {remove && confirming === f.id && (
-                <ConfirmInline
-                  question={t('removeConfirm', { name: f.filename })}
-                  confirmLabel={t('remove')}
-                  busy={busy}
-                  onConfirm={() => void drop(f)}
-                  onCancel={() => setConfirming(null)}
-                />
-              )}
-            </li>
+            <FileItem
+              key={f.id}
+              file={f}
+              busy={busy}
+              download={download}
+              view={view}
+              remove={
+                remove &&
+                (async (gone) => {
+                  await remove(gone)
+                  onChange?.(files.filter((x) => x.id !== gone.id))
+                })
+              }
+              onError={setError}
+            />
           ))}
         </ul>
       )}

@@ -10,8 +10,8 @@ Snapshot: **2026-08-15**.
 ## 1. What this is
 
 Next.js App Router, React, TypeScript, Tailwind. **29 pages** across three route groups —
-`(site)`, `(auth)`, `(app)` — and **39 test files** (Vitest). Three locales: `en`, `ur`,
-`ur-Latn`, each exactly 719 leaf keys, in identical order (re-measured 2026-10-05).
+`(site)`, `(auth)`, `(app)` — and **41 test files** (Vitest). Three locales: `en`, `ur`,
+`ur-Latn`, each exactly 739 leaf keys, in identical order (re-measured 2026-10-05).
 
 This application is the interface and nothing else. The data model, the endpoint catalogue and the
 authorization rules live in the backend documentation:
@@ -37,14 +37,20 @@ Lookup table: [`/Claude/DOC-SYNC-MAP.md`](../Claude/DOC-SYNC-MAP.md).
 `class_level`, never a guardian status read directly. `lib/auth/onboarding.ts` holds the single
 state → route table. **It is not monotonic** — a lapsing trial moves a user *backwards* from
 `active`, so a component that evaluates once and caches strands that user on a page they no longer
-have rights to. `SessionGuard` re-evaluates on every mount rather than caching, deliberately.
+have rights to. `SessionGuard` re-reads the identity on every **navigation** rather than caching,
+deliberately — in the background since classroom Phase 6c, with the page left on screen meanwhile.
 
 **`SessionGuard` is not a security control.** It is a routing convenience. The gate is enforced at
 the interface and database layers. Do not add a check here and consider a resource protected.
 
+**The guard and the sidebar live in the `(app)` layout** (`AppFrame`), so they stay mounted while
+the pages change; each page declares its roles with `RequireRole`. Do not wrap a page in its own
+`SessionGuard` or `DashboardShell` again — that is what made every navigation blank the screen and
+rebuild the sidebar (owner report, 2026-10-05).
+
 It fails **closed**: a 401 and a network error take the same path to `/login`, `me` is assigned
-only after both checks pass, and `children` is a render-prop invoked solely when `me !== null`, so
-no page content renders before the role check completes.
+only after the session and journey checks pass, `children` is a render-prop invoked solely when
+`me !== null`, and `RequireRole` renders no page content for a wrong role.
 
 **`lib/auth/navigation.ts` is a Role-Based Access Control boundary, not styling.** `NAV_BY_ROLE` is
 the single source for every sidebar. A new entry needs its role list checked, not just its label.

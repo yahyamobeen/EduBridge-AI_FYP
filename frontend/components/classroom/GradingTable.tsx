@@ -4,17 +4,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { UsersIcon } from '@/components/ui/Icon'
-import {
-  downloadSubmissionFile,
-  getStudentWork,
-  listSubmissions,
-  saveGrade,
-} from '@/lib/api/endpoints'
+import { getStudentWork, listSubmissions, saveGrade } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { AssignmentDetail, StudentWork, SubmissionRow } from '@/lib/api/types'
 import { StatusChip } from './AssignmentParts'
-import { FileSection } from './Files'
-import { SubmittedLink } from './SubmissionPanel'
+import { WorkAttachments } from './WorkAttachments'
 import { CARD, CARD_HEADING, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
 /**
@@ -235,18 +229,10 @@ function StudentWorkPanel({
                   {work.body}
                 </p>
               )}
-              {work.link_url && (
-                <div className="mt-2">
-                  <p className="text-label-caps uppercase text-on-surface-variant">
-                    {t('link')}
-                  </p>
-                  <SubmittedLink href={work.link_url} />
-                </div>
-              )}
-              <FileSection
-                heading={tf('studentFiles')}
+              <WorkAttachments
+                heading={tf('studentAttachments')}
                 files={work.files}
-                download={(f) => downloadSubmissionFile(f.id)}
+                links={work.links}
               />
             </>
           )}

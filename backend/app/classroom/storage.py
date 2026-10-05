@@ -30,6 +30,7 @@ from typing import Any, Protocol
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from app.classroom.files import content_disposition
 from app.core.config import get_settings
 
 logger = logging.getLogger("edubridge.storage")
@@ -53,6 +54,11 @@ class ObjectStorage(Protocol):
 
     def delete_many(self, keys: list[str]) -> None: ...
 
+    def view_url(self, key: str, filename: str, content_type: str, seconds: int) -> str:
+        """A link that shows the object in a browser for `seconds` (Phase 6b).
+        A bearer pass: mint it only after the file's row has been read under RLS."""
+        ...
+
 
 class InMemoryObjectStorage:
     """Tests and local development. Refused in production (config.py)."""
@@ -72,6 +78,10 @@ class InMemoryObjectStorage:
     def delete_many(self, keys: list[str]) -> None:
         for key in keys:
             self.objects.pop(key, None)
+
+    def view_url(self, key: str, filename: str, content_type: str, seconds: int) -> str:
+        # Nothing a browser could open: viewing needs STORAGE_PROVIDER=s3.
+        return f"memory://{key}"
 
 
 class S3ObjectStorage:
@@ -93,6 +103,11 @@ class S3ObjectStorage:
             config=Config(
                 # Supabase's S3 endpoint is path-style only.
                 s3={"addressing_style": "path"},
+                # Explicit, for pre-signed links: left to its default, botocore
+                # pre-signs with Signature Version 2, which Supabase refuses with
+                # 403 "Missing signature" (measured 2026-10-05). Requests already
+                # used Version 4; this changes only the links.
+                signature_version="s3v4",
                 # botocore 1.36+ adds checksum headers to every upload by default,
                 # which S3-compatible services do not all accept. Only when the
                 # operation requires one.
@@ -125,6 +140,22 @@ class S3ObjectStorage:
                 raise MissingObjectError(key) from None
             raise
         return _chunks(body)
+
+    def view_url(self, key: str, filename: str, content_type: str, seconds: int) -> str:
+        # Signed locally — no request is made. Supabase honours the response-*
+        # overrides (measured 2026-10-05): shown inline, under the cleaned name,
+        # as the server-sniffed type, and never cached.
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": self._bucket,
+                "Key": key,
+                "ResponseContentType": content_type,
+                "ResponseContentDisposition": content_disposition(filename, inline=True),
+                "ResponseCacheControl": "private, no-store",
+            },
+            ExpiresIn=seconds,
+        )
 
     def delete_many(self, keys: list[str]) -> None:
         for i in range(0, len(keys), 1000):  # the DeleteObjects limit

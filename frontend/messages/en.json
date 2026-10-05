@@ -493,7 +493,14 @@
       "endpointLogsTitle": "Daily endpoint access logs",
       "endpointLogsBody": "Which endpoints were called, by how many accounts, and how often. Metadata only.",
       "adminPrivacyTitle": "What an administrator cannot see",
-      "adminPrivacyBody": "You can see audit records, access logs and usage metadata. You cannot read the content of any tutoring conversation — no administrator path to it exists, by design."
+      "adminPrivacyBody": "You can see audit records, access logs and usage metadata. You cannot read the content of any tutoring conversation — no administrator path to it exists, by design.",
+      "classesLoading": "Loading your classes…",
+      "classesEmptyStudent": "You have not joined a class yet.",
+      "classesEmptyTeacher": "You have no classrooms yet.",
+      "joinClass": "Join a class with a code",
+      "createClassroom": "Create your first classroom",
+      "allClassrooms": "All classrooms",
+      "memberCount": "{count, plural, one {# student} other {# students}}"
     }
   },
   "settings": {
@@ -552,13 +559,11 @@
     "loading": "Loading…",
     "student": {
       "title": "My Classes",
-      "subtitle": "Student Dashboard",
       "intro": "Classes you have joined. You can see who can view you, and leave any class at any time.",
       "empty": "You have not joined a class yet. Ask your teacher for the class code."
     },
     "teacher": {
       "title": "My Classrooms",
-      "subtitle": "Teacher Dashboard",
       "intro": "Create a classroom for a subject you teach and share its code with your students.",
       "empty": "You have not created a classroom yet."
     },
@@ -696,8 +701,6 @@
     "submission": {
       "heading": "Your work",
       "bodyLabel": "Your answer",
-      "linkLabel": "Link (optional)",
-      "linkHint": "A full https:// link, for example to a document.",
       "save": "Save draft",
       "saving": "Saving…",
       "saved": "Draft saved.",
@@ -712,7 +715,6 @@
       "feedbackHeading": "Feedback from your teacher",
       "locked": "Your teacher has started grading this work, so it can no longer change.",
       "unsubmitFirst": "Unsubmit the work before editing it.",
-      "linkInvalid": "Use a full link that starts with https://.",
       "failed": "That could not be saved. Try again."
     },
     "grading": {
@@ -725,7 +727,6 @@
       "close": "Close",
       "workHeading": "Work from {name}",
       "notTurnedIn": "Not turned in yet.",
-      "link": "Attached link",
       "gradeLabel": "Grade (out of {points})",
       "noPoints": "This assignment has no points, so only feedback can be given.",
       "feedbackLabel": "Private feedback",
@@ -764,12 +765,14 @@
     },
     "files": {
       "attachments": "Attachments",
-      "yourFiles": "Your files",
-      "studentFiles": "Files",
+      "yourAttachments": "Your files and links",
+      "studentAttachments": "Files and links",
       "add": "Add a file",
       "uploading": "Uploading…",
       "hint": "PDF, PNG, JPEG, Word or PowerPoint, up to 5 MB.",
       "download": "Download {name}",
+      "view": "View",
+      "viewLabel": "View {name}",
       "remove": "Remove",
       "removeLabel": "Remove {name}",
       "removeConfirm": "Remove {name}? This cannot be undone.",
@@ -785,7 +788,24 @@
       "turnedIn": "Unsubmit the work before changing its files.",
       "uploadFailed": "The file could not be added. Try again.",
       "removeFailed": "The file could not be removed. Try again.",
-      "downloadFailed": "The file could not be downloaded. Try again."
+      "downloadFailed": "The file could not be downloaded. Try again.",
+      "viewFailed": "The file could not be opened. Try again.",
+      "addMenu": "Add",
+      "addFile": "File",
+      "addLink": "Link",
+      "linkLabel": "Link",
+      "addLinkButton": "Add link",
+      "adding": "Adding…",
+      "cancel": "Cancel",
+      "linkInvalid": "Use a full link that starts with https://.",
+      "tooManyLinks": "No more links can be added here.",
+      "linkFailed": "The link could not be added. Try again.",
+      "linkRemoveFailed": "The link could not be removed. Try again.",
+      "removeLinkLabel": "Remove link {url}",
+      "removeLinkConfirm": "Remove this link?",
+      "workHint": "Files: PDF, PNG, JPEG, Word or PowerPoint, up to 5 MB. Links: full addresses starting with https://.",
+      "addingFiles": "Adding files…",
+      "notAttached": "The assignment was created, but these files could not be added: {names}. Add them again below."
     },
     "people": {
       "heading": "People",

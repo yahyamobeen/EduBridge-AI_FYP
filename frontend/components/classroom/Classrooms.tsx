@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { DashboardShell } from '@/components/app/DashboardShell'
-import { SessionGuard } from '@/components/app/SessionGuard'
+import { RequireRole } from '@/components/app/SessionGuard'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowIcon, BookIcon, CalendarIcon } from '@/components/ui/Icon'
 import { Link } from '@/i18n/navigation'
@@ -14,25 +13,25 @@ import { JoinClassForm } from './JoinClassForm'
 
 /**
  * The two classroom lists — `/classroom` for students, `/teacher/classroom`
- * for teachers. Separate routes with exact `SessionGuard` role lists, sharing
+ * for teachers. Separate routes with exact `RequireRole` role lists, sharing
  * this module, so the role boundary is a route boundary (navigation.ts is an
  * RBAC map, and each entry points at a page that admits only its role).
  */
 export function StudentClassrooms() {
   return (
-    <SessionGuard allow={['student']}>
+    <RequireRole allow={['student']}>
       {(me) => <ClassroomsBody me={me} basePath="/classroom" form={<JoinClassForm />} />}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
 export function TeacherClassrooms() {
   return (
-    <SessionGuard allow={['teacher']}>
+    <RequireRole allow={['teacher']}>
       {(me) => (
         <ClassroomsBody me={me} basePath="/teacher/classroom" form={<CreateClassForm />} />
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -61,7 +60,7 @@ function ClassroomsBody({
   }, [])
 
   return (
-    <DashboardShell me={me} subtitle={t(`${role}.subtitle`)}>
+    <>
       <header className="mb-8">
         <h1 className="font-headline text-headline-lg text-on-background">
           {t(`${role}.title`)}
@@ -109,7 +108,7 @@ function ClassroomsBody({
 
         <div>{form}</div>
       </div>
-    </DashboardShell>
+    </>
   )
 }
 

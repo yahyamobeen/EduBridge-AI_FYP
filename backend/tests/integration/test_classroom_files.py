@@ -13,6 +13,8 @@ test can assert not only the response but what is — and is no longer — store
   * a download is always an attachment, in a sandbox.
 """
 
+import io
+import zipfile
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -306,3 +308,74 @@ class TestRollback:
         db.rollback()
         _drain()
         assert object_store.objects == {}
+
+
+# ── Phase 6b: viewing in the browser through a short-lived link ─────────────
+
+
+def _docx() -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        for name in ("[Content_Types].xml", "word/document.xml"):
+            archive.writestr(name, "<x/>")
+    return buf.getvalue()
+
+
+def _view(client, user, kind: str, file_id: str):
+    return client.get(f"/api/{kind}/{file_id}/view", headers=_auth(user))
+
+
+class TestFileViewing:
+    """
+    A view link is handed out only after the file's row is read under RLS —
+    the download's rule — and only for what a browser can show. The in-memory
+    store answers `memory://<key>`; the real link's shape is a unit test, and
+    its behaviour was measured on the real bucket (2026-10-05).
+    """
+
+    def test_a_member_views_a_live_attachment(self, client, teacher, student, lab, object_store):
+        file_id = _upload(
+            client, teacher, f"/api/assignments/{lab}/attachments", name="Sheet.pdf"
+        ).json()["id"]
+        resp = _view(client, student, "attachments", file_id)
+        assert resp.status_code == 200, resp.text
+        [key] = object_store.objects
+        assert resp.json()["url"] == f"memory://{key}"
+        assert resp.json()["expires_at"]
+        # The link is a pass for five minutes: never cached on the way.
+        assert resp.headers["cache-control"] == "private, no-store"
+
+    def test_the_teacher_views_a_students_file_only_once_turned_in(
+        self, client, teacher, student, lab
+    ):
+        file_id = _upload(client, student, _files_url(lab)).json()["id"]
+        assert _view(client, student, "submission-files", file_id).status_code == 200
+        assert _view(client, teacher, "submission-files", file_id).status_code == 403
+        _turn_in(client, student, lab)
+        assert _view(client, teacher, "submission-files", file_id).status_code == 200
+
+    def test_a_classmate_gets_the_same_refusal_as_a_missing_file(
+        self, client, db, space, student, lab
+    ):
+        file_id = _upload(client, student, _files_url(lab)).json()["id"]
+        _turn_in(client, student, lab)
+        classmate = _join(client, db, space)
+        theirs = _view(client, classmate, "submission-files", file_id)
+        unknown = _view(client, classmate, "submission-files", str(uuid4()))
+        assert theirs.status_code == unknown.status_code == 403
+        assert theirs.json() == unknown.json()
+
+    def test_an_office_file_is_download_only(self, client, teacher, student, lab):
+        resp = client.post(
+            f"/api/assignments/{lab}/attachments",
+            content=_docx(),
+            headers={
+                **_auth(teacher),
+                "Content-Type": "application/octet-stream",
+                "X-Upload-Filename": "Notes.docx",
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        refused = _view(client, student, "attachments", resp.json()["id"])
+        assert refused.status_code == 400
+        assert _reason(refused) == "not_viewable"

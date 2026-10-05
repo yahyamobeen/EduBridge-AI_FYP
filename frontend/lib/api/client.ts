@@ -137,7 +137,7 @@ export function endSession(): void {
 // the redirect returned on its first line every single time.
 //
 // ⚠️ DELETED RATHER THAN WIRED UP, and the reason is not that wiring it is hard.
-//    `SessionGuard` re-evaluates `onboarding_state` on every mount and catches
+//    `SessionGuard` re-evaluates `onboarding_state` on every navigation and catches
 //    the same two conditions, so nobody is ever stranded. What the seam would
 //    have added is catching a mid-session trial lapse BEFORE the next
 //    navigation — real, but small.
@@ -276,7 +276,7 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}): Prom
 
     // A11: `handleOnboardingRedirect(error)` stood here and did nothing —
     // `navigate` was never registered. `SessionGuard` handles GATE_PENDING and
-    // SUBSCRIPTION_REQUIRED on mount, which is what actually runs.
+    // SUBSCRIPTION_REQUIRED on each navigation, which is what actually runs.
     throw error
   }
 }

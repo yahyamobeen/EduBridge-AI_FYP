@@ -14,11 +14,15 @@ rows:
     visibility as the post or the work it belongs to — and only then streams
     the object.
   * DELETE removes the row, and the object only once that commits.
+  * VIEW (Phase 6b) reads the row exactly as DOWNLOAD does, then hands out a
+    five-minute link that shows a PDF or an image in a new tab, on the storage
+    service's domain. The link is a bearer pass: it is never stored or logged.
 
 Who may see a file is decided by the policies in 20261004150000, never here: a
 read that RLS hides is the same 403 as an id that does not exist.
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -26,11 +30,16 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.classroom import storage
-from app.classroom.files import describe, material_key, submission_key
+from app.classroom.files import VIEWABLE, describe, file_error, material_key, submission_key
 from app.classroom.service import require_owner
 from app.core.errors import forbidden_scope, validation_error
 
 Parent = Literal["announcement", "assignment"]
+
+# How long a view link works. Long enough for a slow phone to open and page
+# through a 5 MB PDF (a viewer can fetch it in ranges as it scrolls); short
+# enough that a copied link is soon useless (owner decision 2026-10-05).
+VIEW_LINK_SECONDS = 300
 
 _META = "id, filename, content_type, size_bytes, created_at"
 
@@ -230,6 +239,22 @@ def readable_file(db: Session, kind: Literal["submission", "material"], file_id:
     if row is None:
         raise forbidden_scope()
     return dict(row)
+
+
+def view_link(db: Session, kind: Literal["submission", "material"], file_id: UUID) -> dict:
+    """
+    Read the row under RLS first — a file the caller cannot see is the usual
+    403 — and only then sign a link. Office files are download-only.
+    """
+    meta = readable_file(db, kind, file_id)
+    if meta["content_type"] not in VIEWABLE:
+        raise file_error("not_viewable")
+    # Taken before signing, so the link outlives the time reported, never the reverse.
+    expires_at = datetime.now(UTC) + timedelta(seconds=VIEW_LINK_SECONDS)
+    url = storage.get_object_storage().view_url(
+        meta["object_key"], meta["filename"], meta["content_type"], VIEW_LINK_SECONDS
+    )
+    return {"url": url, "expires_at": expires_at}
 
 
 # ── delete ──────────────────────────────────────────────────────────────────

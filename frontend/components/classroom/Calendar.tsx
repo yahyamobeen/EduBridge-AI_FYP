@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
-import { DashboardShell } from '@/components/app/DashboardShell'
-import { SessionGuard } from '@/components/app/SessionGuard'
+import { RequireRole } from '@/components/app/SessionGuard'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowLeftIcon, ChevronRightIcon } from '@/components/ui/Icon'
 import { Link } from '@/i18n/navigation'
@@ -24,17 +23,17 @@ import { CARD, SECONDARY_BUTTON } from './styles'
  */
 export function StudentCalendar() {
   return (
-    <SessionGuard allow={['student']}>
+    <RequireRole allow={['student']}>
       {(me) => <CalendarPage me={me} basePath="/classroom" />}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
 export function TeacherCalendar() {
   return (
-    <SessionGuard allow={['teacher']}>
+    <RequireRole allow={['teacher']}>
       {(me) => <CalendarPage me={me} basePath="/teacher/classroom" />}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -42,7 +41,7 @@ function CalendarPage({ me, basePath }: { me: MeResponse; basePath: string }) {
   const t = useTranslations('classroom')
   const role = me.role === 'teacher' ? 'teacher' : 'student'
   return (
-    <DashboardShell me={me} subtitle={t(`${role}.subtitle`)}>
+    <>
       <Link
         href={basePath}
         className="mb-6 inline-flex items-center gap-2 text-body-sm font-semibold text-primary hover:underline"
@@ -57,7 +56,7 @@ function CalendarPage({ me, basePath }: { me: MeResponse; basePath: string }) {
         <p className="text-body-md text-on-surface-variant">{t(`calendar.${role}Intro`)}</p>
       </header>
       <CalendarView basePath={basePath} />
-    </DashboardShell>
+    </>
   )
 }
 

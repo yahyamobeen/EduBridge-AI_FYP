@@ -11,10 +11,10 @@ import { SubmissionPanel } from './SubmissionPanel'
 
 /**
  * A student's own work. What must hold: unsaved edits go in WITH the turn-in,
- * not lost behind it; the three server refusals — locked by grading, unsubmit
- * first, a bad link — each get their own message, chosen by `details`, never
- * by `message`; a returned grade shows with its feedback; a link renders as an
- * anchor only when it is https.
+ * not lost behind it; a server refusal gets its own message, chosen by
+ * `details`, never by `message`; a returned grade shows with its feedback; and
+ * attached files and links make it a turn-in, not "Mark as done". Adding and
+ * removing files and links is `WorkAttachments.test.tsx`.
  */
 
 const saveSubmission = vi.fn()
@@ -29,13 +29,13 @@ vi.mock('@/lib/api/endpoints', () => ({
 function mine(overrides: Partial<MySubmission> = {}): MySubmission {
   return {
     body: '',
-    link_url: null,
     turned_in_at: null,
     status: 'assigned',
     grade: null,
     feedback: null,
     returned_at: null,
     files: [],
+    links: [],
     ...overrides,
   }
 }
@@ -89,7 +89,7 @@ describe('editing', () => {
     renderPanel(mine())
     await userEvent.type(screen.getByLabelText(en.classroom.submission.bodyLabel), 'My answer')
     await userEvent.click(screen.getByRole('button', { name: en.classroom.submission.turnIn }))
-    expect(saveSubmission).toHaveBeenCalledWith('as-1', { body: 'My answer', link_url: null })
+    expect(saveSubmission).toHaveBeenCalledWith('as-1', { body: 'My answer' })
     expect(turnInSubmission).toHaveBeenCalledWith('as-1')
     expect(saveSubmission.mock.invocationCallOrder[0]).toBeLessThan(
       turnInSubmission.mock.invocationCallOrder[0]!,
@@ -102,18 +102,23 @@ describe('editing', () => {
     expect(screen.getByRole('button', { name: en.classroom.submission.markDone })).toBeEnabled()
   })
 
-  it('explains a refused link by its field', async () => {
-    saveSubmission.mockRejectedValue(
-      new ApiError(400, 'VALIDATION_ERROR', 'x', { fields: { link_url: 'bad' } }),
+  it('turns in work that carries only a link: it is not "Mark as done"', () => {
+    renderPanel(
+      mine({
+        links: [
+          { id: 'l-1', url: 'https://example.com/lab', created_at: '2026-10-05T09:00:00Z' },
+        ],
+      }),
     )
+    expect(screen.getByRole('button', { name: en.classroom.submission.turnIn })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: en.classroom.submission.markDone })).toBeNull()
+  })
+
+  it('offers the "+ Add" menu while the work is a draft', () => {
     renderPanel(mine())
-    await userEvent.type(
-      screen.getByLabelText(en.classroom.submission.linkLabel),
-      'http://example.com',
-    )
-    await userEvent.click(screen.getByRole('button', { name: en.classroom.submission.save }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      en.classroom.submission.linkInvalid,
+    expect(screen.getByRole('button', { name: en.classroom.files.addMenu })).toHaveAttribute(
+      'aria-haspopup',
+      'menu',
     )
   })
 })
@@ -139,7 +144,9 @@ describe('returned', () => {
     renderPanel(
       mine({
         body: 'Done',
-        link_url: 'https://example.com/lab',
+        links: [
+          { id: 'l-1', url: 'https://example.com/lab', created_at: '2026-10-05T08:00:00Z' },
+        ],
         turned_in_at: '2026-10-05T09:00:00Z',
         returned_at: '2026-10-06T09:00:00Z',
         status: 'graded',
@@ -154,6 +161,8 @@ describe('returned', () => {
       'noopener noreferrer',
     )
     expect(screen.queryByRole('button', { name: en.classroom.submission.unsubmit })).toBeNull()
+    // Returned work is read-only: nothing to add, nothing to remove.
+    expect(screen.queryByRole('button', { name: en.classroom.files.addMenu })).toBeNull()
   })
 })
 

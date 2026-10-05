@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useFormatter, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import { ArrowLeftIcon } from '@/components/ui/Icon'
 import {
@@ -10,6 +10,7 @@ import {
   downloadAttachment,
   getAssignment,
   uploadAssignmentAttachment,
+  viewAttachment,
 } from '@/lib/api/endpoints'
 import type { AssignmentDetail, MySubmission } from '@/lib/api/types'
 import { AssignmentForm } from './AssignmentForm'
@@ -31,6 +32,7 @@ export function AssignmentView({
   subjectId,
   isOwner,
   canManage,
+  notAttached = [],
   onBack,
   onChanged,
   onDeleted,
@@ -40,12 +42,15 @@ export function AssignmentView({
   isOwner: boolean
   /** Owner of an active classroom. */
   canManage: boolean
+  /** Files picked while creating that could not be attached (Phase 6b). */
+  notAttached?: string[]
   onBack: () => void
   onChanged: (a: AssignmentDetail) => void
   onDeleted: (id: string) => void
 }) {
   const t = useTranslations('classroom.assignment')
   const tf = useTranslations('classroom.files')
+  const format = useFormatter()
   const [assignment, setAssignment] = useState<AssignmentDetail | null>(null)
   const [failed, setFailed] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -121,10 +126,18 @@ export function AssignmentView({
             <p className="mt-4 whitespace-pre-wrap break-words text-body-md text-on-surface">
               {assignment.instructions || t('noInstructions')}
             </p>
+            {notAttached.length > 0 && (
+              <div className="mt-4">
+                <FormBanner>
+                  {tf('notAttached', { names: format.list(notAttached) })}
+                </FormBanner>
+              </div>
+            )}
             <FileSection
               heading={tf('attachments')}
               files={assignment.attachments}
               download={(f) => downloadAttachment(f.id)}
+              view={(f) => viewAttachment(f.id)}
               upload={
                 isOwner && canManage
                   ? (file) => uploadAssignmentAttachment(assignment.id, file)

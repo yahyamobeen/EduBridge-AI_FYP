@@ -59,7 +59,7 @@ function row(overrides: Partial<SubmissionRow> = {}): SubmissionRow {
 }
 
 function work(overrides: Partial<StudentWork> = {}): StudentWork {
-  return { ...row(), body: 'g = 9.8', link_url: null, feedback: '', files: [], ...overrides }
+  return { ...row(), body: 'g = 9.8', feedback: '', files: [], links: [], ...overrides }
 }
 
 function renderTable(canGrade = true, locale = 'en', messages: typeof en = en) {
@@ -113,6 +113,35 @@ describe('the table', () => {
     renderTable()
     const item = await review('Bilal Ahmed')
     expect(await within(item).findByText(en.classroom.grading.notTurnedIn)).toBeInTheDocument()
+  })
+
+  it("shows the student's files and links, read-only", async () => {
+    getStudentWork.mockResolvedValue(
+      work({
+        files: [
+          {
+            id: 'f-1',
+            filename: 'Lab report.pdf',
+            content_type: 'application/pdf',
+            size_bytes: 2_000,
+            created_at: '2026-10-05T08:00:00Z',
+          },
+        ],
+        links: [
+          { id: 'l-1', url: 'https://example.com/lab', created_at: '2026-10-05T08:30:00Z' },
+        ],
+      }),
+    )
+    renderTable()
+    const item = await review('Aisha Khan')
+    const link = await within(item).findByRole('link', { name: 'https://example.com/lab' })
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(
+      within(item).getByRole('button', { name: 'View Lab report.pdf' }),
+    ).toBeInTheDocument()
+    // The teacher cannot add to or remove from a student's work.
+    expect(within(item).queryByRole('button', { name: en.classroom.files.addMenu })).toBeNull()
+    expect(within(item).queryByRole('button', { name: /^Remove/ })).toBeNull()
   })
 })
 
@@ -185,7 +214,13 @@ describe('translations', () => {
           }),
         ],
       })
-      getStudentWork.mockResolvedValue(work({ link_url: 'https://example.com/lab' }))
+      getStudentWork.mockResolvedValue(
+        work({
+          links: [
+            { id: 'l-1', url: 'https://example.com/lab', created_at: '2026-10-05T08:30:00Z' },
+          ],
+        }),
+      )
       const errors = renderTable(true, locale, messages as typeof en)
       const m = messages as typeof en
       const item = (await screen.findByText('Aisha Khan', {}, LOADED)).closest('li')!

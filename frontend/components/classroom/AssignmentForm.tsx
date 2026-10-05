@@ -1,17 +1,25 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
-import { createAssignment, listChapters, updateAssignment } from '@/lib/api/endpoints'
+import {
+  createAssignment,
+  listChapters,
+  updateAssignment,
+  uploadAssignmentAttachment,
+} from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type {
   AssignmentCreateRequest,
   AssignmentDetail,
   AssignmentUpdateRequest,
   ChapterRef,
+  FileMeta,
 } from '@/lib/api/types'
 import { isoToLocalInput, localInputToIso, nowLocalInput } from '@/lib/datetime'
+import { ACCEPT, earlyRefusal } from '@/lib/files'
+import { useSizeLabel } from './Files'
 import { CARD, CARD_HEADING, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
 
 /**
@@ -22,7 +30,17 @@ import { CARD, CARD_HEADING, FIELD, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } fr
  * `null` (the API clears `due_at`, `points` and `chapter_id` that way). A
  * schedule can be set when creating, and moved only while the assignment is
  * still scheduled — the same rule as announcements.
+ *
+ * Creating can carry files (Phase 6b): they are held here, checked, and
+ * uploaded one by one once the assignment exists — an upload needs its id, and
+ * one request with several files is the multipart body the server refuses. A
+ * file that fails does not undo the assignment: `onSaved` names it, and the
+ * assignment view offers "Add a file" again. Editing manages files in
+ * `AssignmentView`, as before.
  */
+
+/** Ten per assignment, the database's limit (app.add_material_attachment). */
+const MAX_FILES = 10
 export function AssignmentForm({
   spaceId,
   subjectId,
@@ -33,11 +51,16 @@ export function AssignmentForm({
   spaceId: string
   subjectId: string
   initial?: AssignmentDetail
-  onSaved: (a: AssignmentDetail) => void
+  /** `notAttached`: names of files picked while creating that could not be added. */
+  onSaved: (a: AssignmentDetail, notAttached?: string[]) => void
   onCancel: () => void
 }) {
   const t = useTranslations('classroom.assignment')
   const tw = useTranslations('classroom.classwork')
+  const tf = useTranslations('classroom.files')
+  const sizeLabel = useSizeLabel()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const fileInputId = useId()
   const [title, setTitle] = useState(initial?.title ?? '')
   const [instructions, setInstructions] = useState(initial?.instructions ?? '')
   const [points, setPoints] = useState(initial?.points != null ? String(initial.points) : '')
@@ -46,7 +69,10 @@ export function AssignmentForm({
   const [chapters, setChapters] = useState<ChapterRef[] | null>(null)
   const [when, setWhen] = useState<'now' | 'later'>(initial?.scheduled ? 'later' : 'now')
   const [at, setAt] = useState(initial?.scheduled ? isoToLocalInput(initial.publish_at) : '')
+  const [pending, setPending] = useState<File[]>([])
+  const [pendingError, setPendingError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -106,6 +132,24 @@ export function AssignmentForm({
     return t('failed')
   }
 
+  function pick(chosen: FileList | null) {
+    setPendingError(null)
+    const next = [...pending]
+    for (const file of Array.from(chosen ?? [])) {
+      const early = earlyRefusal(file)
+      if (early) {
+        setPendingError(tf(early))
+      } else if (next.length >= MAX_FILES) {
+        setPendingError(tf('tooManyFiles'))
+        break
+      } else {
+        next.push(file)
+      }
+    }
+    setPending(next)
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (!canSubmit) return
@@ -120,11 +164,22 @@ export function AssignmentForm({
     setSaving(true)
     setError(null)
     try {
-      onSaved(
-        initial && patch
-          ? await updateAssignment(initial.id, patch)
-          : await createAssignment(spaceId, createBody()),
-      )
+      if (initial && patch) {
+        onSaved(await updateAssignment(initial.id, patch))
+        return
+      }
+      const created = await createAssignment(spaceId, createBody())
+      setUploading(true)
+      const attached: FileMeta[] = []
+      const notAttached: string[] = []
+      for (const file of pending) {
+        try {
+          attached.push(await uploadAssignmentAttachment(created.id, file))
+        } catch {
+          notAttached.push(file.name)
+        }
+      }
+      onSaved({ ...created, attachments: [...created.attachments, ...attached] }, notAttached)
     } catch (caught) {
       setError(explain(caught))
       setSaving(false)
@@ -164,6 +219,60 @@ export function AssignmentForm({
             className={FIELD}
           />
         </div>
+
+        {!initial && (
+          <div>
+            <p className={LABEL}>{tf('attachments')}</p>
+            {pending.length > 0 && (
+              <ul className="mb-2 divide-y divide-outline-variant rounded border border-outline-variant">
+                {pending.map((file, index) => (
+                  <li
+                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                  >
+                    <span className="min-w-0 break-all text-body-md text-on-surface">
+                      {file.name}
+                    </span>
+                    <span className="flex items-center gap-3 text-body-sm text-on-surface-variant">
+                      {sizeLabel(file.size)}
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => setPending(pending.filter((_, i) => i !== index))}
+                        aria-label={tf('removeLabel', { name: file.name })}
+                        className="text-error underline disabled:opacity-50"
+                      >
+                        {tf('remove')}
+                      </button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input
+              ref={fileInput}
+              id={fileInputId}
+              type="file"
+              multiple
+              accept={ACCEPT}
+              className="sr-only"
+              disabled={saving}
+              onChange={(e) => pick(e.target.files)}
+            />
+            <label
+              htmlFor={fileInputId}
+              className={`${SECONDARY_BUTTON} inline-block cursor-pointer ${saving ? 'opacity-50' : ''}`}
+            >
+              {tf('add')}
+            </label>
+            <p className="mt-1 text-body-sm text-on-surface-variant">{tf('hint')}</p>
+            {pendingError && (
+              <div className="mt-2">
+                <FormBanner>{pendingError}</FormBanner>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -293,13 +402,15 @@ export function AssignmentForm({
           {t('cancel')}
         </button>
         <button type="submit" disabled={!canSubmit} className={PRIMARY_BUTTON}>
-          {saving
-            ? t('saving')
-            : initial
-              ? t('save')
-              : when === 'later'
-                ? t('schedule')
-                : t('create')}
+          {uploading
+            ? tf('addingFiles')
+            : saving
+              ? t('saving')
+              : initial
+                ? t('save')
+                : when === 'later'
+                  ? t('schedule')
+                  : t('create')}
         </button>
       </div>
     </form>

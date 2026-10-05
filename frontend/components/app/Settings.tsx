@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { DashboardShell } from '@/components/app/DashboardShell'
-import { SessionGuard } from '@/components/app/SessionGuard'
+import { RequireRole } from '@/components/app/SessionGuard'
 import { AuthField } from '@/components/auth/AuthField'
 import { FormBanner } from '@/components/ui/FormFeedback'
 import {
@@ -53,9 +52,9 @@ const READ_ONLY_FIELD =
 
 export function Settings() {
   return (
-    <SessionGuard allow={['student', 'teacher', 'parent', 'admin']}>
+    <RequireRole allow={['student', 'teacher', 'parent', 'admin']}>
       {(me) => <SettingsBody me={me} />}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -65,7 +64,7 @@ function SettingsBody({ me }: { me: MeResponse }) {
   const pathname = usePathname()
 
   return (
-    <DashboardShell me={me} subtitle={t('subtitle')}>
+    <>
       <header className="mb-8">
         <h1 className="font-headline text-headline-lg text-on-background">{t('title')}</h1>
         <p className="text-body-md text-on-surface-variant">{t('subtitle')}</p>
@@ -82,7 +81,7 @@ function SettingsBody({ me }: { me: MeResponse }) {
           <ParentalLinkCard me={me} />
         </div>
       </div>
-    </DashboardShell>
+    </>
   )
 }
 

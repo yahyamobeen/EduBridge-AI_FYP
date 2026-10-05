@@ -41,6 +41,9 @@ export function ClassworkTab({
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [creating, setCreating] = useState(false)
   const [openId, setOpenId] = useState<string | null>(initialOpenId ?? null)
+  // Files picked while creating that could not be attached (Phase 6b): the new
+  // assignment opens with them named, so they can be added again.
+  const [notAttached, setNotAttached] = useState<string[]>([])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -95,7 +98,11 @@ export function ClassworkTab({
         subjectId={subjectId}
         isOwner={isOwner}
         canManage={canPost}
-        onBack={() => setOpenId(null)}
+        notAttached={notAttached}
+        onBack={() => {
+          setOpenId(null)
+          setNotAttached([])
+        }}
         onChanged={upsert}
         onDeleted={removed}
       />
@@ -113,9 +120,13 @@ export function ClassworkTab({
           <AssignmentForm
             spaceId={spaceId}
             subjectId={subjectId}
-            onSaved={(a) => {
+            onSaved={(a, failed) => {
               upsert(a)
               setCreating(false)
+              if (failed && failed.length > 0) {
+                setNotAttached(failed)
+                setOpenId(a.id)
+              }
             }}
             onCancel={() => setCreating(false)}
           />

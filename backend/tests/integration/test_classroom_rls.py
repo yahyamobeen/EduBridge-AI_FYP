@@ -1129,3 +1129,101 @@ class TestFileBoundary:
         assert row["deleted"] is True
         assert student_key in row["object_keys"]
         assert len(row["object_keys"]) == 2
+
+
+# ── Phase 6b: several links on a piece of work (20261005120000) ─────────────
+
+
+def _add_link(db, student: str, assignment: UUID, url: str = "https://example.com/work") -> str:
+    _as(db, student)
+    return db.execute(
+        text("SELECT outcome FROM app.add_submission_link(:a, :u)"), {"a": assignment, "u": url}
+    ).scalar_one()
+
+
+class TestLinkBoundary:
+    def test_nobody_writes_a_link_row_directly(self, db, classroom, member, lab):
+        _add_link(db, member, lab)  # a draft row to aim at
+        _as(db, member)
+        message = _refused(
+            db,
+            "INSERT INTO submission_link (submission_id, space_id, student_id, url) "
+            "SELECT id, space_id, student_id, 'https://example.com/x' "
+            "  FROM assignment_submission WHERE assignment_id = :a",
+            {"a": lab},
+        )
+        assert "permission denied" in message
+
+    def test_only_an_https_link_is_stored(self, db, member, lab):
+        for bad in ("javascript:alert(1)", "http://example.com", "https://a b.com", ""):
+            assert _add_link(db, member, lab, bad) == "invalid_url"
+
+    def test_a_teacher_sees_a_link_only_once_turned_in_and_while_the_student_stays(
+        self, db, teacher, classroom, member, lab
+    ):
+        def teacher_sees() -> int:
+            _as(db, teacher)
+            return _count(db, "SELECT count(*) FROM submission_link", {})
+
+        assert _add_link(db, member, lab) == "added"
+        assert teacher_sees() == 0  # a draft's links are the student's own
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert teacher_sees() == 1
+        _call(db, member, "SELECT app.leave_space(:s)", {"s": classroom[0]})
+        assert teacher_sees() == 0
+
+    def test_a_classmate_sees_nothing(self, db, classroom, member, lab):
+        _add_link(db, member, lab)
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        classmate = _user(db, role="student")
+        assert _join(db, classmate, classroom[1]) == "joined"
+        _as(db, classmate)
+        assert _count(db, "SELECT count(*) FROM submission_link", {}) == 0
+
+    def test_the_same_link_twice_is_one_link_and_the_sixth_is_refused(self, db, member, lab):
+        assert _add_link(db, member, lab, "https://example.com/1") == "added"
+        assert _add_link(db, member, lab, "https://example.com/1") == "added"
+        outcomes = [_add_link(db, member, lab, f"https://example.com/{n}") for n in range(2, 7)]
+        assert outcomes == ["added"] * 4 + ["too_many_links"]
+        _as(db, member)
+        assert _count(db, "SELECT count(*) FROM submission_link", {}) == 5
+
+    def test_turned_in_work_takes_no_new_link_and_graded_work_none_at_all(
+        self, db, teacher, member, lab
+    ):
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert _add_link(db, member, lab) == "turned_in"
+        _call(db, teacher, "SELECT app.save_grade(:a, :u, 5, '', false)", {"a": lab, "u": member})
+        assert _add_link(db, member, lab) == "graded"
+
+    def test_only_the_student_removes_their_link_and_only_while_a_draft(
+        self, db, teacher, classroom, member, lab
+    ):
+        _add_link(db, member, lab)
+        _as(db, member)
+        link = db.execute(text("SELECT id FROM submission_link")).scalar_one()
+        classmate = _user(db, role="student")
+        _join(db, classmate, classroom[1])
+        for other in (classmate, teacher):
+            assert _call(db, other, "SELECT app.remove_submission_link(:l)", {"l": link}) == (
+                "forbidden"
+            )
+        _call(db, member, "SELECT app.turn_in_submission(:a)", {"a": lab})
+        assert _call(db, member, "SELECT app.remove_submission_link(:l)", {"l": link}) == (
+            "turned_in"
+        )
+        _call(db, member, "SELECT app.unsubmit_submission(:a)", {"a": lab})
+        assert _call(db, member, "SELECT app.remove_submission_link(:l)", {"l": link}) == (
+            "removed"
+        )
+
+    def test_a_scheduled_assignment_takes_no_link(self, db, teacher, classroom, member):
+        later = _assign(db, teacher, classroom[0], scheduled=True)
+        assert _add_link(db, member, later) == "forbidden"
+
+    def test_deleting_an_assignment_takes_its_links_with_it(self, db, teacher, member, lab):
+        _add_link(db, member, lab)
+        _as(db, teacher)
+        db.execute(text("SELECT * FROM app.delete_assignment(:a)"), {"a": lab})
+        _as(db, member)
+        assert _count(db, "SELECT count(*) FROM submission_link", {}) == 0

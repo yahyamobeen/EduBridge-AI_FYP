@@ -10,6 +10,7 @@ import io
 import re
 import zipfile
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -21,6 +22,8 @@ from app.classroom import storage
 from app.classroom.files import (
     DOCX,
     PPTX,
+    VIEWABLE,
+    content_disposition,
     download_headers,
     material_key,
     read_bounded_body,
@@ -174,6 +177,26 @@ class TestKeysAndHeaders:
         assert "sandbox" in headers["Content-Security-Policy"]
         assert headers["Cache-Control"] == "private, no-store"
 
+    def test_a_view_is_inline_under_the_same_safe_name(self):
+        # Phase 6b: a view link shows the file in the browser, named as a download is.
+        disposition = content_disposition('امتحان "final".pdf', inline=True)
+        assert disposition.startswith("inline; ")
+        assert 'filename="final.pdf"' in disposition
+        assert "filename*=UTF-8''%D8%A7" in disposition
+
+    @pytest.mark.parametrize(
+        ("content_type", "viewable"),
+        [
+            ("application/pdf", True),
+            ("image/png", True),
+            ("image/jpeg", True),
+            (DOCX, False),  # a browser cannot render Office files (owner decision 2026-10-05)
+            (PPTX, False),
+        ],
+    )
+    def test_only_pdf_and_images_can_be_viewed(self, content_type, viewable):
+        assert (content_type in VIEWABLE) is viewable
+
 
 class TestInMemoryStorage:
     def test_round_trip_in_chunks(self):
@@ -187,6 +210,11 @@ class TestInMemoryStorage:
     def test_a_missing_object_fails_before_any_byte_is_sent(self):
         with pytest.raises(storage.MissingObjectError):
             storage.InMemoryObjectStorage().open("nope")
+
+    def test_a_view_link_is_a_placeholder(self):
+        # Tests and local work only: there is nothing a browser could open.
+        url = storage.InMemoryObjectStorage().view_url("k", "a.pdf", "application/pdf", 300)
+        assert url == "memory://k"
 
 
 class _SentError(Exception):
@@ -224,6 +252,22 @@ class TestS3Requests:
         )
         with stubber, pytest.raises(storage.MissingObjectError):
             s3.open("s/space/object")
+
+    def test_a_view_link_is_signature_v4_inline_and_short_lived(self, s3):
+        # Measured 2026-10-05: botocore's DEFAULT pre-signer writes a Signature
+        # Version 2 query (AWSAccessKeyId, Signature), which Supabase refuses
+        # with 403 "Missing signature". Version 4 works, and Supabase honours
+        # the response-* overrides. Signing is local: no network here.
+        url = s3.view_url("s/space/object", 'امتحان "final".pdf', "application/pdf", 300)
+        parts = urlsplit(url)
+        query = parse_qs(parts.query)
+        assert parts.path == "/storage/v1/s3/classroom-files/s/space/object"
+        assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+        assert query["X-Amz-Expires"] == ["300"]
+        assert "Signature" not in query and "AWSAccessKeyId" not in query
+        assert query["response-content-type"] == ["application/pdf"]
+        assert query["response-cache-control"] == ["private, no-store"]
+        assert query["response-content-disposition"][0].startswith('inline; filename="final.pdf"')
 
     def test_a_batch_delete_labels_its_body_as_xml(self, s3):
         # With no Content-Type, DeleteObjects is answered 400 "must have

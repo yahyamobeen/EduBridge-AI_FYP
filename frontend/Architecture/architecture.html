@@ -111,8 +111,8 @@
     <div class="grid">
       <div class="stat"><div class="n">29</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-04)</div></div>
       <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
-      <div class="stat"><div class="n">39</div><div class="l">test files (Vitest)</div></div>
-      <div class="stat"><div class="n">3 × 719</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">41</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 739</div><div class="l">locales × leaf message keys</div></div>
       <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
     </div>
 
@@ -182,8 +182,8 @@ flowchart TB
     D2["10 transactional screens"]
   end
   subgraph app["(app)/layout.tsx"]
-    E["bare main — no chrome<br/><span class='ln'>:10-16</span>"]
-    E2["3 role dashboards<br/>chrome rendered INSIDE SessionGuard"]
+    E["AppFrame — SessionGuard + sidebar, mounted once<br/><span class='ln'>:15-21</span>"]
+    E2["11 pages, each RequireRole<br/>identity re-read per navigation"]
   end
   A --> B
   B --> C --> C2
@@ -197,18 +197,17 @@ flowchart TB
       </div>
 
       <div class="card">
-        <h3 style="margin-top:4px">Why <code>(app)</code> renders no chrome</h3>
-        <p>The layout's own comment <span class="ln">(app)/layout.tsx:3-9</span> says it:
-          <em>"each dashboard renders its own sidebar through <code>DashboardShell</code>, because the
-          sidebar's contents depend on the role, which is only known once <code>SessionGuard</code> has
-          resolved the identity."</em></p>
-        <p>This is the structural consequence of the guard being a <strong>client-side render-prop</strong>
-          component. The role arrives from <code>GET /auth/me</code> <em>after</em> mount. A layout renders
-          above the page, before that answer exists, and a server layout cannot read it at all. A sidebar
-          there would mean either an empty shell that fills in later — a visible layout shift on every
-          dashboard entry — or a default role, which is exactly the copy-paste mistake
-          <code>navigation.ts</code> exists to prevent. So the chrome moves <em>inside</em> the guard,
-          where <code>me</code> is already resolved, and the layout does nothing but reserve the flex column.</p>
+        <h3 style="margin-top:4px"><code>(app)</code> renders the frame once — since classroom Phase 6c</h3>
+        <p><span class="ln">(app)/layout.tsx:15-21</span> renders <code>&lt;AppFrame&gt;</code>
+          <span class="ln">AppFrame.tsx:15</span>: the identity check (<code>SessionGuard</code>) and the role's
+          sidebar (<code>DashboardShell</code>), <strong>once</strong>, with every page inside them. Each page
+          declares its own roles with <code>RequireRole</code>.</p>
+        <p>Until 2026-10-05 the layout was a bare <code>&lt;main&gt;</code> and each page wrapped itself in its
+          own guard and sidebar, because the sidebar depends on the role, known only once the identity
+          resolves. The owner's report was the cost: <strong>every navigation unmounted the sidebar, blanked
+          the screen to "Loading…" and built a new one.</strong> The frame now resolves the identity once,
+          keeps the sidebar mounted, and re-reads the identity on each navigation in the background. The
+          sidebar's subtitle is one per user (a student's class, otherwise the role), not one per page.</p>
       </div>
     </section>
 
@@ -238,7 +237,7 @@ flowchart TB
           <tr><td><code>(app)</code></td><td><code>/classroom</code></td><td><code>StudentClassrooms</code> — list + join form, <code>allow={['student']}</code>. Classroom Phase 2 (2026-10-04)</td></tr>
           <tr><td><code>(app)</code></td><td><code>/classroom/[spaceId]</code></td><td><code>StudentClassroom</code> — on demand; owner controls render from the server's <code>viewer_role</code>, never the session role</td></tr>
           <tr><td><code>(app)</code></td><td><code>/teacher/classroom</code></td><td><code>TeacherClassrooms</code> — list + create form, <code>allow={['teacher']}</code></td></tr>
-          <tr><td><code>(app)</code></td><td><code>/teacher/classroom/[spaceId]</code></td><td><code>TeacherClassroom</code> — join code, rename/archive, people with remove (each behind <code>ConfirmInline</code>); Stream and People tabs since Phase 3, Classwork (assignments, submissions, grading) since Phase 4; file attachments on posts, assignments and work since Phase 6 (<code>Files.tsx</code> — always saved through <code>lib/download.ts</code>, never opened in the app)</td></tr>
+          <tr><td><code>(app)</code></td><td><code>/teacher/classroom/[spaceId]</code></td><td><code>TeacherClassroom</code> — join code, rename/archive, people with remove (each behind <code>ConfirmInline</code>); Stream and People tabs since Phase 3, Classwork (assignments, submissions, grading) since Phase 4; file attachments on posts, assignments and work since Phase 6 (<code>Files.tsx</code> — always saved through <code>lib/download.ts</code>, never opened in the app's own pages); since Phase 6b files while creating an assignment, a student's files and links in one list with a "+ Add" menu (<code>WorkAttachments.tsx</code>), and <strong>View</strong> for a PDF or an image in a new tab through a five-minute link</td></tr>
           <tr><td><code>(app)</code></td><td><code>/classroom/calendar</code>, <code>/teacher/classroom/calendar</code></td><td><code>StudentCalendar</code> / <code>TeacherCalendar</code> — month grid of deadlines and (teacher) scheduled posts; entries link back with <code>?assignment=</code>. Classroom Phase 5</td></tr>
           <tr><td><code>(auth)</code></td><td><code>/admin-login</code></td><td>Reachable ONLY through the <code>proxy.ts</code> rewrite from the unlisted <code>ADMIN_LOGIN_PATH</code>; the ordinary path answers 404</td></tr>
         </tbody>
@@ -249,18 +248,24 @@ flowchart TB
         wrong, not handed a language they may not read. <span class="ln">:41</span> calls
         <code>setRequestLocale</code>, without which every page opts into dynamic rendering; that static
         prerendering is what the Content Security Policy section below turns on.</p>
-      <p>The dashboards are <strong>shells</strong> <span class="ln">Dashboards.tsx:8-19</span>: no dashboard
+      <p>The dashboards are <strong>shells</strong> <span class="ln">Dashboards.tsx:9-22</span>: no dashboard
         data endpoint exists in the contract, so <code>PlaceholderCard</code>
-        <span class="ln">DashboardShell.tsx:144-185</span> names what will live there and says plainly that
+        <span class="ln">DashboardShell.tsx:188</span> names what will live there and says plainly that
         it is not available yet, instead of rendering the mockups' invented 78% exam readiness. Fabricated
         analytics have a way of surviving into a demo and then into a report. What <em>is</em> real on these
-        pages is the navigation and the role boundary.</p>
+        pages is the navigation and the role boundary — and, since classroom Phase 6c, the classroom card
+        <span class="ln">ClassroomsCard.tsx:24</span>, which lists up to three of the caller's real
+        classrooms and never says "Not available yet", not even when its request fails.</p>
     </section>
 
     <section class="prose">
-      <h2>SessionGuard + onboarding routing <span class="ln">components/app/SessionGuard.tsx</span></h2>
-      <p>A <strong>render-prop</strong> component, not a wrapper and not a hook
-        <span class="ln">:29-36</span>. <code>children</code> is a <em>function</em> of the resolved
+      <h2>SessionGuard, RequireRole + onboarding routing <span class="ln">components/app/SessionGuard.tsx</span></h2>
+      <p>Since classroom Phase 6c the gate is in two parts: <code>SessionGuard</code>
+        <span class="ln">:43</span>, in the <code>(app)</code> layout, checks the session and the journey
+        and re-reads them on <strong>every navigation</strong> while the page stays on screen;
+        <code>RequireRole</code> <span class="ln">:132</span>, in each page, checks the role from the
+        shared identity (<code>useMe</code>, no second request). Both are <strong>render-prop</strong>
+        components, not wrappers and not hooks. <code>children</code> is a <em>function</em> of the resolved
         identity — <code>(me: MeResponse) =&gt; ReactNode</code>. That shape is load-bearing: the page body
         cannot be constructed at all until <code>me</code> exists, so there is no branch on which a
         component can render with an undefined user.</p>
@@ -268,26 +273,26 @@ flowchart TB
       <div class="diagram">
         <div class="mermaid">
 flowchart TB
-  S(["mount — one identity check<br/>useEffect, empty deps<br/><span class='ln'>SessionGuard.tsx:42-97</span>"]) --> G["GET /auth/me<br/><span class='ln'>:61</span>"]
-  G -- "throws" --> L1["router.replace('/login')<br/><span class='ln'>:73-77</span>"]
-  G -- "resolves" --> O{"onboarding_state<br/>=== 'active'?<br/><span class='ln'>:64</span>"}
-  O -- "no" --> RT["routeForOnboardingState(state, role)<br/><span class='ln'>:65 · onboarding.ts:31-33</span>"]
+  S(["each navigation — one identity check<br/>useEffect keyed on the path<br/><span class='ln'>SessionGuard.tsx:50-99</span>"]) --> G["GET /auth/me<br/><span class='ln'>:69</span>"]
+  G -- "throws" --> L1["router.replace('/login')<br/><span class='ln'>:77-81</span>"]
+  G -- "resolves" --> O{"onboarding_state<br/>=== 'active'?<br/><span class='ln'>:72</span>"}
+  O -- "no" --> RT["routeForOnboardingState(state, role)<br/><span class='ln'>:73 · onboarding.ts:31-33</span>"]
   RT --> E1["/onboarding/email<br/>email_verification_pending"]
   RT --> E2["/onboarding/2fa<br/>two_factor_enrollment_pending"]
   RT --> E3["/onboarding/guardian<br/>guardian_link_pending"]
   RT --> E4["/onboarding/plan<br/>plan_selection_pending"]
-  O -- "yes" --> R{"allow.includes(role)?<br/><span class='ln'>:68</span>"}
-  R -- "no" --> DB["dashboardFor(role)<br/><span class='ln'>:69 · onboarding.ts:20-22</span>"]
+  O -- "yes" --> M["setMe(identity) — the frame keeps<br/>showing the page meanwhile<br/><span class='ln'>:76</span>"]
+  M --> R{"RequireRole: allow.includes(role)?<br/><span class='ln'>:143</span>"}
+  R -- "no" --> DB["dashboardFor(role)<br/><span class='ln'>:146 · onboarding.ts:20-22</span>"]
   DB --> D1["/dashboard · student"]
   DB --> D2["/teacher · teacher"]
   DB --> D3["/parent · parent"]
   DB --> D4["/admin · admin<br/>AdminDashboard"]
-  R -- "yes" --> M["setMe(identity)<br/><span class='ln'>:72</span>"]
-  M --> RENDER["children(me)<br/><span class='ln'>:113</span>"]
+  R -- "yes" --> RENDER["children(me)<br/><span class='ln'>:159</span>"]
   L1 --> CLOSED
   RT --> CLOSED
   DB --> CLOSED
-  CLOSED["me === null → status region only,<br/>NO page content<br/><span class='ln'>:99-111</span>"]
+  CLOSED["first entry, me === null → status region only,<br/>NO page content<br/><span class='ln'>:101-115</span>"]
         </div>
         <div class="legend">
           <span><span class="swatch" style="background:#15323b;border-color:#2596be"></span> step</span>
@@ -300,31 +305,33 @@ flowchart TB
         <h3 style="margin-top:4px">The three checks, in order</h3>
         <ol>
           <li><strong>No session → <code>/login</code>.</strong> Any failure to establish identity is caught
-            <span class="ln">:73-77</span> and treated as "not signed in". The client has already attempted a
+            <span class="ln">:77-81</span> and treated as "not signed in". The client has already attempted a
             refresh by this point, so there is nothing further to recover from. Test:
-            <span class="ln">SessionGuard.test.tsx:49-53</span>.</li>
-          <li><strong>Onboarding incomplete → the step that completes it.</strong> <span class="ln">:64-67</span>.
-            Test: <span class="ln">:55-59</span>.</li>
-          <li><strong>Wrong role → that role's own dashboard.</strong> <span class="ln">:68-71</span>. A parent
-            who opens <code>/dashboard</code> is sent to <code>/parent</code>, not to an error page. Test:
-            <span class="ln">:61-65</span>.</li>
+            <span class="ln">SessionGuard.test.tsx:63-67</span>.</li>
+          <li><strong>Onboarding incomplete → the step that completes it.</strong> <span class="ln">:72-75</span>.
+            Test: <span class="ln">:69-73</span>.</li>
+          <li><strong>Wrong role → that role's own dashboard.</strong> <code>RequireRole</code>
+            <span class="ln">:145-150</span>. A parent who opens <code>/dashboard</code> is sent to
+            <code>/parent</code>, not to an error page, and sees "Redirecting…" meanwhile. Test:
+            <span class="ln">:75-80</span>.</li>
         </ol>
       </div>
 
       <div class="card">
-        <h3 style="margin-top:4px">It fails <em>closed</em> on every path</h3>
-        <p>While <code>me === null</code> <span class="ln">:99-111</span> the component renders a
+        <h3 style="margin-top:4px">It fails <em>closed</em> on first entry</h3>
+        <p>While <code>me === null</code> <span class="ln">:101-115</span> the guard renders a
           <code>role="status"</code> region and <strong>no page content</strong> —
-          <code>checked ? t('redirecting') : t('loading')</code> <span class="ln">:106-108</span>. There is no
+          <code>checked ? t('redirecting') : t('loading')</code> <span class="ln">:110-112</span>. There is no
           branch that renders <code>children</code> before identity resolves, no <code>me ?? fallbackUser</code>,
           and no optimistic path. A hung request renders "Loading…" forever; a rejected request renders
-          "Redirecting…" and navigates. Neither shows a page.
-          <span class="ln">SessionGuard.test.tsx:104-111</span> asserts a permanently pending promise produces
-          no page content.</p>
+          "Redirecting…" and navigates. Neither shows a page. Since Phase 6c this is the only blank screen —
+          a full load or a refresh; a later re-check keeps the page on screen.
+          <span class="ln">SessionGuard.test.tsx:134-140</span> asserts a permanently pending first check
+          produces no page content.</p>
       </div>
 
       <div class="callout warn">
-        <span class="t">The StrictMode note — a real bug, recorded at :43-56</span>
+        <span class="t">The StrictMode note — a real bug, recorded at :51-64</span>
         The obvious implementation — a <code>started</code> ref to make the effect idempotent —
         <strong>deadlocked in development</strong>. <code>reactStrictMode: true</code>
         <span class="ln">next.config.mjs:136</span> makes React mount, unmount and remount every component.
@@ -332,8 +339,8 @@ flowchart TB
         <code>started.current</code> still true (refs survive the double-invoke) and returned early. Neither
         <code>setMe</code> nor <code>setChecked</code> ever ran. Every dashboard sat on "Loading…" forever
         with a healthy 200 in the network tab — and <em>only</em> in development, so nothing in continuous
-        integration could see it. The fix is the empty dependency array plus a plain <code>let cancelled</code>
-        closure variable <span class="ln">:57, :83-85</span>, re-created per mount.
+        integration could see it. The fix is a dependency array with no ref (empty then; the path since Phase 6c) plus a plain
+        <code>let cancelled</code> closure variable <span class="ln">:65, :87-89</span>, re-created per run.
         <strong>The same pattern is reproduced, unfixed, in <code>VerifyEmail</code> — defect D5.</strong>
       </div>
 
@@ -359,17 +366,18 @@ flowchart TB
 
       <div class="callout danger">
         <span class="t">It is NOT monotonic.</span>
-        <span class="ln">onboarding.ts:47-53</span> and <span class="ln">SessionGuard.tsx:13-18</span>: a
+        <span class="ln">onboarding.ts:47-53</span> and <span class="ln">SessionGuard.tsx:21-29</span>: a
         student reaches <code>active</code>, uses the app for fourteen days, and then the trial lapses and
         the server puts them back into <code>plan_selection_pending</code>. Onboarding is a <strong>state,
         not a checklist</strong> — a user moves <em>backwards</em> through it. Any consumer that caches
         <code>active</code> — a context set once on login, a <code>hasOnboarded</code> boolean, a guard
         written as "check once, then trust" — <strong>strands that user</strong> on a page they no longer
         have rights to, with every API call returning 403 <code>SUBSCRIPTION_REQUIRED</code> and no route
-        out. The defence is that the state is re-read on every mount and never remembered across one;
-        <span class="ln">SessionGuard.test.tsx:90-101</span> renders an <code>active</code> student,
-        unmounts, flips the mock to <code>plan_selection_pending</code>, renders again, and asserts both the
-        redirect and that <code>getMe</code> was called twice.
+        out. The defence is that the state is re-read on every navigation and never remembered across one;
+        <span class="ln">SessionGuard.test.tsx:106-117</span> renders an <code>active</code> student,
+        flips the mock to <code>plan_selection_pending</code>, moves to another path, and asserts both the
+        redirect and that <code>getMe</code> was called twice — and <span class="ln">:119-132</span> that the
+        page stayed on screen, the same node, while the re-check ran.
       </div>
     </section>
 
@@ -560,8 +568,8 @@ function resolve(path: string): string {
         <code>rawRequest</code> directly so there is no loop.
         <span class="ln">client.test.ts:96-105</span> asserts the original path is hit exactly twice and then
         gives up. <code>noRetry</code> <span class="ln">:105-113</span> has four call sites —
-        <code>login</code> <span class="ln">endpoints.ts:88</span>, <code>adminLogin</code> <span class="ln">:104</span>,
-        <code>twoFactorConfirm</code> <span class="ln">:174</span> and <code>changePassword</code> <span class="ln">:272</span> —
+        <code>login</code> <span class="ln">endpoints.ts:90</span>, <code>adminLogin</code> <span class="ln">:106</span>,
+        <code>twoFactorConfirm</code> <span class="ln">:176</span> and <code>changePassword</code> <span class="ln">:274</span> —
         because on each a 401 can mean a wrong credential, and refreshing would fire a guaranteed-to-fail request on
         every typo. <a href="architecture.md">architecture.md</a> gives the reason for each.</p>
 
@@ -572,7 +580,7 @@ function resolve(path: string): string {
         refresh-and-retry stays safe. <code>responseType: 'blob'</code> <span class="ln">:208</span> returns a
         <strong>successful</strong> body as a <code>Blob</code> <span class="ln">:246</span>, while an error is still
         the JSON envelope and an <code>ApiError</code>. The token travels in the header, never in a URL; the wrappers
-        are <span class="ln">endpoints.ts:512-556</span>.</p>
+        are <span class="ln">endpoints.ts:515-580</span>.</p>
 
       <h3>Transport-level onboarding redirects <span class="ln">:182-198</span></h3>
       <table>
@@ -655,7 +663,7 @@ function resolve(path: string): string {
     <section class="prose">
       <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
       <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
-        <code>ur-Latn</code> — with <strong>719 leaf message keys each (2026-10-05), identical across all three</strong>, and in the same order.
+        <code>ur-Latn</code> — with <strong>739 leaf message keys each (2026-10-05), identical across all three</strong>, and in the same order.
         <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
         <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
         — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had
@@ -836,10 +844,10 @@ export function dirFor(locale) { return isRtl(locale) ? 'rtl' : 'ltr' }  // :78-
         <p><code>lib/auth/onboarding.ts:17</code> mapped <code>admin</code> to <code>/admin</code> and the
           nav table pointed there, but <code>app/[locale]/(app)/</code> contained only
           <code>dashboard/</code>, <code>teacher/</code> and <code>parent/</code>. Three call sites could send
-          an administrator there — <span class="ln">SessionGuard.tsx:65</span>,
-          <span class="ln">SessionGuard.tsx:69</span> and <span class="ln">TwoFactorChallenge.tsx:183</span> —
-          and the result was a loop, with the guard's own fallback rendering "Redirecting…"
-          <span class="ln">SessionGuard.tsx:106-108</span> for ever.</p>
+          an administrator there — what are now <span class="ln">SessionGuard.tsx:73</span>,
+          <span class="ln">SessionGuard.tsx:146</span> (in <code>RequireRole</code>) and
+          <span class="ln">TwoFactorChallenge.tsx:183</span> — and the result was a loop, with the guard's own
+          fallback rendering "Redirecting…" for ever.</p>
         <p><strong><code>app/[locale]/(app)/admin/page.tsx</code> and <code>AdminDashboard</code> now
           exist.</strong> The page is a shell like the other three: no <code>/api/admin/*</code> endpoint is
           implemented, so its five cards name the five FR-K1 duties and say plainly that each is not
@@ -902,8 +910,8 @@ URL.revokeObjectURL(url)     // :50 — synchronous, immediately after</pre>
   router.replace('/login')
 }                            // DashboardShell.tsx:45-48</pre>
         <p>No <code>try</code>/<code>catch</code>. <code>logout()</code>
-          <span class="ln">endpoints.ts:290-299</span> uses <code>try</code>/<strong><code>finally</code></strong>,
-          not <code>catch</code> — the local session is dropped at <span class="ln">:297</span>, but the error
+          <span class="ln">endpoints.ts:292-301</span> uses <code>try</code>/<strong><code>finally</code></strong>,
+          not <code>catch</code> — the local session is dropped at <span class="ln">:299</span>, but the error
           still propagates. So on a network failure: the token is cleared, <code>await logout()</code>
           rejects, and <code>router.replace('/login')</code> <span class="ln">:47</span> <strong>never
           executes</strong>. The user is left looking at a dashboard that appears signed in, with no token
@@ -935,7 +943,7 @@ useEffect(() =&gt; {
   ...  if (cancelled) return                                 // :51
   return () =&gt; { cancelled = true }                          // :70-72
 }, [token])</pre>
-        <p>Precisely the pattern <span class="ln">SessionGuard.tsx:43-56</span> records as having deadlocked:
+        <p>Precisely the pattern <span class="ln">SessionGuard.tsx:51-64</span> records as having deadlocked:
           a ref guard that survives React's development double-invoke, combined with a <code>cancelled</code>
           flag that discards the first response. The unmount sets <code>cancelled</code>, so the in-flight
           verification's result is thrown away at <span class="ln">:51</span>; the remount finds
@@ -952,7 +960,7 @@ useEffect(() =&gt; {
           validates it against that union at the boundary. Both lookup tables are plain
           <code>Record</code>s, so an unrecognised value returns <code>undefined</code>:</p>
         <ul>
-          <li><span class="ln">onboarding.ts:32</span> → <span class="ln">SessionGuard.tsx:65</span> calls
+          <li><span class="ln">onboarding.ts:32</span> → <span class="ln">SessionGuard.tsx:73</span> calls
             <code>router.replace(undefined)</code></li>
           <li><span class="ln">onboarding.ts:44</span> → the guard at
             <span class="ln">TwoFactorChallenge.tsx:176</span> is <code>if (next !== null)</code>, and

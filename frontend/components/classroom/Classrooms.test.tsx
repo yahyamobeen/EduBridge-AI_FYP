@@ -5,6 +5,7 @@ import type { MeResponse, SpaceSummary } from '@/lib/api/types'
 import en from '@/messages/en.json'
 import ur from '@/messages/ur.json'
 import urLatn from '@/messages/ur-Latn.json'
+import { AppFrame } from '@/components/app/AppFrame'
 import { StudentClassrooms, TeacherClassrooms } from './Classrooms'
 
 /**
@@ -78,7 +79,8 @@ function renderIn(
 ) {
   return render(
     <NextIntlClientProvider locale={locale} messages={messages} onError={onError}>
-      {node}
+      {/* The (app) layout's frame: the identity check and the sidebar (Phase 6c). */}
+      <AppFrame>{node}</AppFrame>
     </NextIntlClientProvider>,
   )
 }

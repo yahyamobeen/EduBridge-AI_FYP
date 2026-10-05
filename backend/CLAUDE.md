@@ -16,7 +16,7 @@ JSON Web Tokens and hashes passwords with argon2id. Supabase Auth is deliberatel
 `app_user` holds `password_hash` itself.
 
 **Two routers**: `app/auth/routes.py` (21 routes — authentication, guardian, reference) and
-`app/classroom/routes.py` (34 routes — classroom Phases 2–6). `tdd.md` v0.4.0 specifies **83
+`app/classroom/routes.py` (38 routes — classroom Phases 2–6b). `tdd.md` specifies **87
 endpoints — 28 do not exist** (`Architecture/api-endpoints.md` §1). Classroom writes go through
 `app.*` functions only; never grant `app_backend` a write on `enrollment` or `join_code` to make a
 route easier (`Architecture/database.md`, invariant 9).
@@ -98,8 +98,9 @@ dispatched off the request thread.
 deleted only **after** the deleting transaction commits (`app/classroom/storage.py`:
 `track_upload`, `delete_after_commit`), so a rollback can orphan an object but never a row. Never
 import an implementation by name: `tests/integration/conftest.py` swaps the factory for an
-in-memory store per test, and a captured reference would reach real storage. A download reads
-the file's row under RLS before opening the object — do not add a path that skips it.
+in-memory store per test, and a captured reference would reach real storage. A download — and
+the five-minute view link (Phase 6b) — reads the file's row under RLS first; do not add a path
+that skips it, and never log a minted view URL: its signature is the credential.
 
 **Revocation writes commit before the exception is raised.** A lockout or a family revocation that
 is written and not committed is undone by the very response that reports it, because the exception
@@ -109,7 +110,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 - **Never edit an applied migration.** Add a new one. Filenames are
   `YYYYMMDDHHMMSS_snake_case_subject.sql` and run in filename order. Latest applied:
-  `20261004150000_classroom_files.sql` (2026-10-05, with `supabase db push`).
+  `20261005120000_submission_links.sql` (2026-10-05, with `supabase db push`).
 - **Changing a `RETURNS TABLE` or adding a parameter needs `DROP` then `CREATE`.** Adding a
   parameter *overloads* rather than replaces, and the existing call then matches both signatures
   and fails at runtime with "function name is not unique".
@@ -124,7 +125,7 @@ unwinds through `get_db`, which rolls back. Both call sites commit deliberately,
 
 ## 5. Testing
 
-50 test files: **22 in `tests/unit`**, **28 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-05).
+51 test files: **22 in `tests/unit`**, **29 in `tests/integration`** (`ls tests/*/test_*.py`, 2026-10-05).
 
 `tests/unit` must stay runnable with **no connection string, no engine and no live project** —
 that is why `tests/conftest.py` has no fixtures and why `gate.py` and `onboarding.py` avoid

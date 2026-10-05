@@ -425,14 +425,14 @@ export type AssignmentPage = { items: AssignmentSummary[]; next_cursor: string |
 /** The calling student's own work. `grade` and `feedback` are null until returned. */
 export type MySubmission = {
   body: string
-  link_url: string | null
   turned_in_at: string | null
   status: WorkStatus
   grade: number | null
   feedback: string | null
   returned_at: string | null
-  /** The student's own uploaded files (Phase 6). */
+  /** The student's own uploaded files (Phase 6) and links (Phase 6b). */
   files: FileMeta[]
+  links: LinkMeta[]
 }
 
 export type AssignmentDetail = AssignmentSummary & {
@@ -466,7 +466,8 @@ export type AssignmentUpdateRequest = {
   publish_at?: string
 }
 
-export type SubmissionDraftRequest = { body: string; link_url: string | null }
+/** Links are their own rows since Phase 6b (`addSubmissionLink`). */
+export type SubmissionDraftRequest = { body: string }
 
 /**
  * `details.reason` on a 400 from the submission endpoints: `graded` — the
@@ -497,10 +498,10 @@ export type SubmissionsResponse = { rows: SubmissionRow[] }
 /** One student's work for the teacher. `body` is null until it is turned in. */
 export type StudentWork = SubmissionRow & {
   body: string | null
-  link_url: string | null
   feedback: string
   /** Empty until the work is turned in, like `body`. */
   files: FileMeta[]
+  links: LinkMeta[]
 }
 
 // Phase 5 — the calendar
@@ -551,3 +552,26 @@ export type FileRefusalReason =
   | 'classroom_quota'
   | 'graded'
   | 'turned_in'
+  /** A view link was asked for an Office file: those are download-only. */
+  | 'not_viewable'
+
+// Phase 6b — links on a piece of work, and viewing in the browser
+
+/** A link on a student's work. The server stores `https://` links only. */
+export type LinkMeta = {
+  id: string
+  url: string
+  created_at: string
+}
+
+/**
+ * `details.reason` on a 400 from the link endpoints. A malformed link is
+ * `details.fields.url` instead.
+ */
+export type LinkRefusalReason = 'too_many_links' | 'graded' | 'turned_in'
+
+/**
+ * A short-lived link that shows a PDF or an image in a new tab, on the storage
+ * service's own domain. A bearer pass until `expires_at`: open it, never keep it.
+ */
+export type ViewLink = { url: string; expires_at: string }

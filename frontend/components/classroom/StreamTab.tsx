@@ -12,6 +12,7 @@ import {
   listAnnouncements,
   updateAnnouncement,
   uploadAnnouncementAttachment,
+  viewAttachment,
 } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
 import type { Announcement, AnnouncementUpdateRequest } from '@/lib/api/types'
@@ -400,6 +401,7 @@ function Post({
         heading={tf('attachments')}
         files={a.attachments}
         download={(f) => downloadAttachment(f.id)}
+        view={(f) => viewAttachment(f.id)}
         upload={canManage ? (file) => uploadAnnouncementAttachment(a.id, file) : undefined}
         remove={canManage ? (f) => deleteAttachment(f.id) : undefined}
         onChange={(attachments) => onChanged({ ...a, attachments })}

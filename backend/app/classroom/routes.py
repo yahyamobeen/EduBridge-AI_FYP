@@ -14,13 +14,21 @@ endpoint appears to need it, add a narrow `app.*` function instead.
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from starlette.concurrency import run_in_threadpool
 
 from app.auth.dependencies import AuthContext, authenticated
-from app.classroom import announcements, assignments, calendar, file_service, service, storage
+from app.classroom import (
+    announcements,
+    assignments,
+    calendar,
+    file_service,
+    links,
+    service,
+    storage,
+)
 from app.classroom.dependencies import AnyStudent, GatedStudent, Participant, Teacher
 from app.classroom.files import download_headers, read_bounded_body
 from app.classroom.schemas import (
@@ -40,6 +48,8 @@ from app.classroom.schemas import (
     JoinCodeResponse,
     JoinRequest,
     JoinResponse,
+    LinkMeta,
+    LinkRequest,
     MySubmission,
     PeopleResponse,
     SpaceCreateRequest,
@@ -50,6 +60,7 @@ from app.classroom.schemas import (
     SubjectsResponse,
     SubmissionDraftRequest,
     SubmissionsResponse,
+    ViewLink,
 )
 from app.core.config import get_settings
 from app.core.ratelimit import (
@@ -437,3 +448,47 @@ def delete_submission_file_endpoint(request: Request, file_id: UUID, ctx: GatedS
 def delete_attachment_endpoint(request: Request, file_id: UUID, ctx: Teacher) -> None:
     _write(request, ctx)
     file_service.remove_material(ctx.session, file_id)
+
+
+# ── Phase 6b: links on a piece of work, and viewing in the browser ──────────
+
+
+@router.post(
+    "/assignments/{assignment_id}/submission/links",
+    response_model=LinkMeta,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_link_endpoint(
+    request: Request, assignment_id: UUID, payload: LinkRequest, ctx: GatedStudent
+) -> LinkMeta:
+    _write(request, ctx)
+    return LinkMeta(**links.add_link(ctx.session, assignment_id, payload.url))
+
+
+@router.delete("/submission-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_link_endpoint(request: Request, link_id: UUID, ctx: GatedStudent) -> None:
+    _write(request, ctx)
+    links.remove_link(ctx.session, link_id)
+
+
+def _view(
+    request: Request, response: Response, ctx: AuthContext, kind: str, file_id: UUID
+) -> ViewLink:
+    enforce(request, bucket="file_download", limit=FILE_DOWNLOAD_LIMIT, subject=str(ctx.user_id))
+    # The body is a five-minute pass to the file: never cached on the way.
+    response.headers["Cache-Control"] = "private, no-store"
+    return ViewLink(**file_service.view_link(ctx.session, kind, file_id))  # RLS decides
+
+
+@router.get("/submission-files/{file_id}/view", response_model=ViewLink)
+def view_submission_file_endpoint(
+    request: Request, response: Response, file_id: UUID, ctx: Participant
+) -> ViewLink:
+    return _view(request, response, ctx, "submission", file_id)
+
+
+@router.get("/attachments/{file_id}/view", response_model=ViewLink)
+def view_attachment_endpoint(
+    request: Request, response: Response, file_id: UUID, ctx: Participant
+) -> ViewLink:
+    return _view(request, response, ctx, "material", file_id)

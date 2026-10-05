@@ -16,7 +16,10 @@ What a file must survive before it is stored:
     forced to match the detected type.
 
 Downloads are always `attachment` with a sandboxing CSP: a file is never
-rendered inside the application.
+rendered inside the application. Since Phase 6b a PDF or an image can also be
+VIEWED — in a new tab, on the storage service's own domain, through a short-lived
+link (`file_service.view_link`); Office files stay download-only (owner decision
+2026-10-05).
 """
 
 import hashlib
@@ -40,6 +43,9 @@ EXTENSION = {
     DOCX: "docx",
     PPTX: "pptx",
 }
+# What a browser can show by itself. Word and PowerPoint cannot be, and the
+# online viewers that could would hand a student's file to a third party.
+VIEWABLE = frozenset({"application/pdf", "image/png", "image/jpeg"})
 
 # A real document has dozens of zip entries; thousands is the shape of a zip
 # bomb or something that is not an Office file at all.
@@ -53,6 +59,7 @@ _MESSAGES = {
     "unsupported_type": (
         "Only PDF, PNG, JPEG, Word (.docx) and PowerPoint (.pptx) files are accepted."
     ),
+    "not_viewable": "This kind of file can only be downloaded.",
 }
 
 
@@ -139,16 +146,20 @@ def submission_key(space_id: UUID, student_id: UUID) -> str:
     return f"u/{space_id}/{student_id}/{uuid4().hex}"
 
 
-def download_headers(filename: str, size: int) -> dict[str, str]:
-    """`attachment`, an ASCII fallback name plus the exact UTF-8 one (RFC 6266)."""
+def content_disposition(filename: str, *, inline: bool = False) -> str:
+    """An ASCII fallback name plus the exact UTF-8 one (RFC 6266)."""
     ascii_name = (
         filename.encode("ascii", "ignore").decode().replace('"', "").replace("\\", "").strip()
         or "file"
     )
+    kind = "inline" if inline else "attachment"
+    return f"{kind}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+def download_headers(filename: str, size: int) -> dict[str, str]:
+    """Always `attachment`, in a sandbox: a download is never rendered by the app."""
     return {
-        "Content-Disposition": (
-            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
-        ),
+        "Content-Disposition": content_disposition(filename),
         "Content-Length": str(size),
         "Cache-Control": "private, no-store",
         "Content-Security-Policy": "default-src 'none'; sandbox",

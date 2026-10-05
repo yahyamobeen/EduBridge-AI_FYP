@@ -136,7 +136,7 @@
       <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
       <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
       the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
-      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, and files with their object store — classroom Phases 2–6), <code>app/core/</code> (configuration, the
+      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, and a student's links — classroom Phases 2–6b), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -146,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">41</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:64</span></div></div>
-        <div class="stat"><div class="n">55</div><div class="l">implemented routes · 21 auth + 34 classroom</div></div>
-        <div class="stat"><div class="n">28</div><div class="l">specified but missing · 83 in <code>tdd.md</code> v0.4.0, minus 55</div></div>
-        <div class="stat"><div class="n">30</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">50</div><div class="l">test files · 22 unit + 28 integration</div></div>
+        <div class="stat"><div class="n">42</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:75</span></div></div>
+        <div class="stat"><div class="n">59</div><div class="l">implemented routes · 21 auth + 38 classroom</div></div>
+        <div class="stat"><div class="n">28</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 59</div></div>
+        <div class="stat"><div class="n">31</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">51</div><div class="l">test files · 22 unit + 29 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -377,6 +377,11 @@ flowchart TB
       the network; a download reads the row under RLS before opening the object. The upload handlers are the only
       <code>async</code> routes — they must read the stream — and still run every database step in the threadpool. The
       object store is <code>classroom/storage.py</code>, below.</p>
+      <p>Phase 6b adds <strong>links</strong> — rows of their own (<span class="ln">20261005120000</span>), up to five per
+      piece of work, written only through <code>app.add_submission_link</code> / <code>remove_submission_link</code> and
+      read under the file's policy (<code>classroom/links.py</code>) — and <strong>viewing</strong>: after the same row read
+      as a download, <code>file_service.view_link</code> signs a five-minute link that opens a PDF or an image on the
+      storage service's domain, never in the application's pages. Office files are download-only.</p>
     </section>
 
     <section class="prose">
@@ -957,24 +962,25 @@ flowchart TB
       </div>
 
       <h3>Object storage <span class="ln">app/classroom/storage.py</span> (classroom Phase 6)</h3>
-      <p>The email seam's shape: a <code>Protocol</code> <span class="ln">storage.py:46</span> with <code>put</code>,
-      <code>open</code> and <code>delete_many</code>; <code>InMemoryObjectStorage</code> for tests and local work;
+      <p>The email seam's shape: a <code>Protocol</code> <span class="ln">storage.py:47</span> with <code>put</code>,
+      <code>open</code>, <code>delete_many</code> and <code>view_url</code> (a five-minute SigV4 link, signed locally with an explicit
+      <code>signature_version="s3v4"</code> — botocore's default Version 2 is refused by Supabase); <code>InMemoryObjectStorage</code> for tests and local work;
       <code>S3ObjectStorage</code> — Supabase Storage over S3 through <code>boto3</code>, path-style, checksums only when
       required, imported only when <code>STORAGE_PROVIDER=s3</code>; and a cached factory,
-      <code>get_object_storage</code> <span class="ln">:150</span>. Settings: <code>STORAGE_PROVIDER</code>
+      <code>get_object_storage</code> <span class="ln">:181</span>. Settings: <code>STORAGE_PROVIDER</code>
       (<code>memory</code> by default, refused in production), the endpoint, region and <strong>storage-only</strong> S3
       keys — never the project secret key — <code>STORAGE_BUCKET</code> and <code>MAX_UPLOAD_BYTES</code>
       <span class="ln">config.py:165-185</span>.</p>
       <table>
         <thead><tr><th>Helper</th><th>The object is deleted…</th></tr></thead>
         <tbody>
-          <tr><td><code>delete_now</code> <span class="ln">:179</span></td><td>at once — the database refused the row a moment after the object was stored</td></tr>
-          <tr><td><code>track_upload</code> <span class="ln">:185</span></td><td>only if the transaction <strong>rolls back</strong></td></tr>
-          <tr><td><code>delete_after_commit</code> <span class="ln">:190</span></td><td>only once the deleting transaction <strong>commits</strong> — a failed request never loses a file whose row survived</td></tr>
+          <tr><td><code>delete_now</code> <span class="ln">:210</span></td><td>at once — the database refused the row a moment after the object was stored</td></tr>
+          <tr><td><code>track_upload</code> <span class="ln">:216</span></td><td>only if the transaction <strong>rolls back</strong></td></tr>
+          <tr><td><code>delete_after_commit</code> <span class="ln">:221</span></td><td>only once the deleting transaction <strong>commits</strong> — a failed request never loses a file whose row survived</td></tr>
         </tbody>
       </table>
-      <p>Two <code>Session</code> hooks carry it out (<code>after_commit</code> <span class="ln">:196</span>,
-      <code>after_soft_rollback</code> <span class="ln">:203</span>); deletion runs on a two-worker pool after the
+      <p>Two <code>Session</code> hooks carry it out (<code>after_commit</code> <span class="ln">:227</span>,
+      <code>after_soft_rollback</code> <span class="ln">:234</span>); deletion runs on a two-worker pool after the
       response and is <strong>logged, never raised</strong>, and the lifespan drains it at shutdown
       <span class="ln">main.py:72-75</span>.</p>
       <div class="callout warn">
@@ -987,7 +993,7 @@ flowchart TB
         <span class="t">Supabase's S3 endpoint is not S3 in two ways (real-bucket smoke test, 2026-10-05)</span>
         A <code>DeleteObjects</code> body is read only when it is labelled <code>application/xml</code>, which botocore
         does not do — every deletion failed with <code>400 "must have required property 'Body'"</code>, silently;
-        <code>_label_xml_body</code> <span class="ln">:137</span> adds the header before signing. And a missing object's
+        <code>_label_xml_body</code> <span class="ln">:168</span> adds the header before signing. And a missing object's
         <code>NoSuchKey</code> sits in a namespaced <code>&lt;Error&gt;</code> that botocore parses to an empty code, so
         <code>open</code> tests the 404. Both pinned by <code>TestS3Requests</code>, without a network.
       </div>
