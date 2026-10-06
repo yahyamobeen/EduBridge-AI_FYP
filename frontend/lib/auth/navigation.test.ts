@@ -27,9 +27,17 @@ describe('the parent surface is read-only', () => {
     ['practice', /practice/],
     ['quizzes', /quiz/],
     ['subjects', /subject|curriculum/],
+    // Classroom Phase 8: the parent reaches the classrooms, never the class chat.
+    ['class chat', /chat/],
   ])('exposes no %s control', (_label, pattern) => {
     expect(parentHrefs.filter((h) => pattern.test(h))).toEqual([])
     expect(parentKeys.filter((k) => pattern.test(k))).toEqual([])
+  })
+
+  it("reaches the child's classrooms through the read-only overview (classroom Phase 8)", () => {
+    // prd.md CL-10: deadlines, turn-in status and returned grades — and its own
+    // page, never a classroom's, so no classroom control comes with it.
+    expect(navFor('parent')).toContainEqual({ key: 'classrooms', href: '/parent/classroom' })
   })
 })
 
@@ -94,9 +102,13 @@ describe('the map itself', () => {
     //    `/settings` failed here naming the item, and the alternation was only
     //    widened afterwards. A route added to this regex before it exists is a
     //    404 this test then certifies as fine, so the order matters.
+    //
+    //    `classroom` joined the same way in classroom Phase 2 (2026-10-04): the
+    //    student's `/classroom` failed here first, naming `myClasses`. The
+    //    teacher's `/teacher/classroom` already matched the `teacher` prefix.
     for (const item of Object.values(NAV_BY_ROLE).flat()) {
       expect(item.href, item.key).toMatch(
-        /^\/(dashboard|teacher|parent|admin|settings|coming-soon\/)/,
+        /^\/(dashboard|teacher|parent|admin|settings|classroom|coming-soon\/)/,
       )
     }
   })

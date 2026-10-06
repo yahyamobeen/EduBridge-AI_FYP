@@ -13,11 +13,13 @@ Every count here has the command that produced it beside it. Run from `frontend/
 
 | Measure | Value | Command |
 |---|---|---|
-| Pages | **22** | `find app -name "page.tsx" \| wc -l` |
+| Pages | **30** (4 added by classroom Phase 2, 2 by Phase 5, 1 by Phase 8) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **24** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **45** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **429**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **785**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+
+*Re-measured 2026-10-06 (the roster card removed).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -53,7 +55,7 @@ app/
     not-found.tsx                localized 404, renders its own chrome (:15-38)
     (site)/    layout.tsx        TopNav + main + Footer (:12-22)
     (auth)/    layout.tsx        bare main, no chrome (:11-17)
-    (app)/     layout.tsx        bare main, no chrome (:10-16)
+    (app)/     layout.tsx        AppFrame: the guard and the sidebar, mounted once (:15-21)
 ```
 
 `app/[locale]/layout.tsx:17-19` pre-renders all three locales at build time via `generateStaticParams`. `:38` sends an unknown locale to `notFound()` rather than falling back to English — a student who lands on `/pk/login` is told the page is wrong instead of being handed a language they may not read. `:41` calls `setRequestLocale`, without which every page opts into dynamic rendering; that static prerendering is what the Content Security Policy section below turns on.
@@ -97,68 +99,249 @@ Ten pages:
 | `/reset-password` | `(auth)/reset-password/page.tsx` | |
 | `/guardian/confirm` | `(auth)/guardian/confirm/page.tsx` | Where the invitation email lands; authenticated as the **parent** (`:16-21`) |
 
-#### `(app)` — the authenticated application, and why it renders no chrome
+#### `(app)` — the authenticated application, and the frame it keeps mounted
 
-`app/[locale]/(app)/layout.tsx:10-16` renders a bare `<main>`. The reason is at `:3-9`:
+`app/[locale]/(app)/layout.tsx:15-21` renders `<AppFrame>` (`components/app/AppFrame.tsx:15`) inside
+the `<main>`: the identity check (`SessionGuard`) and the role's sidebar (`DashboardShell`), **once**,
+with every `(app)` page rendered inside them. Every one of the 11 pages in the group has a sidebar,
+so none gains or loses one.
 
-> No chrome here: each dashboard renders its own sidebar through `DashboardShell`, because the sidebar's contents depend on the role, which is only known once `SessionGuard` has resolved the identity.
-
-This is the structural consequence of the guard being a **client-side, render-prop** component. The role arrives from `GET /auth/me` after mount. A layout is rendered above the page, before that answer exists, and a server layout cannot read it at all. Putting a sidebar there would mean either rendering an empty shell and then filling it — a visible layout shift on every dashboard entry — or picking a default role, which is exactly the copy-paste mistake `navigation.ts` exists to prevent. So the chrome moves *inside* the guard, where `me` is already resolved, and the layout does nothing but reserve the flex column.
+⚠️ **Until classroom Phase 6c (2026-10-05) the layout rendered a bare `<main>`, on purpose**: the
+sidebar depends on the role, known only once the guard has resolved the identity, so each page wrapped
+itself in its own `SessionGuard` and `DashboardShell`. The cost, reported by the owner: **every
+navigation unmounted the sidebar, blanked the screen to "Loading…" and built a new one.** The frame
+now resolves the identity once and stays mounted. The sidebar's subtitle is one per user — a
+student's board, class and group; anyone else's role (`AppFrame.tsx:19-29`) — rather than one per
+page, and the two per-page subtitle keys that fed it were removed. Each page still declares its own
+roles with `RequireRole` (below). The layout itself stays a server component; `AppFrame` is the
+client boundary.
 
 Three pages, one per role that has a dashboard:
 
 | Route | File | Component | `allow` |
 |---|---|---|---|
-| `/dashboard` | `(app)/dashboard/page.tsx:13-17` | `StudentDashboard` | `['student']` — `components/app/Dashboards.tsx:34` |
-| `/teacher` | `(app)/teacher/page.tsx:13-17` | `TeacherDashboard` | `['teacher']` — `Dashboards.tsx:80` |
-| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:103` |
-| `/admin` | `(app)/admin/page.tsx:13-17` | `AdminDashboard` | `['admin']` — `Dashboards.tsx:145` |
+| `/dashboard` | `(app)/dashboard/page.tsx:13-17` | `StudentDashboard` | `['student']` — `components/app/Dashboards.tsx:29` |
+| `/teacher` | `(app)/teacher/page.tsx:13-17` | `TeacherDashboard` | `['teacher']` — `Dashboards.tsx:70` |
+| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:99` |
+| `/admin` | `(app)/admin/page.tsx:13-17` | `AdminDashboard` | `['admin']` — `Dashboards.tsx:141` |
 
 **`/admin` was built in phase 1b**, which closes defect **A6**. Administrators reach it after signing
 in at an unlisted path served by `(auth)/admin-login/page.tsx` — see *The unlisted administrator
 login* below.
 
-The dashboards are shells. `Dashboards.tsx:8-19` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:144-185`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary.
+**The classroom pages (classroom Phase 2, 2026-10-04).** Four more `(app)` pages, each a thin server
+page (`setRequestLocale`, the `settings/page.tsx` pattern) rendering a client component with an
+**exact** `allow` list — one route per role, so the RBAC boundary is a route boundary:
+
+| Route | File | Component | `allow` |
+|---|---|---|---|
+| `/classroom` | `(app)/classroom/page.tsx` | `StudentClassrooms` — list + join form | `['student']` |
+| `/classroom/[spaceId]` | `(app)/classroom/[spaceId]/page.tsx` | `StudentClassroom` | `['student']` |
+| `/teacher/classroom` | `(app)/teacher/classroom/page.tsx` | `TeacherClassrooms` — list + create form | `['teacher']` |
+| `/teacher/classroom/[spaceId]` | `(app)/teacher/classroom/[spaceId]/page.tsx` | `TeacherClassroom` | `['teacher']` |
+| `/classroom/calendar` | `(app)/classroom/calendar/page.tsx` | `StudentCalendar` (classroom Phase 5) | `['student']` |
+| `/teacher/classroom/calendar` | `(app)/teacher/classroom/calendar/page.tsx` | `TeacherCalendar` (classroom Phase 5) | `['teacher']` |
+| `/parent/classroom` | `(app)/parent/classroom/page.tsx` | `ParentClassrooms` (classroom Phase 8) — read-only | `['parent']` |
+
+The two list pages prerender in all three locales; the two `[spaceId]` pages have no
+`generateStaticParams` and render on demand, because the id is per user and the data is fetched in
+the browser (the access token lives only in client memory). The client refuses a non-UUID id without
+making a request. Since classroom Phase 5 they also read `?assignment=<id>` from `searchParams` (on
+the server, so no `useSearchParams` and no Suspense boundary) and open Classwork on that assignment —
+the calendar's links; a non-UUID value is ignored. The two `calendar` pages are a static segment, so
+they win over the sibling `[spaceId]`, and prerender like the list pages; there is no new navigation
+entry — each list page links to its calendar. Components live in `components/classroom/`:
+
+- **`ClassroomView.tsx`** — one classroom for both roles. ⚠️ **Owner controls (join code, rename,
+  archive, remove) render from the server's `viewer_role === 'owner' && can_manage`, never from the
+  session role.** A teacher whose subject scope was revoked is still `owner` but gets no controls and
+  is told why. Not the security boundary — the database is — but `prd.md` §4.2 forbids rendering a
+  control the caller cannot use. Since classroom Phase 3 its sections are tabs — **Stream** (the
+  default), **Classwork** (Phase 4), **Chat** (Phase 7) and **People** — built on `components/ui/Tabs.tsx` (below); later phases add theirs to the
+  `TABS` constant. On People the owner can also **mute** a student in the chat (and unmute them);
+  the "Muted in chat" label comes from the server's `muted`, which only the owner receives.
+- **`StreamTab.tsx`** (classroom Phase 3) — announcements, newest first. **Nothing here filters
+  scheduled posts**: a member never receives one, because the database withholds it
+  (`announcement_member_read`), so the owner alone sees the "Scheduled for" badge. Bodies render as
+  plain text in `whitespace-pre-wrap` — never HTML, never auto-linked. The composer and the edit form
+  offer *post now* or *schedule* (a `datetime-local` whose `min` is now); a published post can be
+  edited but not rescheduled, matching the API. "Load older" follows `next_cursor` and **merges by
+  id**, because a post published between two requests can appear on both pages. Posting is offered
+  only for the owner of a non-archived classroom (`canPost`); errors branch on `ApiError.code` and
+  `details.fields`, never on `message`.
+- **`ClassworkTab.tsx`** (classroom Phase 4) — assignments, newest first, with "Load older"
+  merging by id as the stream does. Opening one replaces the list **in place** with
+  `AssignmentView.tsx`, and "Back" returns to the list kept in step with any change made inside — no
+  new route, so the RBAC boundary stays the two existing classroom pages. Nothing filters: a member
+  never receives a scheduled assignment, and each member's status is **derived by the server**
+  (`StatusChip`, in `AssignmentParts.tsx`, only names and colours it).
+- **`AssignmentForm.tsx`** — create and edit. Points are validated as a whole number 1–1000
+  **before** sending; the due date and schedule go out as ISO instants with an offset
+  (`lib/datetime.ts`); the chapter picker reads `/reference/subjects/{id}/chapters` and is replaced by
+  a note when the subject has none. An edit sends only what changed, with `null` to clear an
+  optional field — the API's contract. **Creating can carry files** (Phase 6b): they are checked and
+  held, then uploaded one by one once the assignment exists — an upload needs its id, and one
+  multi-file request is the multipart body the server refuses. A file that fails does not undo the
+  assignment: `onSaved` names it, and `ClassworkTab` opens the new assignment with those names, where
+  "Add a file" is the retry.
+- **`SubmissionPanel.tsx`** — the student's own work, in three states read from the server's answer
+  (editing, turned in, returned). Unsaved edits are saved **before** turning in, not lost behind it.
+  A refusal gets its own message, chosen by `details.reason` (`graded`, `turned_in`). Since Phase 6b
+  only the written answer is a draft: files and links are saved the moment they are added, through
+  `WorkAttachments`, and the old single link field is gone.
+- **`GradingTable.tsx`** — every active member, with "Review" opening their work inline. A draft is
+  never shown (the server returns nothing until it is turned in). A grade above the points is
+  refused before sending; "Save and return" sends `return_to_student: true`, and the row updates in
+  place from the response. In an archived classroom the work is still readable and grading is
+  hidden, matching the database, which refuses it.
+- **`ChatTab.tsx`** (classroom Phase 7) — the class chat. It **says it is class-public** above the
+  messages ("Everyone in this class can read what is written here"). Names come from the roster
+  (`getPeople`), the one place the database releases them; an author the roster no longer lists
+  refreshes it **once** and is then a "former member". ⚠️ **The Teacher badge comes from
+  `people.owner.user_id`, never from a name**, so a student who calls themselves "Sir Ahmed" gets
+  none. Bodies are plain text (`whitespace-pre-wrap`). Enter sends and Shift+Enter starts a new
+  line — never while an input method is composing, which matters for Urdu. A student who cannot
+  post sees why instead of the box: archived, muted, or locked; a post refused before the next poll
+  noticed (`details.reason`) shows the same reason, and a `RATE_LIMITED` one how long to wait; a
+  failed send keeps the draft. The owner gets a per-message Delete behind `ConfirmInline` — the
+  message stays on their screen, marked deleted, because the server keeps it for them — and a
+  Lock / Unlock chat button (`PATCH /spaces/{id}` with `chat_locked`), and can still post while
+  locked.
+- **`useChatPoll.ts`** (classroom Phase 7) — the poll behind it. A `setTimeout` **chain**, never
+  `setInterval`, every 5 s (`POLL_MS`), so two polls never overlap on a slow connection; nothing
+  while the tab is hidden, and an immediate catch-up when it is shown again. The cursor is the
+  server's `server_time` — the database clock, never this device's. Messages are a `Map` by id, so
+  the overlap window's repeats merge away; `deleted_ids` removes a member's copy and marks the
+  teacher's; `reset` replaces everything with the newest page. A 429 waits as long as `retry_after`
+  says; a 403 (removed, gated) stops polling and says the chat is unavailable; anything else keeps
+  what is on screen and tries again.
+- **`JoinClassForm.tsx`** — branches on `details.reason` (`invalid_code`, `class_mismatch` with the
+  class named, `classroom_full`) and on `GATE_PENDING` / `RATE_LIMITED`; never on `message`.
+- **`CreateClassForm.tsx`** — board → class → subject from `/reference/enums` and
+  `/reference/subjects`; changing board or class discards the chosen subject.
+- **`ConfirmInline.tsx`** — the second step before remove, leave, archive and turning joining off.
+  Inline rather than a `<dialog>`: jsdom implements no `showModal`, so a dialog could not be tested.
+- **`styles.ts`** — the card and button class strings `Settings.tsx` uses, shared by the classroom
+  components.
+
+Two shared pieces arrived with the stream:
+
+- **`components/ui/Tabs.tsx`** — a WAI-ARIA tablist with automatic activation: one tab in the Tab
+  order, arrows move, Home/End jump. ⚠️ **The arrow keys follow the screen, not the source order**:
+  under `dir="rtl"` the first tab is drawn on the right, so ArrowRight moves towards the *start* of
+  the list. Direction is read from the element's computed style rather than the locale, so the
+  component is correct wherever it is mounted. Callers give each panel `id={tabPanelId(key)}`,
+  `role="tabpanel"` and `aria-labelledby={tabId(key)}`.
+- **`lib/datetime.ts`** — the only bridge between `<input type="datetime-local">` (wall-clock time,
+  no offset) and the API (ISO instants **with** an offset; the backend refuses a naive one).
+  ECMAScript parses an offset-less date-time as local time, so the conversion the backend will not
+  guess is made in the browser, where the user's zone is actually known.
+
+The calendar (classroom Phase 5):
+
+- **`components/classroom/Calendar.tsx`** — `StudentCalendar` / `TeacherCalendar` (exact `allow`),
+  `CalendarView` (month navigation and loading) and `CalendarMonth` (the grid). It decides nothing
+  about visibility: `GET /calendar` returns only what the caller could already see. Loading is
+  derived from the month the data belongs to rather than set inside the effect, so changing month
+  never calls `setState` synchronously in an effect. **One DOM, two layouts**: seven columns from
+  `md` up; below that, only the days that have entries, as a list. Each day carries its full date in
+  `sr-only` text, so a screen reader never hears a bare number. Entries link back into the
+  classroom — an assignment to `?assignment=` (Classwork), an announcement to the classroom itself.
+- **`lib/calendar.ts`** — `monthGrid` (6 × 7 local days, weeks from Monday), `gridRange` (the
+  instants at the grid's edges — always within the API's 62 days), `dayKey`, `addMonths`. All local:
+  the grid is the user's wall calendar, never UTC's. `lib/calendar.test.ts` asserts with local
+  getters, so it holds in any time zone.
+
+Files (classroom Phases 6 and 6b):
+
+- **`components/classroom/Files.tsx`** — `FileSection`, a teacher's attachments on a stream post
+  (`StreamTab.tsx`) and on an assignment (`AssignmentView.tsx`), with add and remove for the owner;
+  and `FileItem` (`:58`), one file's row — download, **View**, remove — which `WorkAttachments`
+  shares. Add and remove appear only when the caller passes `upload` / `remove`. **The server is the check** — it reads the type from the bytes
+  and enforces every limit; the client refuses only what is certain to fail (a wrong extension, an
+  empty file, over 5 MB) so nobody waits on a doomed upload. A refusal is explained by
+  `details.reason` through `REASON_KEY` (`Files.tsx:25`), never by `message`; removing asks first
+  (`ConfirmInline`). **View** (Phase 6b) appears only for a PDF or an image (`lib/files.ts`,
+  `isViewable`): it asks for a five-minute link and opens it in a new tab. Office files are
+  download-only (owner decision 2026-10-05).
+- **`components/classroom/WorkAttachments.tsx`** (Phase 6b) — a student's files **and links** in one
+  list, in the order added, used in `SubmissionPanel.tsx` (editable only while the work is a draft)
+  and `GradingTable.tsx` (the teacher's read-only review). One **"+ Add"** menu offers File (the
+  hidden picker) or Link (an inline https field), like Google Classroom. It is a WAI-ARIA menu
+  button: ArrowDown opens it on the first item, arrows/Home/End move, Escape closes it and returns
+  focus, Tab or a click elsewhere closes it. A link renders as an anchor only if it is `https://`,
+  with `rel="noopener noreferrer"`, and a non-https link is refused before it is sent; a refusal is
+  `details.fields.url` or `details.reason` (`too_many_links`, `graded`, `turned_in`).
+- **`lib/files.ts`** (Phase 6b) — the client-side checks the three file pickers share:
+  `earlyRefusal` (extension, 5 MB, empty) and `isViewable`.
+- **`lib/download.ts`** — `saveBlob`: a download is always **saved, never opened** inside the
+  application (`prd.md` CL-8). The `BackupCodes.tsx` technique — a temporary object URL on a
+  temporary link, revoked on the next tick — in one place for the classroom. `openInNewTab`
+  (`:27`, Phase 6b) opens the tab **synchronously inside the click** — a pop-up blocker allows that
+  and not a window opened after an await — cuts `opener`, then points the tab at the fetched link;
+  if the link cannot be had, it closes the blank tab.
+
+The parent's overview (classroom Phase 8):
+
+- **`components/classroom/ParentClassrooms.tsx`** — `/parent/classroom`, `allow={['parent']}`. One
+  call, `GET /parent/classrooms`, rendered as each child, then each classroom (subject and teacher,
+  an "Archived" label where it applies), then its assignments: deadline, the server-derived status
+  (`StatusChip`, shared with Classwork) and a grade **only as the server sends it**, which is once
+  returned. ⚠️ **Nothing to click**: no link into a classroom, no tab, no button — a classroom's own
+  pages carry the stream, the chat and classmates' names, none of which a parent may see — and a
+  test asserts there is no link, button or tab on the page. It says, above everything, what it
+  never shows. A linked child in no classroom, and a parent with no linked child, each get a sentence
+  saying so. The sidebar marks it current by the longest-prefix rule (`/parent/classroom` beats the
+  dashboard's `/parent`).
+
+The dashboards are shells. `Dashboards.tsx:9-22` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:188`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary — and, **since classroom Phase 6c, the classroom card**: `ClassroomsCard` (`components/app/ClassroomsCard.tsx:24`) replaced the student's "My classes" and the teacher's "My classrooms" placeholders, which kept saying "Not available yet" for a feature built in Phase 2. It lists up to three active classrooms from `GET /api/spaces` (the teacher's with member counts), says what to do when there are none — join with a code, or create the first — and, if the request fails, still offers the way in; it never shows the pill. The teacher's "Class roster" placeholder was **removed** (owner decision, 2026-10-06): its body promised "who has not joined yet", which no endpoint can know, and each classroom's People tab already is the roster. The teacher's classroom card takes the whole row (`span={12}`), and `Dashboards.test.tsx` pins both.
 
 ---
 
-## `SessionGuard` — the gate on every authenticated route
+## `SessionGuard` and `RequireRole` — the gate on every authenticated route
 
-`components/app/SessionGuard.tsx`.
+`components/app/SessionGuard.tsx`. Since classroom Phase 6c the gate is in two parts: `SessionGuard`
+(`:43`) lives in the `(app)` layout through `AppFrame` and answers *who is this, and is their journey
+complete?*; `RequireRole` (`:132`) lives in each page and answers *may this role see this page?*.
 
 ### Shape
 
-It is a **render-prop** component, not a wrapper and not a hook:
+Both are **render-prop** components, not wrappers and not hooks:
 
 ```ts
-// components/app/SessionGuard.tsx:29-36
-export function SessionGuard({
-  children,
-  allow,
-}: {
-  children: (me: MeResponse) => ReactNode
-  /** Roles permitted on this route. */
-  allow: Role[]
-})
+// components/app/SessionGuard.tsx:43, :132
+export function SessionGuard({ children }: { children: (me: MeResponse) => ReactNode })
+export function RequireRole({ allow, children }: { allow: Role[]; children: (me: MeResponse) => ReactNode })
 ```
 
-`children` is a *function* of the resolved identity. That shape is load-bearing: the page body cannot be constructed at all until `me` exists, so there is no branch on which a component can render with an undefined user. Every call site passes an inline arrow — `Dashboards.tsx:35`, `:81`, `:109`.
+`children` is a *function* of the resolved identity. That shape is load-bearing: the page body cannot be
+constructed at all until `me` exists, so there is no branch on which a component can render with an
+undefined user. `SessionGuard` shares `me` through a context (`useMe`, `:121`); `RequireRole` reads it
+from there, so a page's role check makes no second request. Call sites: `Dashboards.tsx:29`, `:70`,
+`:99`, `:141`, and the Settings, classroom and calendar pages.
 
 ### The three checks, in order
 
-One identity check per mount, in a `useEffect` with an empty dependency array (`:42-97`):
+1. **No session → `/login`.** `SessionGuard`, `:77-81`: any failure to establish identity is treated as
+   "not signed in". The client has already attempted a refresh by this point.
+2. **Onboarding incomplete → the step that completes it.** `SessionGuard`, `:72-75`: if
+   `identity.onboarding_state !== 'active'`, `router.replace(routeForOnboardingState(…))`.
+3. **Wrong role → that role's own dashboard.** `RequireRole`, `:145-150`: a parent who opens
+   `/dashboard` is sent to `/parent`, not to an error page, and sees "Redirecting…" meanwhile — never
+   the page.
 
-1. **No session → `/login`.** Any failure to establish identity is caught at `:73-77` and treated as "not signed in". The client has already attempted a refresh by this point, so there is nothing further to recover from.
-2. **Onboarding incomplete → the step that completes it.** `:64-67`: if `identity.onboarding_state !== 'active'`, `router.replace(routeForOnboardingState(identity.onboarding_state, identity.role))` and return.
-3. **Wrong role → that role's own dashboard.** `:68-71`: if `!allow.includes(identity.role)`, `router.replace(dashboardFor(identity.role))` and return. A parent who opens `/dashboard` is sent to `/parent`, not to an error page.
+**The identity is re-read on every navigation** — the effect is keyed on the path (`:50-99`) — because
+onboarding is not monotonic (below). What changed in Phase 6c is only what is on screen meanwhile: the
+page and the sidebar stay while the re-check runs (stale while revalidating), and a redirect follows
+if the state went backwards. Tests: `SessionGuard.test.tsx:62-90` (the three checks and the happy path),
+`:98-132` (the lapsed trial, the re-read on navigation, and the page staying on screen meanwhile).
 
-Only if all three pass does `:72` call `setMe(identity)`, and only then does `:113` render `children(me)`.
+### It fails closed on first entry
 
-Each of the four cases has a test: `SessionGuard.test.tsx:49-53`, `:55-59`, `:61-65`, `:67-72`.
-
-### It fails closed on every path
-
-`:99-111`: while `me === null`, the component renders a `role="status"` region and **no page content** — `checked ? t('redirecting') : t('loading')`. There is no branch that renders `children` before the identity resolves, no `me ?? fallbackUser`, and no optimistic path. A hung request renders "Loading…" forever; a rejected request renders "Redirecting…" and navigates. Neither shows a page. `SessionGuard.test.tsx:104-111` asserts that a permanently pending promise produces no page content.
+`:101-115`: while there is no identity yet, `SessionGuard` renders a `role="status"` region and **no
+page content** — `checked ? t('redirecting') : t('loading')`. There is no `me ?? fallbackUser` and no
+optimistic path. This is now the **only** blank screen: a full load or a refresh. `SessionGuard.test.tsx:134-140`
+asserts that a permanently pending first check produces no page content.
 
 ### It is **not** a security control
 
@@ -215,19 +398,19 @@ And `dashboardFor` (`:13-22`):
 
 Three functions read that table:
 
-- `routeForOnboardingState(state, role)` (`:31-33`) — for a caller that has both. `SessionGuard.tsx:65`.
+- `routeForOnboardingState(state, role)` (`:31-33`) — for a caller that has both. `SessionGuard.tsx:73`.
 - `pendingOnboardingRoute(state)` (`:43-45`) — returns `null` for `active`. Exists so a caller that has a state but **no role** — the two-factor challenge, whose response carries `onboarding_state` and nothing else (`lib/api/types.ts:119-124`) — can route without inventing one. `TwoFactorChallenge.tsx:175`, `TwoFactorEnrollment.tsx:136`, `VerifyEmail.tsx:61`.
 - `isOnboardingComplete(state)` (`:54-56`) — a named predicate for `state === 'active'`.
 
 ### It is **not monotonic**
 
-This is the rule that makes the guard different from the obvious implementation, recorded at `onboarding.ts:47-53` and again at `SessionGuard.tsx:13-18`:
+This is the rule that makes the guard different from the obvious implementation, recorded at `onboarding.ts:47-53` and again at `SessionGuard.tsx:21-29`:
 
 > A student reaches `active`, uses the app for fourteen days, and then the trial lapses and the server puts them back into `plan_selection_pending`.
 
 Onboarding is a **state**, not a **checklist**. A user moves *backwards* through it. Any consumer that caches `active` — a context set once on login, a `hasOnboarded` boolean in local storage, a guard written as "check once, then trust" — strands that user on a page they no longer have rights to, with every API call returning 403 `SUBSCRIPTION_REQUIRED` and no route out.
 
-The defence is that the state is re-read on **every mount** and never remembered across one. `SessionGuard.test.tsx:90-101` asserts exactly this: it renders the guard with an `active` student, unmounts, flips the mock to `plan_selection_pending`, renders again, and asserts both the redirect and that `getMe` was called twice.
+The defence is that the state is re-read on **every navigation** and never remembered across one (until classroom Phase 6c, on every mount — each page had its own guard). `SessionGuard.test.tsx:106-117` asserts exactly this: it renders the guard with an `active` student, flips the mock to `plan_selection_pending`, moves to another path, and asserts both the redirect and that `getMe` was called twice; `:119-132` asserts the page is the same node, not a "Loading…", while the re-check is in flight.
 
 The transport client carries the same rule at a lower level: a 403 `SUBSCRIPTION_REQUIRED` on any request redirects to `/onboarding/plan` (`lib/api/client.ts:186-190`), so a trial that lapses *mid-session* is caught without waiting for a remount.
 
@@ -239,19 +422,28 @@ The transport client carries the same rule at a lower level: a 403 `SUBSCRIPTION
 
 > THIS FILE IS AN RBAC BOUNDARY, not a styling concern.
 
-`NAV_BY_ROLE` (`:44-75`) is a `Record<Role, NavItem[]>`. `DashboardShell` builds every sidebar from it (`components/app/DashboardShell.tsx:41`, rendered at `:69-85`) and from nothing else. That single-source construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no per-role markup to paste into.
+`NAV_BY_ROLE` (`:50-115`) is a `Record<Role, NavItem[]>`. `DashboardShell` builds every sidebar from it (`components/app/DashboardShell.tsx:41`, rendered at `:69-85`) and from nothing else. That single-source construction is the mechanism: an item cannot leak across roles by copy-paste, because there is no per-role markup to paste into.
 
 Three decisions it encodes, each of which a shared component tree makes easy to get wrong:
 
-**(a) The parent surface is read-only.** `:67-73` — dashboard, my child, progress, how to help, settings, help. No tutor, no session replay, no planner write. The supplied mockups shipped **one student sidebar pasted into all three dashboards**, which handed parents a "Play Session" button that replays a child's AI tutor conversation. `GET /api/tutor/sessions/{id}` is student-owner-only and the requirements forbid a parent reading chat content — so that control was not a dead link, it was a privacy violation with a button on it.
+**(a) The parent surface is read-only.** `:76-86` — dashboard, my child, classrooms (the read-only overview, classroom Phase 8), progress, how to help, settings, help. No tutor, no session replay, no planner write. The supplied mockups shipped **one student sidebar pasted into all three dashboards**, which handed parents a "Play Session" button that replays a child's AI tutor conversation. `GET /api/tutor/sessions/{id}` is student-owner-only and the requirements forbid a parent reading chat content — so that control was not a dead link, it was a privacy violation with a button on it.
 
-**(b) The teacher surface has no tutor entry.** `:56-66`. The requirements once granted teachers tutor access "for own testing" while `POST /api/tutor/ask` has always been scoped to gate-verified students. The technical design document won.
+**(b) The teacher surface has no tutor entry.** `:64-75`. The requirements once granted teachers tutor access "for own testing" while `POST /api/tutor/ask` has always been scoped to gate-verified students. The technical design document won.
 
-**(c) The student surface must expose My Classes.** `:52`. Students are guaranteed the right to see who can view them and to leave any space at any time. No mockup had an entry for it, and a right with no route to it is not a right.
+**(c) The student surface must expose My Classes.** `:60`. Students are guaranteed the right to see who can view them and to leave any space at any time. No mockup had an entry for it, and a right with no route to it is not a right.
 
-`lib/auth/navigation.test.ts` is described in its own header (`:8-18`) as *the highest-value regression test in the frontend*. `:19-34` asserts the parent navigation contains no href and no key matching `/tutor/`, `/session|replay|play/`, `/planner/`, `/practice/`, `/quiz/` or `/subject|curriculum/`. `:36-46` asserts the teacher surface has no tutor entry. `:48-54` asserts the student surface has My Classes. `:67-81` asserts every key has a translated label in all three locales.
+**Classroom Phase 2 (2026-10-04)** moved the four things the comment at `navigation.ts:40-45` says
+move together: student `myClasses` → `/classroom`, teacher `mySpaces` → `/teacher/classroom`
+(relabelled "My Classrooms"); the teacher's `roster` and `announcements` entries were **removed**,
+not repointed — both now live inside a classroom; `my-classes`, `spaces`, `roster` and
+`announcements` left the coming-soon `SLUGS`; and the route-prefix regex in `navigation.test.ts`
+gained `classroom` — **after** it had failed naming `myClasses`, the order its own comment demands.
+`Dashboards.tsx` card links were repointed in the same change (`/coming-soon/my-classes` would have
+become a silent 404).
 
-`ROLE_ACCENT` (`:78-83`) sits in the same file and *is* styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is here because it is keyed by `Role`, and keeping every role-keyed record together is what makes an incomplete role obvious.
+`lib/auth/navigation.test.ts` is described in its own header (`:8-18`) as *the highest-value regression test in the frontend*. `:19-42` asserts the parent navigation contains no href and no key matching `/tutor/`, `/session|replay|play/`, `/planner/`, `/practice/`, `/quiz/`, `/subject|curriculum/` or — since classroom Phase 8 — `/chat/`, and that it does reach the read-only `/parent/classroom`. `:44-54` asserts the teacher surface has no tutor entry. `:56-62` asserts the student surface has My Classes. `:80-94` asserts every key has a translated label in all three locales.
+
+`ROLE_ACCENT` (`:118-123`) sits in the same file and *is* styling — one Tailwind text-colour class per role. It is the exception that proves the rule: it is here because it is keyed by `Role`, and keeping every role-keyed record together is what makes an incomplete role obvious.
 
 ---
 
@@ -276,7 +468,7 @@ branch, plus the flag from `.env.example`, `vitest.config.mts`, `render.yaml` an
 importing the router. ⚠️ **The only caller of `setNavigationHandler` in the repository was
 `client.test.ts`**, so `navigate` was permanently `null` and the redirect returned on its first
 line every time. Four tests passed while describing behaviour the application did not have, which is
-the more dangerous kind of green. `SessionGuard` re-evaluates `onboarding_state` on every mount and
+the more dangerous kind of green. `SessionGuard` re-evaluates `onboarding_state` on every navigation and
 is what actually moves a gated or lapsed user; the suite went 289 -> 285.
 
 What it was, recorded so nobody rebuilds it: an in-memory router serving 18 endpoints from eight
@@ -408,6 +600,25 @@ burned attempt. On `/auth/login` a 401 means the password was wrong, so refreshi
 
 ⚠️ **`changePassword` is the subtle one, added in Phase 3.** `POST /auth/password/change` returns `401 UNAUTHENTICATED` for a wrong *current* password — the contract forbids a bespoke code — and `UNAUTHENTICATED` is necessarily on `REFRESHABLE_401_CODES`, because it normally means an expired token. It is therefore the **only** route where both meanings of that 401 are live at once. The `init.bearer === undefined` guard does **not** shield it: unlike `/2fa/confirm`, its credential travels in the body, not as `bearer`. Without `noRetry` every mistyped password would silently fire a token refresh and replay the request.
 
+### File transfer — raw bodies and blobs (classroom Phase 6)
+
+Two options on `ApiRequestInit` (`client.ts:195`), used only by the file wrappers in
+`endpoints.ts:518-583`:
+
+- **`rawBody`** (`:203`) sends a `Blob` — a `File` — **as-is**: no JSON encoding and no JSON
+  `Content-Type`; the caller sets the type (`:226-242`). Uploads are never multipart, because the
+  backend counts the raw body against `Content-Length`. The file name travels in an
+  `X-Upload-Filename` header, URL-encoded. A `Blob` can be sent twice, so refresh-and-retry
+  stays safe; a one-shot stream could not be.
+- **`responseType: 'blob'`** (`:208`) returns a **successful** body as a `Blob` (`:246`). An
+  error is still parsed as the JSON envelope, so a refused download is an ordinary `ApiError`. The
+  download goes through `fetch` with the access token in the header — never a URL carrying a
+  credential — and `saveBlob` (`lib/download.ts`) hands it to the browser as a saved file.
+
+`client.test.ts` pins all four behaviours: the raw body sent untouched with no JSON type, a blob
+returned on success, a JSON error still thrown as `ApiError`, and a refresh-and-retry that resends
+the same file.
+
 ### Transport-level onboarding redirects
 
 `GATE_PENDING` and `SUBSCRIPTION_REQUIRED` are both 403s that mean "authenticated, but an onboarding precondition is unmet". Neither is an error to show; both are a signal to move the user. `client.ts:182-198`:
@@ -452,9 +663,9 @@ Three kinds of credential, three storage rules, all of them narrower than the ob
 
 The refresh token is an `httpOnly` cookie the server sets. JavaScript cannot read it at all, which is the property that makes it safe to persist when the access token is not.
 
-The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:130-131`) on every call.
+The consequence is stated at `tokenStore.ts:9-11`: **a full page reload loses the access token**, and the application recovers by calling `/auth/refresh` with the cookie. That is the intended trade-off, not a bug — and it is why `rawRequest` sends `credentials: 'include'` (`client.ts:230`) on every call.
 
-`endpoints.ts:175-177` is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
+`startSession` (`endpoints.ts:291-293`) is the one place a token enters the application, so no screen has to remember that `expires_in` drives proactive refresh.
 
 ### The challenge tokens, and the deliberate reload consequence
 
@@ -480,7 +691,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **429 leaf keys each, identical across all three**, and in the same order — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **785 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -621,7 +832,20 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-24 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+41 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+
+The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
+give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured
+machine load inside the full suite rather than the code — the same class of false failure
+`vitest.config.mts` records raising `testTimeout` for. The ones that render dates
+(`ClassroomView.test.tsx`, `StreamTab.test.tsx`) pass `timeZone="Asia/Karachi"` as
+`PlanSelection.test.tsx` does, because **the app configures no global next-intl time zone**
+(pre-existing; dates render in the browser's zone, which is correct for client-only rendering, but a
+server-rendered date would mismatch). `StreamTab.test.tsx` also renders in `ur` and `ur-Latn` with an
+`onError` that fails on any missing key, and `components/ui/Tabs.test.tsx` pins the reversed arrows
+under `dir="rtl"`. The Phase 4 files (`ClassworkTab.test.tsx`, `SubmissionPanel.test.tsx`,
+`GradingTable.test.tsx`) use the same `LOADED` first wait and fixed time zone, and each ends with the
+`ur` / `ur-Latn` `onError` sweep.
 
 The suite is not uniform — three files do something other than test a component:
 
@@ -643,9 +867,9 @@ Recorded here rather than hidden until fixed, per the Phase 0 honesty rules. Num
 
 `lib/auth/onboarding.ts:17` mapped `admin` to `/admin` and `lib/auth/navigation.ts` gave the admin
 sidebar one entry pointing there, but `app/[locale]/(app)/` contained only `dashboard/`, `teacher/`
-and `parent/`. Three call sites could send an administrator to that route — `SessionGuard.tsx:65`
-(`routeForOnboardingState(state, 'admin')` when the state is `active`), `SessionGuard.tsx:69`
-(`dashboardFor('admin')` on a role mismatch) and `TwoFactorChallenge.tsx:183` after a completed
+and `parent/`. Three call sites could send an administrator to that route — what is now `SessionGuard.tsx:73`
+(`routeForOnboardingState(state, 'admin')` when the state is `active`), what is now
+`SessionGuard.tsx:146` in `RequireRole` (`dashboardFor('admin')` on a role mismatch) and `TwoFactorChallenge.tsx:183` after a completed
 challenge — and the result was a loop: the guard redirected, the route 404'd through the `(site)`
 catch-all, and the guard's own fallback rendered "Redirecting…" for ever.
 
@@ -728,7 +952,7 @@ async function signOut() {
 }
 ```
 
-No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:179-188`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:186`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
+No `try`/`catch`. `logout()` (`lib/api/endpoints.ts:295-304`) uses `try`/`finally`, not `try`/`catch` — the local session is dropped in the `finally` at `:302`, but the error still propagates. So on a network failure or a 500: `endSession()` runs, the access token is cleared, `await logout()` rejects, and `router.replace('/login')` at `:47` **never executes**.
 
 The user is left looking at a dashboard that appears signed in, with no token behind it. Every subsequent request 401s. It looks like the sign-out button is broken, and it is — on the shared devices this product is used on, "sign out appeared to do nothing" is the worst possible failure for that button.
 
@@ -775,7 +999,7 @@ which cannot be produced in SQL.
 
 ### D5 — `VerifyEmail` reproduces the StrictMode deadlock `SessionGuard` documents fixing
 
-`components/auth/VerifyEmail.tsx:41-73` uses precisely the pattern `SessionGuard.tsx:43-56` records as having deadlocked:
+`components/auth/VerifyEmail.tsx:41-73` uses precisely the pattern `SessionGuard.tsx:51-64` records as having deadlocked:
 
 ```ts
 const attempted = useRef(false)                              // :41
@@ -803,12 +1027,24 @@ Development only, exactly like the original — which is what makes it costly. T
 
 `onboarding_state` is typed as a five-value union (`lib/api/types.ts:12-17`), but it arrives from the network and nothing validates it against that union at the boundary. Both lookup tables are plain `Record`s, so an unrecognised value returns `undefined`:
 
-- `lib/auth/onboarding.ts:32` — `ONBOARDING_ROUTES[state]` → `undefined` → `SessionGuard.tsx:65` calls `router.replace(undefined)`
+- `lib/auth/onboarding.ts:32` — `ONBOARDING_ROUTES[state]` → `undefined` → `SessionGuard.tsx:73` calls `router.replace(undefined)`
 - `lib/auth/onboarding.ts:44` — `pendingOnboardingRoute` returns `undefined`, and the guard at `TwoFactorChallenge.tsx:176` is `if (next !== null)`. `undefined !== null` is **true**, so `:177` calls `router.replace(undefined)`.
 
 Two of the three `pendingOnboardingRoute` call sites are accidentally safe — `VerifyEmail.tsx:61` and `TwoFactorEnrollment.tsx:136` both use `?? '/dashboard'`, and nullish coalescing catches `undefined` as well as `null`. `TwoFactorChallenge.tsx:176` uses an explicit `!== null` and is not.
 
 The trigger is a backend that adds a sixth onboarding state, or renames one. Today the two sides agree; the register also notes that `onboarding_state` is a `Literal` on `MeResponse` and a plain string on four other backend responses (register **D13**), which is the drift channel.
+
+### The sidebar marked the first item as the current page, everywhere — FIXED, classroom Phase 6c (2026-10-05)
+
+`DashboardShell.tsx` set `aria-current="page"` and the highlight on `index === 0` rather than on
+the route being shown, so "Dashboard" was announced and drawn as current on every page — Settings
+and the classroom pages included; the owner reported it from a classroom. Recorded on 2026-10-04 and
+fixed on its own, as recorded then: `currentItem` (`DashboardShell.tsx:19`) picks the item whose href is
+the **longest prefix** of `usePathname()`, so `/teacher/classroom/<id>` is My classrooms and not the
+Dashboard at `/teacher`, and a path no item owns marks nothing. `DashboardShell.test.tsx` pins five
+paths, the teacher's prefix case and the no-match case. Because the shell no longer remounts on a
+navigation, the phone menu's "open" is derived from the page it was opened on, so following a link
+closes it — also pinned.
 
 ### D17 — `error.tsx` logs the error object it refuses to render
 

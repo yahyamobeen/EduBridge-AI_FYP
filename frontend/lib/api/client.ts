@@ -137,7 +137,7 @@ export function endSession(): void {
 // the redirect returned on its first line every single time.
 //
 // ⚠️ DELETED RATHER THAN WIRED UP, and the reason is not that wiring it is hard.
-//    `SessionGuard` re-evaluates `onboarding_state` on every mount and catches
+//    `SessionGuard` re-evaluates `onboarding_state` on every navigation and catches
 //    the same two conditions, so nobody is ever stranded. What the seam would
 //    have added is catching a mid-session trial lapse BEFORE the next
 //    navigation — real, but small.
@@ -195,6 +195,17 @@ async function performRefresh(): Promise<boolean> {
 export type ApiRequestInit = {
   method?: string
   body?: unknown
+  /**
+   * Sent as-is instead of a JSON body — a file upload (classroom Phase 6). The
+   * caller sets its Content-Type. A Blob can be sent twice, so refresh-and-retry
+   * stays safe; a one-shot stream could not be.
+   */
+  rawBody?: Blob
+  /**
+   * 'blob' returns a SUCCESSFUL body as a Blob — a file download. An error is
+   * still parsed as the JSON envelope, so a refused download is an ApiError.
+   */
+  responseType?: 'json' | 'blob'
   /** Sent instead of the session token, for short-lived challenge credentials. */
   bearer?: string
   /**
@@ -212,20 +223,27 @@ export type ApiRequestInit = {
 
 async function rawRequest<T>(path: string, init: ApiRequestInit): Promise<T> {
   const token = init.bearer ?? getAccessToken()
+  const raw = init.rawBody !== undefined
   const response = await fetch(resolve(path), {
     method: init.method ?? 'GET',
     // Carries the httpOnly refresh cookie.
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      // A raw body carries its own type, set by the caller.
+      ...(raw ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
-    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    ...(raw
+      ? { body: init.rawBody }
+      : init.body === undefined
+        ? {}
+        : { body: JSON.stringify(init.body) }),
     ...(init.signal ? { signal: init.signal } : {}),
   })
 
   if (response.status === 204) return undefined as T
+  if (init.responseType === 'blob' && response.ok) return (await response.blob()) as T
 
   const payload = await response.json().catch(() => null)
   if (!response.ok) throw toApiError(response.status, payload)
@@ -258,7 +276,7 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}): Prom
 
     // A11: `handleOnboardingRedirect(error)` stood here and did nothing —
     // `navigate` was never registered. `SessionGuard` handles GATE_PENDING and
-    // SUBSCRIPTION_REQUIRED on mount, which is what actually runs.
+    // SUBSCRIPTION_REQUIRED on each navigation, which is what actually runs.
     throw error
   }
 }

@@ -3,7 +3,11 @@
 > The EduBridge AI schema as it is actually applied — tables, the complete Row-Level Security
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
-> **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.**
+> **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
+> sections re-measured **2026-10-05 on branch `add-classroom`** (33 migration files, all applied with `supabase db push` and re-verified on the live database —
+> the four earlier `20261004…` files on 2026-10-04; `20261004150000` (classroom files),
+> `20261005120000` (submission links), `20261005130000` (class chat) and `20261005140000`
+> (parent overview) on 2026-10-05).
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
 > [Migration rules](#migration-rules) for why they can.
@@ -19,33 +23,40 @@ Run from the repository root.
 
 | Measure | Value | Command |
 |---|---|---|
-| Applied migrations | **11** | `ls supabase/migrations/*.sql \| wc -l` |
-| `CREATE TABLE` statements | **48** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
+| Migration files | **33** (all applied; `20261005140000` on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| `CREATE TABLE` statements | **55** | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` |
 | …of which DEFAULT partitions | **2** | `grep -hE '^CREATE TABLE.*PARTITION OF' supabase/migrations/*.sql \| wc -l` |
-| Base tables (48 − 2) | **46** | derived from the two rows above |
+| Base tables (55 − 2) | **53** | derived from the two rows above |
 | Views | **1** | `grep -hE '^CREATE VIEW' supabase/migrations/*.sql \| wc -l` |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
-| Indexes | **40** | `grep -hE '^CREATE INDEX' supabase/migrations/*.sql \| wc -l` |
-| Triggers | **9** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
-| `CREATE POLICY` occurrences | **73** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| …real `CREATE POLICY` statements | **72** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
-| **Live policy objects** | **73** | see [the reconciliation](#why-73-73-and-72-are-all-correct) |
-| `CREATE OR REPLACE FUNCTION` statements | **37** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| Distinct `app.*` function names ever defined | **34** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
-| **Live `app.*` functions** (34 − 1 dropped) | **33** | `grep -nE 'DROP FUNCTION' supabase/migrations/*.sql` shows `issue_token_for_email` retired |
-| `SECURITY DEFINER` function definitions | **35** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| Definitions carrying `SET search_path` | **36** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
-| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **30** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
-| `GRANT EXECUTE … TO app_backend` | **30** | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
-| Implemented HTTP endpoints | **17 of 48** | `grep -cE '^@router\.' backend/app/auth/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Indexes | **63** (62 plain + 1 unique) | `grep -hE '^CREATE (UNIQUE )?INDEX' supabase/migrations/*.sql \| wc -l` |
+| Triggers | **17** | `grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql \| wc -l` |
+| `CREATE POLICY` occurrences | **114** | `grep -o 'CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| …real `CREATE POLICY` statements | **111** | `grep -hE '^[[:space:]]*CREATE POLICY' supabase/migrations/*.sql \| wc -l` |
+| **Policy objects the migrations produce** | **98** | `SELECT count(*) FROM pg_policies WHERE schemaname = 'public'` on a shadow database built from all 33 files, and the same 98 on the live database (`20261005140000` creates none; 95 before `20261005130000`, which creates 3; 93 before `20261005120000`, which creates 2; 88 before `20261004150000`, which creates 5; 80 before `20261004140000`, which creates 8; 77 before `20261004130000`, which drops 2 and creates 5; 79 before `20261004120000`, which drops 4 and creates 2) |
+| `CREATE OR REPLACE FUNCTION` statements | **85** | `grep -hE '^CREATE OR REPLACE FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| Distinct `app.*` function names ever defined | **73** | `grep -ohE 'CREATE OR REPLACE FUNCTION app\.[a-zA-Z0-9_]+' supabase/migrations/*.sql \| sed 's/.*app\.//' \| sort -u \| wc -l` |
+| **Live `app.*` functions** (73 − 1 retired) | **72** | `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app'` on the shadow, and 72 on the live database (2026-10-05; 71 before `20261005140000`, which adds 1; 67 before `20261005130000`, which added 4); `issue_token_for_email` is the one dropped for good |
+| `SECURITY DEFINER` lines | **85** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
+| `SET search_path` lines | **85** | `grep -hE '^SET search_path' supabase/migrations/*.sql \| wc -l` |
+| `REVOKE ALL ON FUNCTION … FROM PUBLIC` | **74** | `grep -hE '^REVOKE ALL ON FUNCTION' supabase/migrations/*.sql \| wc -l` |
+| `GRANT EXECUTE … TO app_backend` | **72** — lines, not functions; no longer equal to the revokes, because the classroom's internal helpers (`submittable_space`, `lock_submission`, `space_storage_bytes`, `lock_space_files`) are revoked and deliberately never granted (plan R9) | `grep -hE '^GRANT EXECUTE' supabase/migrations/*.sql \| wc -l` |
+| `app.*` functions executable by `PUBLIC` | **0** | `aclexplode(proacl)` with `grantee = 0`, on the shadow |
+| Implemented HTTP endpoints | **64** (21 auth + 43 classroom) | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
 
-**36 of the 37 function definitions carry `SET search_path`.** The exception is
-`app.set_updated_at()` (`20260801120000_initial_schema.sql:85`), a plain trigger function that is
-not `SECURITY DEFINER` and therefore has nothing to escalate. Two definitions are not
-`SECURITY DEFINER`: that trigger, and `app.current_user_id()`
-(`20260801120100_rls_policies.sql:49`), which only reads a session setting.
+**Measured from the catalogue (shadow database built from all 33 files, 2026-10-05): 71 of the 72 live `app.*` functions
+carry `search_path`.** The exception is `app.set_updated_at()`
+(`20260801120000_initial_schema.sql:85`), a plain trigger function that is not `SECURITY DEFINER`
+and therefore has nothing to escalate. Two functions are not `SECURITY DEFINER`: that trigger, and
+`app.current_user_id()` (`20260801120100_rls_policies.sql:49`), which only reads a session setting.
+The grep counts above count *lines*, which drift from function counts when a later migration
+re-states a definition; the catalogue query is the authority.
 
 ### Why 73, 73 and 72 are all correct
+
+> **Historical — the 2026-08-16 reconciliation, kept for its method.** The current numbers are in the
+> table above and were measured from a shadow database rather than derived by arithmetic; the lesson
+> below (statements ≠ objects ≠ live) still applies.
 
 Three different numbers describe the same policy layer, and conflating them is the easiest
 mistake to make here:
@@ -236,7 +247,7 @@ protected is [B1](#b-known-gaps--the-database-would-not-catch-a-missed-check).
 | `subject_group` | `:281` | Which elective groups take each subject. |
 | `chapter` | `:288` | `uq_chapter (subject_id, number)`. |
 | `slo` | `:298` | Student Learning Outcomes. `retired_at` **soft-retires** on a syllabus change; rows are never deleted, so historical mastery keeps its meaning. |
-| `teacher_subject_scope` | `:311` | Many-to-many least-privilege scope: which subjects a teacher may see. |
+| `teacher_subject_scope` | `:311` | Many-to-many least-privilege scope: which subjects a teacher may see. **Self-declared** since `20261004120000`: `app.create_space` writes the row when a teacher creates a classroom (owner decision 2026-10-03). An administrator withdraws it by stamping `revoked_at` — `DELETE` is revoked from `app_backend`, because a deleted row would be silently re-declared by the teacher's next classroom. |
 
 Seeded by `20260801120200_seed_reference_data.sql` — two boards, four class levels each, the
 subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempotent.
@@ -245,10 +256,17 @@ subject matrix documented at `:6-19`, and the group mappings at `:91-96`. Idempo
 
 | Table | Defined at | Notes |
 |---|---|---|
-| `classroom_space` | `20260801120000_initial_schema.sql:324` | `owner_role space_owner_role` (teacher or parent). `ck_teacher_space_has_subject` (`:334`) forces a teacher space to declare its subject, because subject-scoping depends on it. |
-| `join_code` | `:341` | Unique code, revocable, optional expiry. Never readable by students — they receive it out of band. |
-| `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. |
-| `announcement` | `:364` | Space-scoped, author-attributed. |
+| `classroom_space` | `20260801120000_initial_schema.sql:324` | `ck_teacher_space_has_subject` (`:334`) forces a teacher space to declare its subject, because subject-scoping depends on it. Since `20261004120000`: `ck_space_owner_is_teacher` (the enum still lists `parent`, but parents no longer create spaces — `prd.md` §4.2 v0.3.5) and `ck_space_title` (1–120 characters). **Created only by `app.create_space`; never deleted** — `status = 'archived'` is the end state, and the owner may write only `title` and `status` — and, since `20261005130000`, `chat_locked` (default `false`; while true only the teacher posts in the class chat). |
+| `join_code` | `:341` | Unique code, revocable, optional expiry. Never readable by students — they receive it out of band. Since `20261004120000`: `ck_join_code_format` (`^[A-HJ-NP-Z2-9]{8}$`, 2⁴⁰ codes, minted in Python by `app/classroom/codes.py`) and `uq_join_code_one_live` (one unrevoked code per space). **Written only by `app.rotate_join_code` / `app.disable_join_code`.** |
+| `enrollment` | `:351` | Joining a space **is** the consent record. `left_at` is the soft leave. Since `20261004120000`: `removed_at` (set by the teacher; a removed student cannot rejoin with the code, one who left can — `ck_enrollment_removed_has_left`) and `muted_at` (written by `app.set_student_muted` since `20261005130000`; survives leave and rejoin). **Written only by `app.join_space_by_code`, `app.leave_space`, `app.remove_student` and `app.set_student_muted`.** |
+| `announcement` | `:364` | Space-scoped, author-attributed. Since `20261004130000`: `updated_at` (with `trg_announcement_updated`), `publish_at` (default `now()`; a future value **schedules** the post and the member read policy hides it until then — no job publishes it), `ck_announcement_body` (1–5000 characters after trimming), `ix_announcement_feed (space_id, publish_at DESC, id DESC)` for the keyset-paginated stream (replaces `ix_announcement_space`) and `ix_announcement_author` for the `ON DELETE RESTRICT` check. The owner may `UPDATE` only `body` and `publish_at`; INSERT and DELETE stay table-level and are held by the policies. Since `20261004150000`: `uq_announcement_id_space (id, space_id)`, the target of an attachment's composite key. |
+| `assignment` | `20261004140000:59` | Owner content, like `announcement`: author-attributed, scheduled by `publish_at` (members cannot read a future one). `subject_id` is denormalised for per-subject reports and held to the classroom's by the composite key `fk_assignment_space_subject (space_id, subject_id)`; the optional `chapter_id` is held to the same subject by `fk_assignment_chapter_subject (chapter_id, subject_id)` — a chapter from another subject is a foreign-key violation, not a service check. `ck_assignment_title` (1–200), `ck_assignment_instructions` (≤ 10 000), `ck_assignment_points` (1–1000 or NULL), `ck_assignment_due_after_publish`. The owner may `UPDATE` only `title, instructions, due_at, points, chapter_id, publish_at`; INSERT is table-level and held by `assignment_insert`; **no DELETE grant** — `app.delete_assignment` only. |
+| `assignment_submission` | `20261004140000:93` | One per (assignment, student) — `uq_submission_one_per_student`. `turned_in_at` (NULL = draft, stamped with `clock_timestamp()`) is the only state: **late, missing and graded are derived** (`app/classroom/status.py`), never stored. `link_url` (with `ck_submission_link`) is **superseded since `20261005120000`** — copied into `submission_link`, cleared, and kept unread, because `app.save_submission_draft` still takes `p_link` (the service passes `NULL`). `uq_submission_id_space_student` is the target for submission files and links. **No write grant**: written only by `app.save_submission_draft`, `app.turn_in_submission` and `app.unsubmit_submission`. |
+| `submission_grade` | `20261004140000:117` | The teacher's grade (`numeric(6,2)`) and private feedback, keyed `(assignment_id, student_id)`. **A separate table, not a column on the submission**: every user shares one database role, so a teacher-owned column on a student-owned row would be writable by both. `returned_at` is when the student may see it — set once, never cleared. **No write grant**: written only by `app.save_grade`. |
+| `material_attachment` | `20261004150000:43` | A teacher's file on an announcement **or** an assignment — exactly one (`ck_material_one_parent`), each by a composite key `(announcement_id, space_id)` / `(assignment_id, space_id)` so the row's `space_id` is always its parent's. **`ck_material_key`**: the object key must be `s/<space_id>/<32 hex>` — a key naming another classroom is a CHECK violation. `ck_material_type` (PDF, PNG, JPEG, DOCX, PPTX), `ck_material_size` (1 byte to 9 MiB), `ck_material_filename` (1–255), `ck_material_sha` (SHA-256 hex). Cascades with its parent. Grants: `SELECT`, and `DELETE` for the owner under `material_owner_delete`; **written only by `app.add_material_attachment`**; no `UPDATE` — a row is immutable. |
+| `submission_file` | `20261004150000:76` | A student's file on their submission. `fk_subfile_submission (submission_id, space_id, student_id)` targets `uq_submission_id_space_student`, so a file can only ever belong to its own student's submission in its own classroom. **`ck_subfile_key`**: `u/<space_id>/<student_id>/<32 hex>`. Same type, size, filename and hash checks. **`SELECT` only**: written only by `app.add_submission_file` and `app.remove_submission_file`. |
+| `submission_link` | `20261005120000:25` | A link on a student's work (classroom Phase 6b) — up to five, each its own row. `fk_sublink_submission (submission_id, space_id, student_id)` targets `uq_submission_id_space_student`, like a file. `ck_sublink_url`: `https://` and no whitespace, at most 2048 characters; `uq_sublink_url (submission_id, url)` — the same link twice is one row. **`SELECT` only**: written only by `app.add_submission_link` and `app.remove_submission_link`. |
+| `space_message` | `20261005130000:45` | The class chat (classroom Phase 7, `prd.md` CL-5) — **class-public**, and deliberately **not** the tutor `message` table ([invariant 8](#8-chat-is-owner-only)). `ck_space_message_body` (1–1000 characters after trimming); `ck_space_message_deleted_pair` (`deleted_at` and `deleted_by` set together). `created_at` defaults to `clock_timestamp()`: the poll's cursor needs the real insert time, and `now()` is frozen per transaction. `author_id` and `deleted_by` are `ON DELETE RESTRICT` — **deleting an account does not delete what it said in a class** (owner decision 2026-10-05); `space_id` cascades. Indexes: `ix_space_message_feed (space_id, created_at, id)`, the partial `ix_space_message_deleted (space_id, deleted_at)` for tombstones, `ix_space_message_author`, the partial `ix_space_message_deleted_by`. Grants: `SELECT`, and **`INSERT (space_id, author_id, body)` only**, so neither a message's time nor its deletion can be supplied; no UPDATE or DELETE — soft-deleted only by `app.delete_space_message`. |
 
 ### Assessment
 
@@ -321,7 +339,7 @@ never silently grant free access forever.
 
 ## The complete Row-Level Security policy catalogue
 
-**All 73 live policy objects.** Every one is `TO app_backend`; no other role has a policy. An empty
+**All 98 live policy objects** (shadow and live agree, 2026-10-05; the parent overview, `20261005140000`, adds none). Every one is `TO app_backend`; no other role has a policy. An empty
 cell means the clause is absent from the policy, which is not the same as `true` — an absent
 `WITH CHECK` on an `UPDATE` policy means PostgreSQL falls back to the `USING` expression, and an
 absent `USING` on an `INSERT` policy is simply not applicable.
@@ -388,13 +406,63 @@ The six `*_read` policies below were created by the `FOREACH` loop at `202608011
 | Table | Policy | FOR | USING | WITH CHECK | Live at |
 |---|---|---|---|---|---|
 | `classroom_space` | `space_visible` | SELECT | `owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()` | — | `20260801120100:261` |
-| `classroom_space` | `space_owner_write` | ALL | `owner_id = cuid()` | `owner_id = cuid()` | `20260801120100:269` |
-| `join_code` | `join_code_owner` | ALL | `app.owns_space(space_id) OR app.is_admin()` | `app.owns_space(space_id)` | `20260801120100:275` |
+| `classroom_space` | `space_owner_update` | UPDATE | `app.owns_space(id)` | `app.owns_space(id)` | `20261004120000` §2 — replaces `space_owner_write` (FOR ALL, no role check: **B10**). Column grant `UPDATE (title, status)` only — and `chat_locked` since `20261005130000`; no INSERT/DELETE grant |
+| `join_code` | `join_code_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004120000` §3 — replaces `join_code_owner` (FOR ALL); no write grant at all |
 | `enrollment` | `enrollment_visible` | SELECT | `student_id = cuid() OR app.owns_space(space_id) OR app.is_admin()` | — | `20260801120100:281` |
-| `enrollment` | `enrollment_student_join` | INSERT | — | `student_id = cuid()` | `20260801120100:289` |
-| `enrollment` | `enrollment_leave` | UPDATE | `student_id = cuid() OR app.owns_space(space_id)` | *(none — falls back to `USING`)* | `20260801120100:294` |
-| `announcement` | `announcement_read` | SELECT | `app.is_enrolled_in(space_id) OR app.owns_space(space_id) OR app.is_admin()` | — | `20260801120100:298` |
-| `announcement` | `announcement_write` | INSERT | — | `app.owns_space(space_id)` | `20260801120100:302` |
+| `announcement` | `announcement_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004130000:67` |
+| `announcement` | `announcement_member_read` | SELECT | `space_id IN (SELECT app.my_member_space_ids()) AND publish_at <= now()` — a scheduled post is invisible to members **at the database** | — | `20261004130000:72` |
+| `announcement` | `announcement_insert` | INSERT | — | `author_id = cuid() AND app.owns_active_space(space_id)` | `20261004130000:76` |
+| `announcement` | `announcement_update` | UPDATE | `author_id = cuid() AND app.owns_active_space(space_id)` | same expression; column grant `UPDATE (body, publish_at)` only | `20261004130000:80` |
+| `announcement` | `announcement_delete` | DELETE | `author_id = cuid() AND app.owns_active_space(space_id)` | — | `20261004130000:85` |
+| `assignment` | `assignment_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004140000:234` |
+| `assignment` | `assignment_member_read` | SELECT | `space_id IN (SELECT app.my_member_space_ids()) AND publish_at <= now()` | — | `20261004140000:240` |
+| `assignment` | `assignment_insert` | INSERT | — | `author_id = cuid() AND app.owns_active_space(space_id)` | `20261004140000:244` |
+| `assignment` | `assignment_update` | UPDATE | `author_id = cuid() AND app.owns_active_space(space_id)` | the same **and** `app.points_compatible(id, points)` — points can never drop below an existing grade | `20261004140000:248` |
+| `assignment_submission` | `submission_read_own` | SELECT | `student_id = cuid()` | — | `20261004140000:259` |
+| `assignment_submission` | `submission_teacher_read` | SELECT | `turned_in_at IS NOT NULL AND (space_id, student_id) IN (SELECT … FROM app.my_taught_students())` — **turned-in work of active members only**; a draft is the student's own | — | `20261004140000:263` |
+| `submission_grade` | `grade_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students())` | — | `20261004140000:271` |
+| `submission_grade` | `grade_student_read_returned` | SELECT | `student_id = cuid() AND returned_at IS NOT NULL` | — | `20261004140000:275` |
+| `material_attachment` | `material_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` | — | `20261004150000:159` |
+| `material_attachment` | `material_member_read` | SELECT | `space_id IN (SELECT app.my_member_space_ids()) AND app.material_parent_published(announcement_id, assignment_id)` — a scheduled post's attachment is hidden **with** the post | — | `20261004150000:163` |
+| `material_attachment` | `material_owner_delete` | DELETE | `app.owns_active_space(space_id)` | — | `20261004150000:168` |
+| `submission_file` | `subfile_read_own` | SELECT | `student_id = cuid()` | — | `20261004150000:175` |
+| `submission_file` | `subfile_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students()) AND EXISTS (turned-in submission)` — both conditions stated here, not inherited from `submission_teacher_read` through a subquery | — | `20261004150000:182` |
+| `submission_link` | `link_read_own` | SELECT | `student_id = cuid()` | — | `20261005120000:59` |
+| `submission_link` | `link_teacher_read` | SELECT | `(space_id, student_id) IN (SELECT … FROM app.my_taught_students()) AND EXISTS (turned-in submission)` — the file rule, stated in full | — | `20261005120000:63` |
+| `space_message` | `space_message_owner_read` | SELECT | `space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())` — deleted messages included: retained for review | — | `20261005130000:120` |
+| `space_message` | `space_message_member_read` | SELECT | `deleted_at IS NULL AND space_id IN (SELECT app.my_member_space_ids())` — a muted member, or one in a locked chat, still reads | — | `20261005130000:126` |
+| `space_message` | `space_message_insert` | INSERT | — | `author_id = cuid() AND app.can_post_message(space_id)` — an active, unmuted member of an unlocked, active classroom who passes the guardian gate, or its teacher (who may post while it is locked) | `20261005130000:130` |
+
+`enrollment_student_join` (INSERT into **any** space) and `enrollment_leave` (UPDATE with no
+`WITH CHECK`) were **dropped** by `20261004120000` §4 — finding **B9** — and `app_backend` holds no
+write grant on `enrollment`. Every enrolment change goes through a function in the
+[classroom section](#classroom--post-apispaces-functions).
+
+`announcement_read` and `announcement_write` (`20260801120100:298-304`) were **dropped** by
+`20261004130000` — finding **B27**: the write policy never checked `author_id`, so a space owner
+could post as anyone, and there was no UPDATE or DELETE policy at all. ⚠️ `now()` in
+`announcement_member_read` is the **transaction** start, so a post becomes visible to the first
+query that begins after its `publish_at`, never part-way through one.
+
+The assignment tables (`20261004140000`) have no DELETE policy, and `assignment_submission` and
+`submission_grade` no write policy at all: with no write grant either, every change goes through
+a function in the [assignments section](#classroom--assignment-functions). **Leaving ends teacher
+visibility** (user story 7.1) is `app.my_taught_students()`: it lists active members only, so the
+moment a student leaves, their submissions and grades drop out of both teacher read policies.
+
+The file tables (`20261004150000`) follow the thing a file is attached to: a member sees a teacher's
+attachment from the moment its post goes live, and a teacher sees a student's file only while the
+student is an active member **and** only once the work is turned in — the draft rule, applied to
+files. `subfile_teacher_read` spells out both conditions rather than leaning on
+`submission_teacher_read` through a subquery, so a later change to that policy cannot widen this one
+by accident (the B18 lesson). No INSERT or UPDATE policy exists on either table, and no write grant
+but the owner's DELETE on `material_attachment`.
+
+The class chat (`20261005130000`) is the one classroom table a student writes directly: a
+column-limited `INSERT` that `space_message_insert` holds to the caller and to
+`app.can_post_message`. There is no UPDATE or DELETE policy and no such grant, so a message is never
+edited and never really deleted — a moderator's deletion is a stamp, written by a function. A
+member's read stops at that stamp; the teacher's does not.
 
 ### Assessment
 
@@ -472,14 +540,15 @@ path.
 | `question_key` | **Deliberate and permanent.** See the invariants below. |
 | `audit_log_default` | Deliberate. RLS is enabled and forced with no policy, making *direct* access default-deny while parent-routed reads and writes keep using `audit_log`'s own policies. |
 | `api_request_log_default` | As above. |
+| `storage.objects` (bucket `classroom-files`) | **Deliberate.** The bucket is private and no `storage.objects` policy is created: users are not Supabase Auth users, and only the backend — with storage-only S3 keys — reads or writes an object. Who may download a file is decided by the two file tables' policies above, before the object is opened. |
 | `two_factor_status_v` | **Resolved 2026-08-16.** A view cannot carry row-level security — policies attach to tables. `20260816150000` set `security_invoker = true`, so it executes as its **caller** and the policies underneath apply. Was finding [B1](#b-known-gaps--the-database-would-not-catch-a-missed-check). `tests/integration/test_rls_coverage.py` now fails if any view in `public` lacks the option. |
 
 ---
 
 ## The `app.*` privileged functions
 
-**33 live**, from 34 distinct names ever defined — `app.issue_token_for_email` was dropped as a
-byte-for-byte duplicate of `app.insert_auth_token` (`20260803160000:151-153`).
+**72 live** (shadow and live agree, 2026-10-05), from 73 distinct names
+ever defined — `app.issue_token_for_email` was dropped as a byte-for-byte duplicate of `app.insert_auth_token` (`20260803160000:151-153`).
 
 All are in the `app` schema. All but two are `SECURITY DEFINER`; all but one carry
 `SET search_path = public, pg_temp`, which is what prevents a shadowing attack from redirecting an
@@ -488,32 +557,180 @@ bound parameters.
 
 ### Row-Level Security helpers — called by policies, not by routes
 
-These six are the ones the policy predicates above call. **Five of the six retain PostgreSQL's
-default `EXECUTE` grant to `PUBLIC`** — there is no `REVOKE` for them anywhere in the migrations
-(finding C5). They are `SECURITY DEFINER` so that reading the tables they check does not recurse
-into the very policies calling them.
+These are the ones the policy predicates above call. They are `SECURITY DEFINER` so that reading
+the tables they check does not recurse into the very policies calling them. **None is executable
+by `PUBLIC`** — finding C5 was closed by `20260816190000`, and every helper since is granted to
+`app_backend` explicitly, because a policy is evaluated with the privileges of the role running
+the query: without `EXECUTE` it would error rather than deny.
 
 | Function | Volatility | Definer? | Returns | Grant | Defined at |
 |---|---|---|---|---|---|
-| `app.current_user_id()` | `STABLE` | **No** | `uuid` — the bound user, or `NULL` | default `PUBLIC` | `20260801120100:49` |
-| `app.is_admin()` | `STABLE` | Yes | `boolean` — caller is an `active` `admin` | default `PUBLIC` | `20260801120100:56` |
-| `app.is_verified_guardian_of(p_student uuid)` | `STABLE` | Yes | `boolean` — a **verified** link exists | default `PUBLIC` | `20260801120100:67` |
-| `app.teaches_student_subject(p_student uuid, p_subject uuid)` | `STABLE` | Yes | `boolean` — active enrolment in a space the caller owns **and** a matching `teacher_subject_scope` row | default `PUBLIC` | `20260801120100:81` |
-| `app.owns_space(p_space uuid)` | `STABLE` | Yes | `boolean` | default `PUBLIC` | `20260801120100:99` |
-| `app.is_enrolled_in(p_space uuid)` | `STABLE` | Yes | `boolean` — enrolled and `left_at IS NULL` | default `PUBLIC` | `20260801120100:109` |
+| `app.current_user_id()` | `STABLE` | **No** | `uuid` — the bound user, or `NULL` | `app_backend` | `20260801120100:49` |
+| `app.is_admin()` | `STABLE` | Yes | `boolean` — caller is an `active` `admin` | `app_backend` | `20260801120100:56` |
+| `app.is_verified_guardian_of(p_student uuid)` | `STABLE` | Yes | `boolean` — a **verified** link exists | `app_backend` | `20260801120100:67` |
+| `app.teaches_student_subject(p_student uuid, p_subject uuid)` | `STABLE` | Yes | `boolean` — active enrolment in a space the caller owns **and** an **unrevoked** `teacher_subject_scope` row | `app_backend` | `20260801120100:81`, body replaced `20261004120000` §1 |
+| `app.owns_space(p_space uuid)` | `STABLE` | Yes | `boolean` — owner **and** active teacher **and** unrevoked scope for the space's subject (**B11**) | `app_backend` | `20260801120100:99`, body replaced `20261004120000` §1 |
+| `app.is_enrolled_in(p_space uuid)` | `STABLE` | Yes | `boolean` — enrolled and `left_at IS NULL` | `app_backend` | `20260801120100:109` |
+| `app.owns_active_space(p_space uuid)` | `STABLE` | Yes | `boolean` — `owns_space` **and** `status = 'active'`: the write predicate, so an archived classroom is read-only | `app_backend` | `20261004120000` §1 |
+| `app.my_owned_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller owns with live scope | `app_backend` | `20261004120000` §1 |
+| `app.my_member_space_ids()` | `STABLE` | Yes | `SETOF uuid` — spaces the caller is actively enrolled in | `app_backend` | `20261004120000` §1 |
+| `app.caller_passes_guardian_gate()` | `STABLE` | Yes | `boolean` — `gate.py` in SQL; **fails closed** on an unbound user or unknown class level | `app_backend` | `20261004120000` §1 |
+| `app.my_taught_students()` | `STABLE` | Yes | `TABLE (space_id, student_id)` — active members of the caller's scoped spaces | `app_backend` | `20261004140000:167` |
+| `app.points_compatible(p_assignment uuid, p_points smallint)` | `STABLE` | Yes | `boolean` — the caller owns the classroom **and** no grade exceeds `p_points`; false for anyone else, so it is not an oracle | `app_backend` | `20261004140000:181` |
+| `app.material_parent_published(p_announcement uuid, p_assignment uuid)` | `STABLE` | Yes | `boolean` — the attachment's post is live (`publish_at <= now()`) | `app_backend` | `20261004150000:122` |
+
+**Why two set-returning helpers.** A `SECURITY DEFINER` function is never inlined, so a per-row
+helper such as `app.owns_space(space_id)` runs once per **row**. Used as
+`space_id IN (SELECT app.my_owned_space_ids())` it is an uncorrelated subquery that runs once per
+**query** as a hashed subplan — the difference between a 300-row roster costing 300 lookups and one.
+New classroom read policies use the set form; the single-space form stays for function bodies and
+service pre-checks.
 
 `app.is_verified_guardian_of` and `app.teaches_student_subject` were checked in the Epic 1 review
 and **cannot be abused through their parameters** — both anchor on `app.current_user_id()`
 internally, so passing an arbitrary student identifier proves nothing.
 
+### Classroom — `POST /api/spaces` functions
+
+`20261004120100`. Since `20261004120000` these are the **only** writers of `enrollment` and
+`join_code` and the only way to create a `classroom_space`. Each derives the actor from
+`app.current_user_id()` — never a parameter (finding C1's shape) — and **returns an outcome instead
+of raising**, because a `RAISE` would surface as `500 INTERNAL_ERROR`. Capacity checks run after a
+row lock (`FOR UPDATE` on `teacher_profile`, `FOR NO KEY UPDATE` on the space), so two concurrent
+requests cannot both pass a limit. All are granted to `app_backend` and `REVOKE`d from `PUBLIC`.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.create_space(p_title text, p_subject uuid) → (outcome, new_space_id)` | `POST /api/spaces` | `created` · `not_teacher` · `unknown_subject` · `classroom_limit` · `scope_revoked` | Self-declares `teacher_subject_scope` in the same transaction; 50 active classrooms per teacher. |
+| `app.rotate_join_code(p_space uuid, p_code text) → (outcome, new_code)` | `POST /api/spaces`, `POST /api/spaces/{id}/join-code` | `rotated` · `forbidden` · `collision` | The code is minted in Python (`secrets`); `collision` means retry with a fresh one. Requires a non-archived space. |
+| `app.disable_join_code(p_space uuid) → boolean` | `POST /api/spaces/{id}/join-code` | — | Owner-only; allowed on an archived space. |
+| `app.join_space_by_code(p_code text) → (outcome, joined_space_id, space_title, space_subject, space_board, space_class_level)` | `POST /api/spaces/join` | `joined` · `already_member` · `invalid_code` · `class_mismatch` · `classroom_full` · `gate_pending` · `not_student` | Normalises case, spaces and dashes. **A removed student gets `invalid_code`**, indistinguishable from an unknown code. Board, class **and** group must match. Re-checks the guardian gate. 300 active members per space. |
+| `app.leave_space(p_space uuid) → boolean` | `DELETE /api/spaces/{id}/membership` | — | Idempotent; allowed on an archived space (leaving is a consent right, `prd.md:258`). |
+| `app.remove_student(p_space uuid, p_student uuid) → boolean` | `DELETE /api/spaces/{id}/members/{student_id}` | — | Sets `left_at` and `removed_at`. |
+| `app.space_people(p_space uuid) → (user_id, full_name, is_owner, joined_at, muted)` | `GET /api/spaces/{id}/people` | — | The narrow door past `app_user_self_read`: owner and **active** members only, `full_name` only; `muted` is shown to the owner only. |
+| `app.my_spaces() → (space_id, title, status, subject…, owner_name, viewer_role, can_manage, member_count, joined_at)` | `GET /api/spaces`, `GET /api/spaces/{id}` | — | `member_count` for the owner only. A de-scoped teacher still sees their row with `can_manage = false`. |
+
+Proved on a shadow database built from all 27 files (2026-10-04): the same attack script, run as
+`app_backend`, **succeeds** against the 25 earlier migrations (a student creates a "teacher" space;
+a student enrols without a code) and is refused with `permission denied` after these two.
+`backend/tests/integration/test_classroom_rls.py` pins every row of the table above (44 tests; 52 with classroom Phase 3's `TestAnnouncementBoundary`).
+
+### Classroom — assignment functions
+
+`20261004140000` (classroom Phase 4). The **only** writers of `assignment_submission` and
+`submission_grade`, and the only way to delete an assignment. Same contract as the space
+functions above: the actor comes from `app.current_user_id()`, an outcome is returned rather than
+raised, and each is `REVOKE`d from `PUBLIC`. Every submission and grade write takes
+`app.lock_submission` — one advisory lock per (assignment, student) — so a grade saved while the
+student edits or turns in cannot leave edited work behind a grade. **Once any grade row exists the
+work is locked** ("editable until graded", `prd.md` CL-7), even before it is returned.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.save_submission_draft(p_assignment uuid, p_body text, p_link text) → text` | `PUT /api/assignments/{id}/submission` | `saved` · `forbidden` · `graded` · `turned_in` | Upsert while not turned in. `turned_in` means unsubmit first. `20261004140000:281` |
+| `app.turn_in_submission(p_assignment uuid) → text` | `POST …/submission/turn-in` | `turned_in` · `already_turned_in` · `forbidden` · `graded` | Stamps `clock_timestamp()` — the real moment, unforgeable (no grant on the column). An empty turn-in is "mark as done". `20261004140000:306` |
+| `app.unsubmit_submission(p_assignment uuid) → text` | `POST …/submission/unsubmit` | `unsubmitted` · `not_turned_in` · `forbidden` · `graded` | `20261004140000:333` |
+| `app.save_grade(p_assignment, p_student, p_grade numeric, p_feedback text, p_return boolean) → text` | `PUT /api/assignments/{id}/grades/{student_id}` | `saved` · `forbidden` · `invalid_grade` | Owner of an **active** classroom, **active** member only; `0 ≤ grade ≤ points` (no points = feedback only). Takes `FOR SHARE` on the assignment so a concurrent change to `points` cannot interleave. Returning is one-way. `20261004140000:355` |
+| `app.delete_assignment(p_assignment uuid) → (deleted, object_keys)` | `DELETE /api/assignments/{id}` | — | Owner of an active classroom. Since `20261004150000:321` (same signature, so `CREATE OR REPLACE` kept the grant) `object_keys` is every stored key the cascade is about to orphan — teacher attachments and **every** student's files, drafts and students who left included, none of which the teacher can read under RLS. `20261004140000:397` |
+
+Two **internal** helpers carry **no grant to `app_backend` at all** (plan R9) — they are called only from
+the functions above, which run as their owner: `app.submittable_space(p_assignment)` (published, active
+classroom, active member, **guardian gate passed** — the Class 9–10 rule at the database too, not only
+on the route; `20261004140000:202`) and `app.lock_submission(p_assignment, p_student)` (`20261004140000:220`). Calling
+either as `app_backend` is `permission denied`, which `test_classroom_rls.py` asserts.
+`TestAssignmentBoundary` (17 tests) pins every row of this section.
+
+### Classroom — file and link functions
+
+`20261004150000` (classroom Phase 6). The **only** writers of `submission_file` and the only way to
+add a `material_attachment`. Each takes the **full object key**, already stored by the backend —
+the object goes first and the row second, so no lock is held across an upload, and on any outcome
+but `added` the backend deletes the object it just stored. The key's prefix is then held to the
+caller by the table's CHECK constraint, not by the function. Quotas run under
+`app.lock_space_files` — one advisory lock per classroom — so two parallel uploads cannot both pass
+a limit.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.add_submission_file(p_assignment, p_object_key, p_filename, p_content_type, p_size, p_sha256) → (outcome, new_file_id)` | `POST /api/assignments/{id}/submission/files` | `added` · `forbidden` · `graded` · `turned_in` · `too_many_files` · `submission_quota` · `classroom_quota` | Same gate as a draft (`app.submittable_space`, guardian gate included) and the same `app.lock_submission`; creates the draft row if there is none. 5 files and 20 MiB per submission, 2 GiB per classroom. `20261004150000:191` |
+| `app.remove_submission_file(p_file uuid) → (outcome, removed_object_key)` | `DELETE /api/submission-files/{id}` | `removed` · `forbidden` · `graded` · `turned_in` | The caller's own file only; the key comes back for deletion **after** commit. `20261004150000:241` |
+| `app.add_material_attachment(p_announcement, p_assignment, p_object_key, …) → (outcome, new_file_id)` | `POST /api/announcements/{id}/attachments`, `POST /api/assignments/{id}/attachments` | `added` · `forbidden` · `too_many_files` · `classroom_quota` | Exactly one parent; owner of an **active** classroom. 10 files per post, 2 GiB per classroom. `20261004150000:271` |
+| `app.add_submission_link(p_assignment uuid, p_url text) → (outcome, new_link_id)` | `POST /api/assignments/{id}/submission/links` | `added` · `forbidden` · `invalid_url` · `graded` · `turned_in` · `too_many_links` | Classroom Phase 6b. The file's gate and lock; checks the URL itself (a CHECK violation would be a 500); the same link twice returns the existing row. 5 links per submission. Stamps `clock_timestamp()`, so links list in the order added. `20261005120000:72` |
+| `app.remove_submission_link(p_link uuid) → text` | `DELETE /api/submission-links/{id}` | `removed` · `forbidden` · `graded` · `turned_in` | The caller's own link, while the work is an ungraded draft. `20261005120000:121` |
+
+Two more **internal** helpers with **no grant** (plan R9): `app.space_storage_bytes(p_space)`
+(`20261004150000:134`, the 2 GiB sum) and `app.lock_space_files(p_space)` (`20261004150000:146`). A teacher removes
+an attachment with a plain `DELETE … RETURNING object_key` under `material_owner_delete`; the
+object follows after commit. `TestFileBoundary` (10 tests, `test_classroom_rls.py`) pins this
+section: no direct write, a forged key refused, the draft and leaving rules, a scheduled post's
+attachment, the sixth file, the locks after turn-in and grading, the helpers' missing grant, and
+`delete_assignment` returning the keys of a student who left. `TestLinkBoundary` (9 tests) pins the
+link rows the same way: no direct write, https only, the draft and leaving rules, a classmate sees
+nothing, one row for a repeated link and a refused sixth, the locks, no link on a scheduled
+assignment, and the cascade with the assignment.
+
+**The single link moved** (`20261005120000:162-168`): under the migration role, which bypasses RLS (as
+`20260817120000`'s top-level `UPDATE` of `auth_token` did — the live role reports
+`rolbypassrls`), every `link_url` is copied into `submission_link` and then cleared, so a re-run
+copies nothing. Proved on the shadow with a seeded old-style link; the live database held none
+(2026-10-05).
+
+**The bucket.** `20261004150000:387` inserts `classroom-files` into `storage.buckets` — private, 9 MiB,
+the same five types — so it is not a dashboard step that exists in one environment and no
+migration (finding F1's lesson). It is skipped where there is no `storage` schema (a plain
+PostgreSQL shadow), and if the migration role lacks the privilege it raises a **WARNING**, not an
+error: the bucket must then be created by hand with those settings. On the live project the
+migration created it (2026-10-05: private, 9 437 184 bytes, 5 types).
+
+### Classroom — chat functions
+
+`20261005130000` (classroom Phase 7). Posting is a column-limited `INSERT` under
+`space_message_insert`; these are the predicate it calls, the only writers of moderation state, and
+the one door through which a member learns that a message they can no longer read was deleted.
+
+| Function | Calling endpoint | Outcomes | Notes |
+|---|---|---|---|
+| `app.can_post_message(p_space uuid) → boolean` | the `space_message_insert` policy; `GET` and `POST /api/spaces/{id}/messages` | `true` · `false` | Active classroom; its teacher (`app.owns_space`) always, even while locked; otherwise an unlocked chat and an active, **unmuted** member who passes `app.caller_passes_guardian_gate()` — the Class 9–10 rule at the database. Fails closed: no such classroom is `false`. **Granted**, because a policy calls it. `20261005130000:89` |
+| `app.delete_space_message(p_message uuid) → text` | `DELETE /api/messages/{id}` | `deleted` · `already_deleted` · `forbidden` | The classroom's teacher only. Stamps `deleted_at` (`clock_timestamp()`) and `deleted_by`; the row is retained. Works on an archived classroom — moderation does not stop when posting does. Deleting twice is `already_deleted`, not an error. `20261005130000:137` |
+| `app.set_student_muted(p_space uuid, p_student uuid, p_muted boolean) → boolean` | `PUT /api/spaces/{id}/members/{student_id}/mute` | `true` · `false` | The classroom's teacher only, and an **active** member only. Keeps the first mute's time; unmuting clears it. A mute survives leaving and rejoining (`app.join_space_by_code` leaves `muted_at` alone). `20261005130000:165` |
+| `app.space_message_tombstones(p_space uuid, p_since timestamptz) → (message_id)` | `GET /api/spaces/{id}/messages` | ids | Messages deleted since a time — **ids only, never content** — for the classroom's teacher and current members, because a member cannot read a deleted row at all. `20261005130000:184` |
+
+`TestChatBoundary` (16 tests, `test_classroom_rls.py`) pins this section: the class reads what a
+member and the teacher post; nobody posts as someone else; the time and the moderation columns are
+not insertable, and no row is updated or deleted directly; an outsider and a student who left
+neither read nor post; a muted student reads but cannot post, and the mute survives leaving and
+rejoining; only the owning teacher mutes, and only a current member; a locked chat takes posts from
+its teacher only, and a student cannot lock it; an archived classroom takes no posts but is still
+moderated; a Class 9 student whose guardian withdrew consent cannot post; a deleted message is hidden
+from the class and kept for the teacher; only the owning teacher deletes; and tombstones reach the
+class and nobody else.
+
+### Classroom — the parent's overview
+
+`20261005140000` (classroom Phase 8, `prd.md` CL-10). A parent has **no read policy on any
+classroom table**; this one function is their whole view.
+
+| Function | Calling endpoint | Returns | Notes |
+|---|---|---|---|
+| `app.guardian_classroom_overview() → (student_id, student_name, space_id, space_title, space_status, subject_name, teacher_name, assignment_id, assignment_title, due_at, points, turned_in_at, grade, returned_at)` | `GET /api/parent/classrooms` | one row per child × classroom × assignment | **No parameters**: the parent is `app.current_user_id()` (the `change_password` pattern), so it cannot be aimed at another family. Verified links only; an active student account; the child's **current** classrooms (one they left drops out; an archived one stays, with its status); published assignments due in the last 120 days or undated; `grade` only once `returned_at` is set. A verified child in no classroom is one row with the classroom columns `NULL`. Never feedback, the work, files, links, the chat or a classmate. `20261005140000:29` |
+
+`TestParentOverview` (10 tests, `test_classroom_rls.py`) pins it: a verified parent sees the
+classroom, its teacher and its classwork; the result has exactly these columns and no classmate; a
+grade appears only once returned; scheduled and long-past assignments are left out; an archived
+classroom stays labelled; a pending or revoked link shows nothing; another family sees none of
+this child; a teacher or a student gets no row; a classroom the child left drops out while the
+child stays; and a parent reads **no** classroom table directly — not the classroom, the roster,
+the stream, the assignments, the work, the grades, the files, the links or the chat.
+
 ### The trigger function
 
 | Function | Volatility | Definer? | Returns | Grant | Defined at |
 |---|---|---|---|---|---|
-| `app.set_updated_at()` | default `VOLATILE` | No | `trigger` — sets `NEW.updated_at = now()` | default `PUBLIC` | `20260801120000:85` |
+| `app.set_updated_at()` | default `VOLATILE` | No | `trigger` — sets `NEW.updated_at = now()` | `app_backend` (`20260816190000`) | `20260801120000:85` |
 
-Wired to nine tables (`grep -c '^CREATE TRIGGER' supabase/migrations/*.sql`). Three profile tables
-carry `updated_at` columns with **no** trigger attached — finding D14.
+**17** `CREATE TRIGGER` statements (`grep -hE '^CREATE TRIGGER' supabase/migrations/*.sql | wc -l`,
+re-measured 2026-10-04). The profile tables that once carried `updated_at` with no trigger
+(finding D14) were closed by `20260817150000` — see the section below.
 
 ### Session and token lifecycle — `POST /auth/login`, `/auth/refresh`, `/auth/logout`
 
@@ -774,6 +991,75 @@ never silently grant free access forever.
 teacher, parent or admin path and no privileged function touching them. Re-verified in the Epic 1
 review; **this invariant holds**.
 
+⚠️ **Classroom chat is a different thing and must never reuse these tables.** The owner brought a
+class-public classroom chat into v1 (2026-10-03); it is its own table, `space_message`
+(`20261005130000`, classroom Phase 7), class-public by design, with teacher moderation — see
+[invariant 13](#13-who-may-post-in-the-class-chat-is-the-insert-policy). Invariant 8 is about the
+private **tutor** conversation and is unchanged by it.
+
+### 9. Classroom membership and codes are written only by functions
+
+Since `20261004120000`, `app_backend` holds **no** write grant on `enrollment` or `join_code`, no
+INSERT or DELETE on `classroom_space`, and no DELETE on `teacher_subject_scope`. Every change goes
+through a `SECURITY DEFINER` function that reads the actor from `app.current_user_id()`. **Do not
+grant a write privilege back to make an endpoint easier** — add a narrow function, the same rule as
+pre-authentication access (`backend/CLAUDE.md` §3). `test_classroom_rls.py` asserts each refusal by
+its message.
+
+### 10. Scheduled classroom content is hidden by the read policy, not by a job or the interface
+
+Since `20261004130000`, a member reads an announcement only when `publish_at <= now()`. **There is no
+publisher** — no background job, no status column; the post becomes visible because the predicate
+starts to hold. So do not add a `published` flag (it would drift from the timestamp it summarises),
+and do not filter scheduled rows in the service instead of the policy (a missed filter would leak a
+post early, which is exactly what the second layer exists to stop). The owner's read policy has no
+time condition, so the teacher sees their own scheduled posts. Assignments follow the same rule
+(`assignment_member_read`, `20261004140000`), and a scheduled assignment cannot be submitted to either
+(`app.submittable_space` requires `publish_at <= now()`).
+
+### 11. A teacher-owned field on a student-owned row is its own table
+
+Every application user connects as `app_backend`, so a column grant cannot tell a teacher from a
+student. A grade stored as a column on `assignment_submission` would therefore be writable by the
+student whose work it grades. That is why `submission_grade` is a separate table, why neither table
+has any write grant, and why `submission_teacher_read` adds `turned_in_at IS NOT NULL`: the student
+owns the draft until they hand it in. **Do not "simplify" the grade onto the submission row.** Status
+(late, missing, graded) is likewise never stored — it is derived from three timestamps owned by two
+people, and a stored copy would drift the first time a deadline moved.
+
+### 12. A stored file is authorized by its row, and its key is held to its owner by the database
+
+Since `20261004150000`, the bytes live in a private bucket that only the backend reaches; the tables
+decide who may see each object, and a download is served only after its row has been read under
+Row-Level Security. The object key **is** the storage boundary, so `ck_material_key` and
+`ck_subfile_key` hold it to `s/<space>/…` and `u/<space>/<student>/…`: a service bug that passes
+another student's key is a CHECK violation, not a leak. **Do not add a `storage.objects` policy, or
+any link path that skips the row read**, and do not loosen either CHECK. The one link that exists
+(classroom Phase 6b, `file_service.view_link`) is minted only **after** that read, for PDF and images
+only, and lives five minutes: it is a bearer pass to one object, never stored or logged. Objects are stored before
+their row and deleted only **after** the deleting transaction commits — so a rollback can orphan an
+object, never a row (`backend/app/classroom/storage.py`).
+
+### 13. Who may post in the class chat is the insert policy
+
+Since `20261005130000`, every safeguard `prd.md` CL-5 requires of the class chat is a database fact:
+`space_message_insert` calls `app.can_post_message`, so a muted student, a locked chat, an archived
+classroom, a student who left and a Class 9–10 student without a verified guardian are each refused
+by PostgreSQL, whatever the service does. The service asks the same function first only so that a
+refusal is a reason the student can act on. A deletion is a stamp, never a `DELETE`: members stop
+reading the row, the teacher keeps it for review. **Do not add an UPDATE or DELETE grant, a member
+read path to deleted rows, or a second way to post.**
+
+### 14. A parent reads the classroom through one function, never through a policy
+
+Since `20261005140000`, a parent's whole view of a child's classrooms is
+`app.guardian_classroom_overview()` — anchored on the caller, with no parameters. Row-Level Security
+is per **row**: a parent read policy on `assignment_submission` or `submission_grade` would hand
+over the student's answer and the teacher's private feedback along with the turn-in time and the
+grade, and the service would be all that stood between them and the parent (`prd.md` CL-10 forbids
+both). **Do not add a parent read policy to a classroom table**; add a column to the function
+instead, if CL-10 ever allows one.
+
 ---
 
 ## Known gaps
@@ -784,8 +1070,8 @@ Recorded here rather than deferred until fixed, per the Phase 0 honesty rules. T
 ### How to read this section
 
 **These are defence-in-depth failures, not remote exploits.** Reaching any of them requires the
-ability to run arbitrary SQL as `app_backend`, and every implemented route is narrow — 17 of 48
-endpoints exist, each issuing fixed statements with bound parameters. The Epic 1 review confirmed
+ability to run arbitrary SQL as `app_backend`, and every implemented route is narrow — 55 of the 83
+specified endpoints exist, each issuing fixed statements with bound parameters. The Epic 1 review confirmed
 that **no current route passes a request-controlled user identifier** into a privileged function.
 
 What is false today is the promise in user-story card 1.5: *"each request checked by the
@@ -810,9 +1096,9 @@ land.
 | **B6** | **FIXED, Phase 2 (`20260816170000`).** `auth_token_owner` was `FOR ALL`, so revocation was **reversible** — logout, password reset and the response to detected theft were all undoable by the owner. Replaced with `FOR SELECT` plus `FOR UPDATE … WITH CHECK (revoked = true)`: a **one-way door**. ⚠️ A column grant would NOT have worked — `GRANT UPDATE (revoked)` permits `false` as readily as `true`. Only a `WITH CHECK` expresses "this transition and not its inverse", which is the opposite conclusion from B2/B3. | `20260816170000` |
 | **B7** | **FIXED, Phase 2 (`20260816170000`).** `attempt_student_own`, `attempt_answer_owner`, `mastery_owner`, `coverage_owner` and `readiness_owner` were `FOR ALL` — exactly the numbers `coverage_viewers_read`, `readiness_viewers_read`, `mastery_guardian_read` and `attempt_teacher_read` show a parent or teacher, so a student could rewrite the evidence about themselves. All five are now `FOR SELECT` on the owner, with **no write policy and no write grant**: nothing writes them yet, and the phase that builds those endpoints adds a narrow one. | `20260816170000` |
 | **B8** | `quiz_teacher_write` checks only `created_by`. It never checks the space, and never checks the role — any user who created a quiz row owns it. | `20260801120100:342` |
-| **B9** | `enrollment_student_join` self-enrols into **any** space; `enrollment_leave` has no `WITH CHECK`. | `:289`, `:294` |
-| **B10** | `classroom_space` has no role check — any user can create a space with `owner_role = 'teacher'`. | `20260801120100:269` |
-| **B11** | `teacher_subject_scope` governs only two policies (`coverage_viewers_read`, `readiness_viewers_read`, through `app.teaches_student_subject`). Every other teacher read goes through `app.owns_space()`, which has **no subject-scope check at all**. | `:406`, `:419` vs `:99` |
+| **B9** | **FIXED, classroom Phase 1 (`20261004120000`, `20261004120100`) — applied 2026-10-04 and re-verified on the live database.** `enrollment_student_join` self-enrolled into **any** space and `enrollment_leave` had no `WITH CHECK`. Both dropped; `app_backend` holds **no** write grant on `enrollment`; the only writers are `app.join_space_by_code` (live code, matching board/class/group, guardian gate, removed ≠ rejoinable), `app.leave_space` and `app.remove_student`. **Measured on a shadow database**: the same raw `INSERT INTO enrollment` as `app_backend` succeeds before and is `permission denied` after. | `20261004120000` §4 |
+| **B10** | **FIXED, classroom Phase 1 (`20261004120000`) — applied 2026-10-04 and re-verified on the live database.** `classroom_space` had no role check — any user could create a space with `owner_role = 'teacher'`. `space_owner_write` (FOR ALL) replaced by `space_owner_update`; INSERT/UPDATE/DELETE revoked, `UPDATE (title, status)` granted back; creation only through `app.create_space`, which reads the role from the bound session. Plus `ck_space_owner_is_teacher`. Measured the same way as B9: a student's raw `INSERT INTO classroom_space` succeeds before, `permission denied` after. | `20261004120000` §2 |
+| **B11** | **FIXED, classroom Phase 1 (`20261004120000`) — applied 2026-10-04 and re-verified on the live database.** `app.owns_space()` had **no subject-scope check**, so `teacher_subject_scope` governed only two policies. It now requires an active teacher **and** an unrevoked scope row for the space's subject; `app.teaches_student_subject` honours `revoked_at` too. Scope is self-declared by `app.create_space` (owner decision 2026-10-03) and withdrawn by an administrator stamping `revoked_at`. ⚠️ The quiz attempt teacher reads (`20260801120100:362`, `:384`) narrow with it — intended (`prd.md` §4.2 "own subject only"), and no route reaches them yet. | `20261004120000` §0–§1 |
 | **B12** | `quiz_question` has a SELECT policy only, so the quiz-authoring path has **no write path** through `app_backend`. | `20260801120100:347` |
 | **B13** | Six curriculum policies were changed to `USING (true)`, dropping the bound-user requirement they were created with. Curriculum data is now readable with no session at all. | `20260802140000:55-71` vs `20260801120100:238` |
 | **B14** | `20260802140000`'s header states the six curriculum tables "were never given" a policy. Only the **read** half was missing — `20260801120100:232-247` already gave all six a `*_admin_write`. A migration comment that misdescribes the state it is fixing is how the next contributor inherits the wrong mental model. | `20260802140000:5-14` vs `20260801120100:232-247` |
@@ -861,11 +1147,21 @@ their own session attributed to the assistant. Card 1.5's privacy invariant conc
 chat content, and that still holds: `chat_session`, `message` and `visual_aid` remain owner-only
 with no teacher, parent or admin path and no privileged function touching them.
 
-**`join_code.join_code_owner` stays `FOR ALL`.** A space owner minting and editing codes for a
-space they already own is the behaviour the feature exists to provide, and the predicate
-`app.owns_space(...)` scopes it. The classroom weaknesses that do matter — `classroom_space`
-having no role check, `enrollment_student_join` self-enrolling into any space — are separate
-findings and stay in §2.4.
+~~**`join_code.join_code_owner` stays `FOR ALL`.**~~ **REVERSED by the repository owner on
+2026-10-03, implemented in `20261004120000` §3.** The original reasoning: a space owner minting and
+editing codes for a space they already own is the behaviour the feature exists to provide, and
+`app.owns_space(...)` scopes it. Why it was reversed: while the owner could `INSERT` any string,
+**code entropy and "one live code per space" were application promises, not database facts** — a
+client bug or a future endpoint could store `AAAAAAAA`, and any student with a matching class could
+then walk into a classroom of minors uninvited. Now `join_code_owner_read` is SELECT-only, codes
+are minted in Python with `secrets`, written only by `app.rotate_join_code`, and held to
+`ck_join_code_format` and `uq_join_code_one_live`.
+
+### B27 — found while planning the classroom, 2026-10-03
+
+| # | Finding | Where |
+|---|---|---|
+| **B27** | **FIXED, classroom Phase 3 (`20261004130000`) — applied 2026-10-04 and re-verified on the live database.** `announcement_write` was `FOR INSERT WITH CHECK (app.owns_space(space_id))` and never checked `author_id`, so a classroom owner could publish an announcement **attributed to any user** — another teacher, or a student in the class. Replaced by `announcement_insert`, `announcement_update` and `announcement_delete`, each requiring `author_id = app.current_user_id() AND app.owns_active_space(space_id)`; `UPDATE` narrowed to `(body, publish_at)` so `author_id` cannot be rewritten afterwards. **Measured on a shadow database**: an owner's raw `INSERT … author_id = <another teacher>` as `app_backend` succeeds on the 27-migration schema and is refused with `new row violates row-level security policy` after. `test_classroom_rls.py` `TestAnnouncementBoundary` pins it. | `20260801120100:302` → `20261004130000:76-90` |
 
 
 ### Related findings recorded elsewhere

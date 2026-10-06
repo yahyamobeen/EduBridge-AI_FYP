@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edubridge-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "EduBridge AI Backend - Authentication Module"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -24,6 +24,11 @@ dependencies = [
     # Runtime HTTP client for the server-side Cloudflare siteverify call
     # (moved here from dev; the package was already pinned by dev).
     "httpx>=0.27.0",
+    # Classroom file storage (classroom Phase 6, owner decision 8): the S3
+    # protocol with storage-only access keys, never the Supabase secret key —
+    # which would also bypass every database policy. A runtime dependency, not
+    # an extra: production refuses to start without real storage.
+    "boto3>=1.36.0",
 ]
 
 [project.optional-dependencies]

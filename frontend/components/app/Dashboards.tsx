@@ -1,9 +1,9 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { DashboardShell, PlaceholderCard } from '@/components/app/DashboardShell'
-import { SessionGuard } from '@/components/app/SessionGuard'
-import type { MeResponse } from '@/lib/api/types'
+import { ClassroomsCard } from '@/components/app/ClassroomsCard'
+import { PlaceholderCard } from '@/components/app/DashboardShell'
+import { RequireRole } from '@/components/app/SessionGuard'
 import { firstName } from '@/lib/auth/displayName'
 
 /**
@@ -16,25 +16,19 @@ import { firstName } from '@/lib/auth/displayName'
  * surviving into a demo and then into a report.
  *
  * What IS real here is the navigation and the role boundary, which is the part
- * with security consequences.
+ * with security consequences — and, since classroom Phase 6c, the classroom
+ * card (`ClassroomsCard`), which lists the caller's real classrooms: that
+ * feature exists, so its card must not say otherwise.
  */
-
-function classSummary(me: MeResponse): string {
-  const profile = me.profile
-  if (profile === null) return me.email
-  // `class_level` is a number and `student_group` a code; both come straight
-  // from the profile rather than being re-derived here.
-  return `${profile.board} · ${profile.class_level} · ${profile.student_group}`
-}
 
 export function StudentDashboard() {
   const t = useTranslations('dashboard.student')
   const tc = useTranslations('dashboard.cards')
 
   return (
-    <SessionGuard allow={['student']}>
+    <RequireRole allow={['student']}>
       {(me) => (
-        <DashboardShell me={me} subtitle={classSummary(me)}>
+        <>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
               {t('welcome', { name: firstName(me) })}
@@ -60,16 +54,11 @@ export function StudentDashboard() {
               prd.md §4.2 guarantees a student can see who may view them and can
               leave any space. The right needs a route, so it has a card too.
             */}
-            <PlaceholderCard
-              span={4}
-              title={tc('myClassesTitle')}
-              body={tc('myClassesBody')}
-              href="/coming-soon/my-classes"
-            />
+            <ClassroomsCard role="student" span={4} />
           </div>
-        </DashboardShell>
+        </>
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -78,9 +67,9 @@ export function TeacherDashboard() {
   const tc = useTranslations('dashboard.cards')
 
   return (
-    <SessionGuard allow={['teacher']}>
+    <RequireRole allow={['teacher']}>
       {(me) => (
-        <DashboardShell me={me} subtitle={t('role')}>
+        <>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
               {t('welcome', { name: firstName(me) })}
@@ -89,15 +78,16 @@ export function TeacherDashboard() {
           </header>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
-            <PlaceholderCard span={8} title={tc('spacesTitle')} body={tc('spacesBody')} />
-            <PlaceholderCard span={4} title={tc('rosterTitle')} body={tc('rosterBody')} />
+            {/* The whole row: each classroom's People tab is the roster, so the
+                "Class roster" placeholder that sat here was removed (2026-10-06). */}
+            <ClassroomsCard role="teacher" span={12} />
             {/* Subject-scoped only: there is no teacher-wide weekly report. */}
             <PlaceholderCard span={6} title={tc('reportsTitle')} body={tc('reportsBody')} />
             <PlaceholderCard span={6} title={tc('sloTitle')} body={tc('sloBody')} />
           </div>
-        </DashboardShell>
+        </>
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -106,9 +96,9 @@ export function ParentDashboard() {
   const tc = useTranslations('dashboard.cards')
 
   return (
-    <SessionGuard allow={['parent']}>
+    <RequireRole allow={['parent']}>
       {(me) => (
-        <DashboardShell me={me} subtitle={t('role')}>
+        <>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
               {t('welcome', { name: firstName(me) })}
@@ -137,9 +127,9 @@ export function ParentDashboard() {
               <p className="text-body-md text-on-surface">{tc('privacyBody')}</p>
             </section>
           </div>
-        </DashboardShell>
+        </>
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }
 
@@ -148,9 +138,9 @@ export function AdminDashboard() {
   const tc = useTranslations('dashboard.cards')
 
   return (
-    <SessionGuard allow={['admin']}>
+    <RequireRole allow={['admin']}>
       {(me) => (
-        <DashboardShell me={me} subtitle={t('role')}>
+        <>
           <header className="mb-8">
             <h1 className="font-headline text-headline-lg text-on-background">
               {t('welcome', { name: firstName(me) })}
@@ -213,8 +203,8 @@ export function AdminDashboard() {
               <p className="text-body-md text-on-surface">{tc('adminPrivacyBody')}</p>
             </section>
           </div>
-        </DashboardShell>
+        </>
       )}
-    </SessionGuard>
+    </RequireRole>
   )
 }

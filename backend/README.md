@@ -45,6 +45,7 @@ cp .env.example .env
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | At least 32 chars; `openssl rand -hex 32`. Rejected if left as the placeholder. |
 | `APP_ENV` | `production` closes `/docs`, sets the cookie `secure` flag, and forbids a `*` CORS origin. |
 | `CORS_ORIGINS` | Never `*`. With credentials enabled a wildcard makes Starlette echo the caller's origin, so any site could use a user's refresh cookie. |
+| `STORAGE_PROVIDER` | Classroom files. `memory` (the default) keeps them in process memory for local work and tests, and is refused in production. `s3` needs `STORAGE_S3_ENDPOINT`, `STORAGE_S3_REGION` and **storage-only** S3 keys (`STORAGE_S3_ACCESS_KEY_ID`, `STORAGE_S3_SECRET_ACCESS_KEY` — Supabase dashboard → Storage → S3 Connection), never the project secret key. |
 
 ## Pre-authentication is the interesting case
 
@@ -79,9 +80,15 @@ After changing a dependency in `pyproject.toml`, regenerate and commit the lock
 
 ```bash
 uv lock
-uv export --format requirements-txt --no-hashes --no-emit-project -o requirements.txt
+uv export --format requirements-txt --no-hashes --no-emit-project --extra email -o requirements.txt
 uv export --format requirements-txt --no-hashes --no-emit-project --extra dev -o requirements-dev.txt
 ```
+
+`requirements.txt` carries the `email` extra because it is what Render installs, and
+production sends through SendGrid. `requirements-dev.txt` keeps its hand-written
+header: re-add it above the export. Locally, `uv sync --extra dev` alone removes
+the `email` extra from the environment — use `uv sync --extra dev --extra email`
+when the backend sends real mail.
 
 `requirements.txt` and `requirements-dev.txt` are pinned exports for pip users
 and anything that cannot run uv. `uv.lock` remains the source of truth.

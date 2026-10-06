@@ -51,6 +51,10 @@ _TEST_ENV = {
     # value is otherwise opaque, so a fixed string is as real as it needs to be.
     # No unit test ever calls siteverify; this exists only so Settings validates.
     "TURNSTILE_SECRET_KEY": "0" * 40,
+    # Pinned for the same reason as EMAIL_PROVIDER: a developer `.env` carrying
+    # real S3 keys must never reach a unit test, and nothing here may touch
+    # real storage (classroom Phase 6).
+    "STORAGE_PROVIDER": "memory",
 }
 
 for key, value in _TEST_ENV.items():

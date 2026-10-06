@@ -386,11 +386,26 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
         #    attempt at this list put `auth_token` before `app_user` and failed
         #    on the ordering rather than on the contents. Keep it sorted.
         assert actual == [
+            # 20261004130000 (classroom Phase 3) — an author may edit the text
+            # and reschedule; `author_id`, `space_id` and `created_at` are not
+            # writable, so a post can never be re-attributed or moved.
+            ("announcement", "body", "UPDATE"),
+            ("announcement", "publish_at", "UPDATE"),
             # 20260816160000 (B2, B3, B4) — the only self-editable fields.
             ("app_user", "full_name", "UPDATE"),
             # 20260816200000 (FR-A8) — the stored preference that governs
             # outgoing email, for every role rather than students only.
             ("app_user", "language_pref", "UPDATE"),
+            # 20261004140000 (classroom Phase 4) — what a teacher may edit.
+            # `space_id`, `subject_id` and `author_id` are not writable, so an
+            # assignment can never move classroom or subject, and the chapter
+            # tag is still held to the subject by a composite foreign key.
+            ("assignment", "chapter_id", "UPDATE"),
+            ("assignment", "due_at", "UPDATE"),
+            ("assignment", "instructions", "UPDATE"),
+            ("assignment", "points", "UPDATE"),
+            ("assignment", "publish_at", "UPDATE"),
+            ("assignment", "title", "UPDATE"),
             # 20260817120000 (Phase 4) — `revoke_user_tokens` (logout) is the
             # only plain UPDATE against `auth_token` in the application, and it
             # names this column alone. Narrowed when `family_started_at`,
@@ -399,6 +414,23 @@ class TestTheGrantsAreWhereWeThinkTheyAre:
             # author their own revocation reason and rewrite the family start,
             # defeating the absolute session cap that migration exists to create.
             ("auth_token", "revoked", "UPDATE"),
+            # 20261004120000 (B10) — the owner may rename and archive, nothing
+            # else. INSERT is app.create_space only; there is no DELETE, and
+            # `owner_id`, `owner_role` and `subject_id` are not writable, so a
+            # classroom can never be moved to another teacher or subject.
+            # 20261005130000 (classroom Phase 7) adds the chat lock, under the
+            # same owner-only policy.
+            ("classroom_space", "chat_locked", "UPDATE"),
+            ("classroom_space", "status", "UPDATE"),
+            ("classroom_space", "title", "UPDATE"),
+            # 20261005130000 (classroom Phase 7) — posting names the classroom,
+            # the author and the text, nothing else: `created_at` and the
+            # moderation columns take their defaults, so neither a message's
+            # time nor its deletion can be forged. The author is held to the
+            # caller by `space_message_insert`.
+            ("space_message", "author_id", "INSERT"),
+            ("space_message", "body", "INSERT"),
+            ("space_message", "space_id", "INSERT"),
             # Kept deliberately: dropping it would leave `student_profile` with
             # no updatable column at all. Nothing READS it any more —
             # `app_user.language_pref` is the source of truth as of

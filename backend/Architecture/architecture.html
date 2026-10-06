@@ -133,9 +133,10 @@
 
     <section class="prose">
       <h2>Overview</h2>
-      <p>The backend is a <strong>single FastAPI application with one router</strong>. All server logic lives under
-      <code>backend/app/</code>: <code>app/auth/</code> (the router, the service layer, dependencies, tokens, the gate,
-      the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/core/</code> (configuration, the
+      <p>The backend is a <strong>single FastAPI application with two routers</strong>. All server logic lives under
+      <code>backend/app/</code>: <code>app/auth/</code> (the authentication router, the service layer, dependencies, tokens, the gate,
+      the onboarding derivation, email, TOTP, backup codes, Turnstile), <code>app/classroom/</code> (the classroom
+      router, its role dependencies, schemas, service, join-code generation, the stream, assignments and grading, the calendar, the keyset cursor, files with their object store, a student's links, the class chat, and the parent's read-only overview — classroom Phases 2–8), <code>app/core/</code> (configuration, the
       database engines and the per-transaction user binding, the error envelope, the rate limiter) and
       <code>app/models/</code> (SQLAlchemy ORM declarations and the Python enumerations mirroring the PostgreSQL types).</p>
       <p>The datastore is <strong>PostgreSQL on Supabase</strong>, with the schema owned by versioned SQL migrations in
@@ -145,12 +146,12 @@
       that talks to this backend over HTTP.</p>
 
       <div class="grid">
-        <div class="stat"><div class="n">26</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
-        <div class="stat"><div class="n">1</div><div class="l">router · <code>app/auth/routes.py</code> <span class="ln">:79</span></div></div>
-        <div class="stat"><div class="n">17</div><div class="l">implemented routes · <code>grep -c "^@router\." backend/app/auth/routes.py</code></div></div>
-        <div class="stat"><div class="n">31</div><div class="l">specified but missing · 48 in <code>tdd.md</code> §3.1 + §7.2, minus 17</div></div>
-        <div class="stat"><div class="n">11</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
-        <div class="stat"><div class="n">25</div><div class="l">test files · 10 unit + 15 integration</div></div>
+        <div class="stat"><div class="n">44</div><div class="l">Python files · <code>find backend/app -type f -name "*.py" | wc -l</code></div></div>
+        <div class="stat"><div class="n">2</div><div class="l">routers · <code>app/auth/routes.py</code> <span class="ln">:90</span> · <code>app/classroom/routes.py</code> <span class="ln">:85</span></div></div>
+        <div class="stat"><div class="n">64</div><div class="l">implemented routes · 21 auth + 43 classroom</div></div>
+        <div class="stat"><div class="n">23</div><div class="l">specified but missing · 87 in <code>tdd.md</code>, minus 64</div></div>
+        <div class="stat"><div class="n">33</div><div class="l">applied migrations · <code>ls supabase/migrations/*.sql | wc -l</code></div></div>
+        <div class="stat"><div class="n">53</div><div class="l">test files · 22 unit + 31 integration</div></div>
       </div>
 
       <div class="callout warn">
@@ -181,15 +182,15 @@
 flowchart TB
   CL["Client<br/><span class='ln'>Next.js frontend · same repo · HTTP</span>"]
   subgraph L1["1-2 · Middleware"]
-    CORS["CORSMiddleware<br/><span class='ln'>main.py:61 · allow_credentials, never '*'</span>"]
-    RC["request_context<br/><span class='ln'>main.py:69 · X-Request-ID + 3 security headers</span>"]
+    CORS["CORSMiddleware<br/><span class='ln'>main.py:100 · allow_credentials, never '*'</span>"]
+    RC["request_context<br/><span class='ln'>main.py:108 · X-Request-ID + 3 security headers</span>"]
   end
   subgraph L3["3 · Route — the ONLY router"]
     R["app/auth/routes.py<br/><span class='ln'>:79 · 17 routes · mounted at /api</span>"]
-    H["GET /health<br/><span class='ln'>main.py:86 · outside /api, unlimited</span>"]
+    H["GET /health<br/><span class='ln'>main.py:126 · outside /api, unlimited</span>"]
   end
   subgraph L4["4 · Rate limit"]
-    RL["enforce(...)<br/><span class='ln'>core/ratelimit.py:117 · in-process, single instance</span>"]
+    RL["enforce(...)<br/><span class='ln'>core/ratelimit.py:160 · in-process, single instance</span>"]
   end
   subgraph L5["5 · Identity"]
     AU["authenticated<br/><span class='ln'>auth/dependencies.py:29 · binds app.current_user_id</span>"]
@@ -202,7 +203,7 @@ flowchart TB
   end
   subgraph L7["7 · Data"]
     TX["SQLAlchemy Core text() · bound params<br/><span class='ln'>no string interpolation anywhere</span>"]
-    PG["PostgreSQL as app_backend<br/><span class='ln'>NOBYPASSRLS · verified at boot main.py:37</span>"]
+    PG["PostgreSQL as app_backend<br/><span class='ln'>NOBYPASSRLS · verified at boot main.py:40</span>"]
     SD["app.* SECURITY DEFINER<br/><span class='ln'>24 functions · pre-auth only</span>"]
   end
   CL --> CORS --> RC --> R
@@ -224,12 +225,12 @@ flowchart TB
         this page must render in a viva room with the network disabled.</div>
       </div>
 
-      <h3>1 · CORS <span class="ln">main.py:61</span></h3>
+      <h3>1 · CORS <span class="ln">main.py:100</span></h3>
       <p><code>allow_origins</code> comes from <code>settings.cors_origins</code> with
-      <code>allow_credentials=True</code>. The comment at <code>main.py:57-60</code> records why a wildcard is refused:
+      <code>allow_credentials=True</code>. The comment at <code>main.py:96-99</code> records why a wildcard is refused:
       with credentials enabled Starlette does <strong>not</strong> send a literal <code>*</code>, it echoes the
       requesting origin back — so a wildcard would let any site make credentialed calls, and the refresh cookie is a
-      credential. <code>Settings._production_is_actually_hardened</code> <span class="ln">core/config.py:159</span>
+      credential. <code>Settings._production_is_actually_hardened</code> <span class="ln">core/config.py:304</span>
       raises at startup if <code>"*"</code> appears in production.</p>
 
       <div class="callout danger">
@@ -239,7 +240,7 @@ flowchart TB
         <code>INTERNAL_ERROR</code> envelope. Recorded, not yet fixed.
       </div>
 
-      <h3>2 · Request-context middleware <span class="ln">main.py:69</span></h3>
+      <h3>2 · Request-context middleware <span class="ln">main.py:108</span></h3>
       <p>One <code>uuid4</code> per request on <code>request.state.request_id</code>, echoed as
       <code>X-Request-ID</code> and attached to the body of any 500 <span class="ln">errors.py:152</span>. It also sets
       <code>X-Content-Type-Options: nosniff</code>, <code>X-Frame-Options: DENY</code> and
@@ -249,35 +250,35 @@ flowchart TB
 
       <h3>3 · Route <span class="ln">app/auth/routes.py</span></h3>
       <p>The single router is created at <code>routes.py:79</code> and mounted at <code>settings.api_base_path</code>
-      (default <code>/api</code>) by <code>main.py:84</code>. Handlers are thin — enforce a limit, call one service
+      (default <code>/api</code>) by <code>main.py:123</code>. Handlers are thin — enforce a limit, call one service
       function, shape the response. The only non-pass-through route logic is the refresh-cookie write, which appears in
       three handlers <span class="ln">routes.py:119, :188, :220</span>. A standing note sits at the top of the file
       <span class="ln">routes.py:81-85</span>: <strong>no route depends on <code>get_service_db</code></strong>.</p>
       <p><code>GET /health</code> is defined on the application rather than the router
-      <span class="ln">main.py:86</span>, so it sits outside <code>/api</code> and outside the limiter.
+      <span class="ln">main.py:126</span>, so it sits outside <code>/api</code> and outside the limiter.
       <strong>Known defect D16:</strong> it is unauthenticated, unrate-limited, and reports
-      <code>settings.environment</code> <span class="ln">main.py:91</span>.</p>
+      <code>settings.environment</code> <span class="ln">main.py:131</span>.</p>
 
-      <h3>4 · Rate limiter <span class="ln">core/ratelimit.py:117</span></h3>
+      <h3>4 · Rate limiter <span class="ln">core/ratelimit.py:160</span></h3>
       <p><code>enforce(request, bucket=…, limit=…, subject=…)</code> is the first statement of every rate-limited
       handler. It is an <strong>in-process fixed-window counter</strong> over a module-level dictionary guarded by a
-      <code>threading.Lock</code> <span class="ln">ratelimit.py:77-78</span>. Its own docstring states the limit of that
+      <code>threading.Lock</code> <span class="ln">ratelimit.py:120-121</span>. Its own docstring states the limit of that
       design, quoted rather than paraphrased:</p>
       <blockquote>SCOPE, STATED PLAINLY: this is an IN-PROCESS fixed-window counter. It is a real control for a
       single-process deployment and it is NOT sufficient for several workers or several instances, because each keeps
       its own counters — N workers means N times the allowance. <code>REDIS_URL</code> is already in the environment
       template for exactly this reason; moving the store there is the upgrade, and the interface here does not change
       when it happens. <span class="ln">core/ratelimit.py:9-14</span></blockquote>
-      <p>Two keying strategies <span class="ln">ratelimit.py:81</span>. <strong>Pre-authentication</strong> buckets
+      <p>Two keying strategies <span class="ln">ratelimit.py:124</span>. <strong>Pre-authentication</strong> buckets
       (<code>register</code>, <code>login</code>, <code>refresh</code>) key on <code>request.client.host</code>; behind a
       proxy that is the proxy, and <code>X-Forwarded-For</code> is deliberately <em>not</em> trusted because any caller
-      can set it <span class="ln">ratelimit.py:93-96</span>. <strong>Authenticated</strong> buckets pass
+      can set it <span class="ln">ratelimit.py:135-139</span>. <strong>Authenticated</strong> buckets pass
       <code>subject=str(ctx.user_id)</code> so the bucket is per-user — the deployment target is Pakistani school
       laboratories and mobile carriers, where a whole cohort shares one public address, so an address key would let
       fifteen students polling the guardian screen exhaust the allowance for the building
-      <span class="ln">ratelimit.py:82-90</span>.</p>
+      <span class="ln">ratelimit.py:125-133</span>.</p>
       <p>The 2FA endpoints carry a second, per-account layer: the address ceilings are deliberately loose and the real
-      bound is <code>enforce_subject</code> <span class="ln">ratelimit.py:127</span>, called from inside the service once
+      bound is <code>enforce_subject</code> <span class="ln">ratelimit.py:170</span>, called from inside the service once
       a token has identified whose account it is <span class="ln">service.py:720, :802, :923, :1042</span>.</p>
       <table>
         <thead><tr><th>Bucket</th><th>Address limit</th><th>Per-account limit</th><th>Defined at</th></tr></thead>
@@ -285,20 +286,20 @@ flowchart TB
           <tr><td><code>login</code></td><td>10 / 60 s</td><td>—</td><td><span class="ln">ratelimit.py:39</span></td></tr>
           <tr><td><code>register</code></td><td>5 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:40</span></td></tr>
           <tr><td><code>refresh</code></td><td>30 / 60 s</td><td>—</td><td><span class="ln">ratelimit.py:41</span></td></tr>
-          <tr><td><code>guardian_status</code></td><td>60 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:47</span></td></tr>
-          <tr><td><code>guardian_invite</code></td><td>5 / 300 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:48</span></td></tr>
-          <tr><td><code>guardian_confirm</code></td><td>10 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:49</span></td></tr>
-          <tr><td><code>2fa_enroll</code></td><td>60 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:61, :72</span></td></tr>
-          <tr><td><code>2fa_confirm</code></td><td>100 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:62, :73</span></td></tr>
-          <tr><td><code>2fa_verify</code></td><td>200 / 300 s</td><td><strong>10 / 300 s</strong></td><td><span class="ln">ratelimit.py:63, :74</span></td></tr>
-          <tr><td><code>2fa_resend</code></td><td>60 / 300 s</td><td><strong>3 / 300 s</strong></td><td><span class="ln">ratelimit.py:64, :75</span></td></tr>
-          <tr><td><code>email_verify</code></td><td>100 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:65</span></td></tr>
-          <tr><td><code>email_resend</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:66</span></td></tr>
-          <tr><td><code>password_forgot</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:67</span></td></tr>
-          <tr><td><code>password_reset</code></td><td>60 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:68</span></td></tr>
+          <tr><td><code>guardian_status</code></td><td>60 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:55</span></td></tr>
+          <tr><td><code>guardian_invite</code></td><td>5 / 300 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:56</span></td></tr>
+          <tr><td><code>guardian_confirm</code></td><td>10 / 60 s <em>(per user)</em></td><td>—</td><td><span class="ln">ratelimit.py:57</span></td></tr>
+          <tr><td><code>2fa_enroll</code></td><td>60 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:69, :95</span></td></tr>
+          <tr><td><code>2fa_confirm</code></td><td>100 / 300 s</td><td><strong>5 / 300 s</strong></td><td><span class="ln">ratelimit.py:70, :96</span></td></tr>
+          <tr><td><code>2fa_verify</code></td><td>200 / 300 s</td><td><strong>10 / 300 s</strong></td><td><span class="ln">ratelimit.py:71, :97</span></td></tr>
+          <tr><td><code>2fa_resend</code></td><td>60 / 300 s</td><td><strong>3 / 300 s</strong></td><td><span class="ln">ratelimit.py:72, :98</span></td></tr>
+          <tr><td><code>email_verify</code></td><td>100 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:73</span></td></tr>
+          <tr><td><code>email_resend</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:74</span></td></tr>
+          <tr><td><code>password_forgot</code></td><td>30 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:75</span></td></tr>
+          <tr><td><code>password_reset</code></td><td>60 / 300 s</td><td>—</td><td><span class="ln">ratelimit.py:76</span></td></tr>
         </tbody>
       </table>
-      <p><code>rate_limited_with_retry</code> <span class="ln">ratelimit.py:135</span> puts a real
+      <p><code>rate_limited_with_retry</code> <span class="ln">ratelimit.py:178</span> puts a real
       <code>retry_after</code> into <code>details</code> so the client's countdown is honest.
       <strong>Known defect E3:</strong> it goes into the JSON body, not the HTTP <code>Retry-After</code> header that
       <code>tdd.md</code> §7.3 specifies.</p>
@@ -333,8 +334,72 @@ flowchart TB
       <p>Queries are SQL strings passed to <code>sqlalchemy.text()</code> with <strong>bound parameters</strong>. The ORM
       declarations exist for the few statements that use them (<code>revoke_user_tokens</code>
       <span class="ln">auth/tokens.py:150</span> is the only ORM write in a request path) and as documentation of a
-      schema the migrations own. There is <strong>no SQL string interpolation anywhere</strong> in the backend —
-      checked across the whole codebase during the Epic 1 review and recorded as verified-correct.</p>
+      schema the migrations own. There is <strong>no SQL string interpolation of a value anywhere</strong> in the backend —
+      checked across the whole codebase during the Epic 1 review and recorded as verified-correct. Three places build a
+      statement's <em>shape</em> from fixed literals and mark it <code># noqa: S608</code>: <code>auth/service.py</code>
+      <code>update_me</code>, and <code>classroom/service.py</code> <code>require_owner</code> and <code>update_space</code>.</p>
+
+      <h3>8 · The classroom router — <code>app/classroom/</code> (classroom Phases 2–8)</h3>
+      <p>Same layers, one difference: <strong>the database decides which classroom a caller may touch.</strong> The
+      dependency decides only <em>who</em> may call — <code>participant</code> and <code>gated_student</code> wrap
+      <code>require_guardian_verified</code>; leaving uses <code>require_role('student')</code> alone, because leaving is a
+      consent right. The service calls an <code>app.*</code> function that reads the actor from
+      <code>app.current_user_id()</code> and <strong>returns an outcome instead of raising</strong>, so every refusal maps
+      to a catalogued error rather than a 500. An unknown id and someone else's id get the same byte-identical
+      <code>403 FORBIDDEN_SCOPE</code>; a SQLSTATE <code>42501</code> reaching the service is logged and answered as 403
+      (<code>rls_refusal_as_forbidden</code>, <span class="ln">classroom/service.py:55</span>). Buckets
+      <code>classroom_read</code>, <code>classroom_write</code> and <code>classroom_join</code> (10 per 5 minutes), and for files
+      <code>file_upload</code> (30 per hour) and <code>file_download</code> (60 per minute), and for the chat
+      <code>chat_poll</code> (60 per minute) and <code>chat_post</code> (10 per minute), all per user.
+      Route table: <a href="api-endpoints.md">api-endpoints.md §2.8</a>.</p>
+      <p>The stream (classroom Phase 3, <code>classroom/announcements.py</code>) adds two rules. <strong>Scheduling is the
+      database's job</strong>: a future <code>publish_at</code> hides a post from members through the read policy
+      (<span class="ln">20261004130000</span>), so the service runs one list query for owner and member and never filters
+      scheduled rows itself; it checks only that a requested time is in the future and within a year, against the
+      <strong>database</strong> clock. <strong>Lists are keyset-paginated</strong>: <code>classroom/pagination.py</code>
+      encodes the last row's <code>(publish_at, id)</code> as an opaque cursor and refuses a timezone-naive one, so a page
+      boundary never skips or repeats a post as new ones arrive.</p>
+      <p>Assignments and grading (classroom Phase 4, <code>classroom/assignments.py</code>) add three more. <strong>Status
+      is derived, never stored</strong> (<code>classroom/status.py</code>, a pure function of three timestamps against the
+      database clock). <strong>Every submission and grade write is an <code>app.*</code> function</strong>
+      (<span class="ln">20261004140000</span>) — neither table has a write grant, because a column grant cannot tell a
+      teacher from a student; a state refusal is <code>400</code> with <code>details.reason</code>. <strong>Visibility is
+      the database's</strong>: a draft is hidden from the teacher until turned in, a grade from the student until
+      returned, and both from the teacher once the student leaves.</p>
+      <p>The calendar (classroom Phase 5, <code>classroom/calendar.py</code>) has no table, migration or policy of its own:
+      one <code>UNION ALL</code> over the assignment and announcement tables, under their policies, so it shows only what the
+      caller could already see. Ranges are bounded at 62 days and results capped at 500.</p>
+      <p>Files (classroom Phase 6) split three ways. <code>classroom/files.py</code> is <strong>pure</strong>: it counts
+      the raw body against <code>Content-Length</code> (never multipart — Starlette does not cap a file part, and the
+      Next.js proxy silently truncates past 10 MB), reads the type from the first bytes, refuses macro-bearing Office
+      files, cleans the name and builds the download headers. <code>classroom/file_service.py</code> stores the object
+      <strong>first</strong> and writes its row <strong>second</strong>, through an <code>app.*</code> function that
+      checks the lock and the quotas (<span class="ln">20261004150000</span>), so no lock is held while a body crosses
+      the network; a download reads the row under RLS before opening the object. The upload handlers are the only
+      <code>async</code> routes — they must read the stream — and still run every database step in the threadpool. The
+      object store is <code>classroom/storage.py</code>, below.</p>
+      <p>Phase 6b adds <strong>links</strong> — rows of their own (<span class="ln">20261005120000</span>), up to five per
+      piece of work, written only through <code>app.add_submission_link</code> / <code>remove_submission_link</code> and
+      read under the file's policy (<code>classroom/links.py</code>) — and <strong>viewing</strong>: after the same row read
+      as a download, <code>file_service.view_link</code> signs a five-minute link that opens a PDF or an image on the
+      storage service's domain, never in the application's pages. Office files are download-only.</p>
+      <p>The <strong>class chat</strong> (classroom Phase 7, <code>classroom/chat.py</code>,
+      <span class="ln">20261005130000</span>) is class-public and is never the tutor conversation. <strong>Who may post
+      is the insert policy</strong>: a student writes <code>space_message</code> directly, through a column-limited
+      <code>INSERT</code> that <code>space_message_insert</code> holds to the caller and to <code>app.can_post_message</code>
+      (unmuted, unlocked, active, guardian gate passed — the teacher always); the service asks the same function first so
+      a member's refusal carries a <code>details.reason</code> — <code>archived</code>, <code>muted</code>,
+      <code>chat_locked</code>. <strong>Polling uses the database's clock</strong>: the cursor is the reading
+      transaction's <code>now()</code>, each catch-up re-reads a 15-second overlap and the client merges by id;
+      deletions reach a member as ids only (<code>app.space_message_tombstones</code>). <strong>Moderation is retained
+      and audited</strong>: the teacher's delete is a stamp they can still read, mute is <code>enrollment.muted_at</code>,
+      and the lock is <code>classroom_space.chat_locked</code> through the existing <code>PATCH</code>.</p>
+      <p>The <strong>parent's overview</strong> (classroom Phase 8, <code>classroom/parent.py</code>,
+      <span class="ln">20261005140000</span>) is the one classroom route a parent reaches. It reads <strong>one
+      function and no table</strong>: <code>app.guardian_classroom_overview()</code> takes no parameters, so it is
+      anchored on the caller, and returns only what CL-10 allows — a verified child's classrooms, teachers, deadlines
+      and returned grades. A function rather than parent read policies, because a policy releases whole rows: the
+      feedback beside the grade, the work beside the turn-in time.</p>
     </section>
 
     <section class="prose">
@@ -368,7 +433,7 @@ flowchart TB
       <span class="ln">core/db.py:103</span>. Being unable to <em>check</em> is also a refusal, reported separately as
       <code>DatabaseUnreachableError</code> <span class="ln">core/db.py:107</span> — the two mean opposite things and
       need different responses from whoever reads the log. Wired into the lifespan at
-      <span class="ln">main.py:37</span>.</p>
+      <span class="ln">main.py:40</span>.</p>
 
       <h3>What Card 1.5 promises</h3>
       <blockquote>As a security administrator, I want each request checked by the application and again by the database,
@@ -498,9 +563,9 @@ flowchart TB
 sequenceDiagram
   autonumber
   participant C as Client
-  participant M as Middleware<br/>main.py:61,:69
+  participant M as Middleware<br/>main.py:100,:108
   participant R as Route<br/>auth/routes.py
-  participant L as Rate limiter<br/>ratelimit.py:117
+  participant L as Rate limiter<br/>ratelimit.py:160
   participant A as authenticated<br/>dependencies.py:29
   participant S as Service<br/>auth/service.py
   participant D as PostgreSQL<br/>as app_backend
@@ -544,9 +609,9 @@ sequenceDiagram
       <table>
         <thead><tr><th>Kind</th><th>Lifetime</th><th>Storage</th><th>Accepted by</th></tr></thead>
         <tbody>
-          <tr><td><code>refresh</code></td><td><strong>7 days</strong> default <span class="ln">config.py:50</span></td><td><code>auth_token</code>, hashed. Plaintext goes <strong>only</strong> into an httpOnly, path-scoped <code>refresh_token</code> cookie <span class="ln">routes.py:119-132</span> — deliberately absent from the response body <span class="ln">routes.py:133-139</span></td><td><code>POST /api/auth/refresh</code> <em>only</em></td></tr>
-          <tr><td><code>two_factor_enrollment</code></td><td><strong>900 s</strong> <span class="ln">config.py:51</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/enroll</code>, <code>POST /api/auth/2fa/confirm</code></td></tr>
-          <tr><td><code>two_factor_pending</code></td><td><strong>300 s</strong> <span class="ln">config.py:52</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/verify</code>, <code>POST /api/auth/2fa/resend</code></td></tr>
+          <tr><td><code>refresh</code></td><td><strong>7 days</strong> default <span class="ln">config.py:64</span></td><td><code>auth_token</code>, hashed. Plaintext goes <strong>only</strong> into an httpOnly, path-scoped <code>refresh_token</code> cookie <span class="ln">routes.py:119-132</span> — deliberately absent from the response body <span class="ln">routes.py:133-139</span></td><td><code>POST /api/auth/refresh</code> <em>only</em></td></tr>
+          <tr><td><code>two_factor_enrollment</code></td><td><strong>900 s</strong> <span class="ln">config.py:65</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/enroll</code>, <code>POST /api/auth/2fa/confirm</code></td></tr>
+          <tr><td><code>two_factor_pending</code></td><td><strong>300 s</strong> <span class="ln">config.py:66</span></td><td><code>auth_token</code>, hashed. Plaintext in the login response body</td><td><code>POST /api/auth/2fa/verify</code>, <code>POST /api/auth/2fa/resend</code></td></tr>
           <tr><td><code>two_factor_email_otp</code></td><td><strong>600 s</strong> <span class="ln">service.py:95</span></td><td><code>auth_token</code>, hashed. The six-digit code is emailed</td><td><code>POST /api/auth/2fa/confirm</code>, <code>POST /api/auth/2fa/verify</code> — as the <code>code</code> field</td></tr>
           <tr><td><code>email_verify</code></td><td><strong>3600 s</strong> <span class="ln">service.py:92</span></td><td><code>auth_token</code>, hashed. Plaintext in an emailed link</td><td><code>POST /api/auth/email/verify</code></td></tr>
           <tr><td><code>password_reset</code></td><td><strong>3600 s</strong> (same constant)</td><td><code>auth_token</code>, hashed. Plaintext in an emailed link</td><td><code>POST /api/auth/password/reset</code></td></tr>
@@ -558,7 +623,7 @@ sequenceDiagram
       <table>
         <thead><tr><th>JWT <code>type</code> claim</th><th>Lifetime</th><th>Issued by</th><th>Accepted by</th></tr></thead>
         <tbody>
-          <tr><td><code>access</code></td><td>15 min default <span class="ln">config.py:49</span></td><td><code>create_access_token</code> <span class="ln">security.py:58</span></td><td>every authenticated route, via <code>decode_access_token</code>'s default <code>expected_type="access"</code> <span class="ln">security.py:92</span></td></tr>
+          <tr><td><code>access</code></td><td>15 min default <span class="ln">config.py:63</span></td><td><code>create_access_token</code> <span class="ln">security.py:58</span></td><td>every authenticated route, via <code>decode_access_token</code>'s default <code>expected_type="access"</code> <span class="ln">security.py:92</span></td></tr>
           <tr><td><code>onboarding</code></td><td>same 15 min</td><td><code>create_onboarding_token</code> <span class="ln">security.py:78</span>; issued by <code>verify_email</code> <span class="ln">service.py:1111-1114</span></td><td><strong>nothing yet</strong> — the default decode requires <code>type == "access"</code>, so it is rejected by every business route including <code>/auth/me</code>. That is the <code>tdd.md</code> §3.1 rule that email verification alone must not become a complete login</td></tr>
         </tbody>
       </table>
@@ -728,7 +793,8 @@ flowchart TB
       <code>guardian_link</code>, ordered <code>(status = 'verified') DESC, created_at DESC LIMIT 1</code>
       <span class="ln">dependencies.py:183-189</span> so a student with several parent links gets the most favourable
       one. A pending gate raises <code>GATE_PENDING</code> (403) <span class="ln">core/errors.py:73</span>.
-      <strong>It is wired to no route</strong> — the learning endpoints it protects are among the 31 that do not exist.
+      <strong>Wired since classroom Phase 2</strong> through <code>participant</code> and <code>gated_student</code>; the
+      learning endpoints it was written for are still among the 35 that do not exist.
       See <a href="api-endpoints.md">api-endpoints.md</a>.</p>
 
       <h3>The write boundary</h3>
@@ -781,7 +847,7 @@ flowchart TB
       <span class="ln">email.py:58-67</span>: the OTP is stored as an HMAC hash, so a code that is neither delivered nor
       logged cannot be recovered by anyone, and 2FA enrolment by email simply could not be completed on a developer
       machine. The safety of that decision rests <em>entirely</em> on
-      <code>_production_is_actually_hardened</code> <span class="ln">config.py:166-171</span> refusing to start with
+      <code>_production_is_actually_hardened</code> <span class="ln">config.py:309-314</span> refusing to start with
       <code>EMAIL_PROVIDER=logging</code> in production.</p>
       <div class="callout warn">
         <span class="t">Adding a provider is two edits, not one</span>
@@ -803,7 +869,7 @@ flowchart TB
       <div class="callout danger">
         <span class="t">Known defects A3, D1 and D8</span>
         <code>email_provider</code> is an unvalidated string, so a typo falls through to the logging sender
-        <strong>and</strong> past the production guard at <code>config.py:166</code>, writing every two-factor code and
+        <strong>and</strong> past the production guard at <code>config.py:309</code>, writing every two-factor code and
         reset link to stdout. Emails are dispatched <strong>before the transaction commits</strong>
         (<code>service.py:198</code> runs before <code>get_db</code>'s commit), so a rolled-back registration still sends
         a verification link. The queue leaks a <code>Future</code> per message into <code>_pending</code>
@@ -838,8 +904,8 @@ flowchart TB
       loop they have finished <span class="ln">service.py:588-595</span>.</p>
 
       <h3>Configuration validation <span class="ln">app/core/config.py</span></h3>
-      <p><code>Settings</code> <span class="ln">config.py:10</span> reads <code>backend/.env</code> through
-      pydantic-settings. The class docstring <span class="ln">config.py:11-24</span> records a real, silent failure:
+      <p><code>Settings</code> <span class="ln">config.py:16</span> reads <code>backend/.env</code> through
+      pydantic-settings. The class docstring <span class="ln">config.py:17-30</span> records a real, silent failure:
       pydantic-settings matches on the <strong>field name</strong>, so <code>environment</code> looked for
       <code>ENVIRONMENT</code> while <code>.env.example</code> set <code>APP_ENV</code>, which was therefore ignored —
       and because <code>environment</code> gates <code>/docs</code> exposure and the refresh cookie's <code>secure</code>
@@ -849,14 +915,14 @@ flowchart TB
       <table>
         <thead><tr><th>Validator</th><th>file:line</th><th>Refuses to start on</th></tr></thead>
         <tbody>
-          <tr><td><code>_secret_is_strong_enough</code></td><td><span class="ln">config.py:106</span></td><td><code>jwt_secret</code> / <code>jwt_refresh_secret</code> under 32 characters, or starting <code>CHANGE_ME</code></td></tr>
-          <tr><td><code>_totp_key_must_be_a_fernet_key</code></td><td><span class="ln">config.py:120</span></td><td>a placeholder or invalid Fernet key — Fernet raises at <em>first use</em>, which would otherwise be the middle of a user's 2FA enrolment, as a 500</td></tr>
-          <tr><td><code>_turnstile_key_is_not_a_placeholder</code></td><td><span class="ln">config.py:145</span></td><td>the placeholder <code>TURNSTILE_SECRET_KEY</code></td></tr>
-          <tr><td><code>_production_is_actually_hardened</code></td><td><span class="ln">config.py:159</span></td><td><code>"*"</code> in <code>cors_origins</code> in production; <code>EMAIL_PROVIDER=logging</code> in production; <code>resend</code> without <code>EMAIL_FROM</code></td></tr>
+          <tr><td><code>_secret_is_strong_enough</code></td><td><span class="ln">config.py:231</span></td><td><code>jwt_secret</code> / <code>jwt_refresh_secret</code> under 32 characters, or starting <code>CHANGE_ME</code></td></tr>
+          <tr><td><code>_totp_key_must_be_a_fernet_key</code></td><td><span class="ln">config.py:245</span></td><td>a placeholder or invalid Fernet key — Fernet raises at <em>first use</em>, which would otherwise be the middle of a user's 2FA enrolment, as a 500</td></tr>
+          <tr><td><code>_turnstile_key_is_not_a_placeholder</code></td><td><span class="ln">config.py:270</span></td><td>the placeholder <code>TURNSTILE_SECRET_KEY</code></td></tr>
+          <tr><td><code>_production_is_actually_hardened</code></td><td><span class="ln">config.py:303</span></td><td><code>"*"</code> in <code>cors_origins</code> in production; <code>EMAIL_PROVIDER=logging</code> in production; a real provider without <code>EMAIL_FROM</code>; a non-<code>https://</code> <code>APP_BASE_URL</code> in production; since classroom Phase 6, <code>STORAGE_PROVIDER=memory</code> in production and — in any environment — <code>STORAGE_PROVIDER=s3</code> without an <code>https://</code> endpoint, a region and real keys, or a <code>MAX_UPLOAD_BYTES</code> outside 1 byte–9 MiB</td></tr>
         </tbody>
       </table>
       <p><code>totp_encryption_key</code> and <code>turnstile_secret_key</code> have <strong>no defaults</strong> on
-      purpose <span class="ln">config.py:58-63</span>: a defaulted encryption key is worse than a missing one, because
+      purpose <span class="ln">config.py:120-132</span>: a defaulted encryption key is worse than a missing one, because
       every deployment that forgot to set it would share the same key and nobody would find out.</p>
 
       <div class="callout">
@@ -912,6 +978,43 @@ flowchart TB
         mail</strong>. The TOTP check passes a float where a <code>datetime</code> is expected. Backup-code download can
         silently produce no file, and the codes are shown once and then lost.
       </div>
+
+      <h3>Object storage <span class="ln">app/classroom/storage.py</span> (classroom Phase 6)</h3>
+      <p>The email seam's shape: a <code>Protocol</code> <span class="ln">storage.py:47</span> with <code>put</code>,
+      <code>open</code>, <code>delete_many</code> and <code>view_url</code> (a five-minute SigV4 link, signed locally with an explicit
+      <code>signature_version="s3v4"</code> — botocore's default Version 2 is refused by Supabase); <code>InMemoryObjectStorage</code> for tests and local work;
+      <code>S3ObjectStorage</code> — Supabase Storage over S3 through <code>boto3</code>, path-style, checksums only when
+      required, imported only when <code>STORAGE_PROVIDER=s3</code>; and a cached factory,
+      <code>get_object_storage</code> <span class="ln">:181</span>. Settings: <code>STORAGE_PROVIDER</code>
+      (<code>memory</code> by default, refused in production), the endpoint, region and <strong>storage-only</strong> S3
+      keys — never the project secret key — <code>STORAGE_BUCKET</code> and <code>MAX_UPLOAD_BYTES</code>
+      <span class="ln">config.py:165-185</span>.</p>
+      <table>
+        <thead><tr><th>Helper</th><th>The object is deleted…</th></tr></thead>
+        <tbody>
+          <tr><td><code>delete_now</code> <span class="ln">:210</span></td><td>at once — the database refused the row a moment after the object was stored</td></tr>
+          <tr><td><code>track_upload</code> <span class="ln">:216</span></td><td>only if the transaction <strong>rolls back</strong></td></tr>
+          <tr><td><code>delete_after_commit</code> <span class="ln">:221</span></td><td>only once the deleting transaction <strong>commits</strong> — a failed request never loses a file whose row survived</td></tr>
+        </tbody>
+      </table>
+      <p>Two <code>Session</code> hooks carry it out (<code>after_commit</code> <span class="ln">:227</span>,
+      <code>after_soft_rollback</code> <span class="ln">:234</span>); deletion runs on a two-worker pool after the
+      response and is <strong>logged, never raised</strong>, and the lifespan drains it at shutdown
+      <span class="ln">main.py:72-75</span>.</p>
+      <div class="callout warn">
+        <span class="t">Callers go through <code>storage.get_object_storage()</code></span>
+        Never a name imported from the module: <code>tests/integration/conftest.py</code> replaces the factory with a
+        fresh in-memory store for every test, so no test can reach real storage — and a captured reference would slip
+        past it.
+      </div>
+      <div class="callout warn">
+        <span class="t">Supabase's S3 endpoint is not S3 in two ways (real-bucket smoke test, 2026-10-05)</span>
+        A <code>DeleteObjects</code> body is read only when it is labelled <code>application/xml</code>, which botocore
+        does not do — every deletion failed with <code>400 "must have required property 'Body'"</code>, silently;
+        <code>_label_xml_body</code> <span class="ln">:168</span> adds the header before signing. And a missing object's
+        <code>NoSuchKey</code> sits in a namespaced <code>&lt;Error&gt;</code> that botocore parses to an empty code, so
+        <code>open</code> tests the 404. Both pinned by <code>TestS3Requests</code>, without a network.
+      </div>
     </section>
 
     <section class="prose">
@@ -921,9 +1024,9 @@ flowchart TB
         <tbody>
           <tr><td><a href="../../prd.md"><code>prd.md</code></a></td><td>Product Requirements Document — the four roles, the monetisation model, §4.3 the parental-consent gate, MON-2 the fail-closed subscription rule</td></tr>
           <tr><td><a href="../../tdd.md"><code>tdd.md</code></a></td><td>Technical Design Document — §3.1 auth and its endpoint table, §6.8 Row-Level Security, §6.9 two-factor authentication, §6.11 client-side security, §7.2 the consolidated endpoint catalogue, §7.3 the error model</td></tr>
-          <tr><td><a href="../../user-stories.md"><code>user-stories.md</code></a></td><td>12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154)</td></tr>
+          <tr><td><code>user-stories.md</code> (outside the repository, in <code>Desktop\EduBridge-AI_FYP-planning\</code>)</td><td>12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154)</td></tr>
           <tr><td><a href="database.html">database.html</a> / <code>database.md</code></td><td>Tables by domain, the <strong>complete Row-Level Security policy catalogue</strong>, the <code>app.*</code> functions with signature and grant, and findings B1–B19 in full</td></tr>
-          <tr><td><a href="api-endpoints.md">api-endpoints.md</a></td><td>Every implemented route → handler → service function with <code>file:line</code>, mapped to its <code>tdd.md</code> §3.1 row, plus the explicit list of the <strong>31 specified-but-missing</strong> routes</td></tr>
+          <tr><td><a href="api-endpoints.md">api-endpoints.md</a></td><td>Every implemented route → handler → service function with <code>file:line</code>, mapped to its <code>tdd.md</code> §3.1 row, plus the explicit list of the <strong>28 specified-but-missing</strong> routes</td></tr>
           <tr><td><a href="../README.md"><code>backend/README.md</code></a></td><td>Environment variables, running and testing commands, and the standing <code>SECURITY DEFINER</code> rule quoted above</td></tr>
           <tr><td><a href="architecture.md">architecture.md</a></td><td>This page as Markdown — a parallel document, not generated from this one; it reads anywhere, this one carries the diagrams</td></tr>
         </tbody>

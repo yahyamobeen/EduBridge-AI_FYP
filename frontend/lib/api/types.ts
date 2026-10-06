@@ -299,3 +299,350 @@ export type SubscriptionResponse = {
   trial_ends_at: string | null
   current_period_end: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Classroom (tdd.md §3.6) — mirrors backend/app/classroom/schemas.py
+// ---------------------------------------------------------------------------
+
+export type SpaceStatus = 'active' | 'archived'
+
+export type SubjectRef = { id: string; name: string; board: BoardCode; class_level: number }
+
+export type SpaceSummary = {
+  id: string
+  title: string
+  status: SpaceStatus
+  subject: SubjectRef
+  owner_name: string | null
+  /** Decided by the SERVER. Owner-only controls render from this, never from the role alone. */
+  viewer_role: 'owner' | 'member'
+  /** False for an owner whose subject scope an administrator revoked. */
+  can_manage: boolean
+  /** Owner only; null for members. */
+  member_count: number | null
+  /** Member only; null for the owner. */
+  joined_at: string | null
+}
+
+export type SpaceDetail = SpaceSummary & {
+  /** The live join code — the database returns it to a scoped owner only. */
+  join_code: string | null
+  /** While true only the teacher posts in the class chat (Phase 7). */
+  chat_locked: boolean
+}
+
+export type SpaceListResponse = { spaces: SpaceSummary[] }
+
+export type SpaceCreateRequest = { title: string; subject_id: string }
+
+export type SpaceUpdateRequest = {
+  title?: string
+  status?: SpaceStatus
+  chat_locked?: boolean
+}
+
+export type JoinCodeResponse = { join_code: string | null }
+
+export type JoinResponse = { space_id: string; already_member: boolean }
+
+/**
+ * `details.reason` on a 400 VALIDATION_ERROR from POST /spaces/join (tdd.md
+ * §7.3). Branch on this, never on `message`. A removed student deliberately
+ * receives `invalid_code`.
+ */
+export type JoinFailureReason = 'invalid_code' | 'class_mismatch' | 'classroom_full'
+
+/** `details.space` on a `class_mismatch` refusal — the student holds the code, so naming the class is not a leak. */
+export type JoinMismatchSpace = {
+  title: string
+  subject_name: string
+  board: BoardCode
+  class_level: number
+}
+
+export type Person = { user_id: string; full_name: string | null }
+
+export type Member = Person & {
+  joined_at: string
+  /** Owner's view only; null for members. */
+  muted: boolean | null
+}
+
+export type PeopleResponse = { owner: Person; members: Member[] }
+
+export type SubjectOption = { id: string; name: string; groups: StudentGroup[] }
+
+export type SubjectsResponse = { subjects: SubjectOption[] }
+
+// Phase 3 — the stream
+
+export type Announcement = {
+  id: string
+  body: string
+  author_id: string
+  /** When members may see it. A future value means scheduled. */
+  publish_at: string
+  /** Only ever true in the owner's view: the database hides scheduled posts from members. */
+  scheduled: boolean
+  created_at: string
+  updated_at: string
+  /** Teacher attachments (Phase 6); a member sees them once the post is live. */
+  attachments: FileMeta[]
+}
+
+export type AnnouncementPage = {
+  items: Announcement[]
+  /** Opaque keyset cursor for the next, older page; null at the end. */
+  next_cursor: string | null
+}
+
+/** `publish_at` must be an ISO instant WITH an offset; omit it to post now. */
+export type AnnouncementCreateRequest = { body: string; publish_at?: string }
+
+export type AnnouncementUpdateRequest = { body?: string; publish_at?: string }
+
+// Phase 4 — assignments, submissions and grades
+
+/** Derived by the server from the timestamps on every read; never stored. */
+export type WorkStatus = 'assigned' | 'turned_in' | 'turned_in_late' | 'missing' | 'graded'
+
+export type ChapterRef = { id: string; number: number; title: string }
+
+export type ChaptersResponse = { chapters: ChapterRef[] }
+
+export type AssignmentSummary = {
+  id: string
+  title: string
+  due_at: string | null
+  points: number | null
+  chapter: ChapterRef | null
+  publish_at: string
+  /** Only ever true in the owner's view, as for announcements. */
+  scheduled: boolean
+  /** Member view only; null for the owner. `my_grade` only once returned. */
+  my_status: WorkStatus | null
+  my_grade: number | null
+  /** Owner view only; null for a member. */
+  turned_in_count: number | null
+}
+
+export type AssignmentPage = { items: AssignmentSummary[]; next_cursor: string | null }
+
+/** The calling student's own work. `grade` and `feedback` are null until returned. */
+export type MySubmission = {
+  body: string
+  turned_in_at: string | null
+  status: WorkStatus
+  grade: number | null
+  feedback: string | null
+  returned_at: string | null
+  /** The student's own uploaded files (Phase 6) and links (Phase 6b). */
+  files: FileMeta[]
+  links: LinkMeta[]
+}
+
+export type AssignmentDetail = AssignmentSummary & {
+  space_id: string
+  instructions: string
+  created_at: string
+  updated_at: string
+  /** Member view only. */
+  my_submission: MySubmission | null
+  /** Teacher attachments (Phase 6). */
+  attachments: FileMeta[]
+}
+
+/** Times are ISO instants WITH an offset (lib/datetime.ts). */
+export type AssignmentCreateRequest = {
+  title: string
+  instructions?: string
+  due_at?: string
+  points?: number
+  chapter_id?: string
+  publish_at?: string
+}
+
+/** Send only what changed. `null` clears `due_at`, `points` or `chapter_id`. */
+export type AssignmentUpdateRequest = {
+  title?: string
+  instructions?: string
+  due_at?: string | null
+  points?: number | null
+  chapter_id?: string | null
+  publish_at?: string
+}
+
+/** Links are their own rows since Phase 6b (`addSubmissionLink`). */
+export type SubmissionDraftRequest = { body: string }
+
+/**
+ * `details.reason` on a 400 from the submission endpoints: `graded` — the
+ * teacher has saved a grade, so the work is locked; `turned_in` — unsubmit first.
+ */
+export type SubmissionRefusalReason = 'graded' | 'turned_in'
+
+export type GradeRequest = {
+  grade: number | null
+  feedback: string
+  return_to_student: boolean
+}
+
+/** One row of the teacher's table: every active member, submitted or not. */
+export type SubmissionRow = {
+  student_id: string
+  full_name: string | null
+  status: WorkStatus
+  turned_in_at: string | null
+  grade: number | null
+  returned_at: string | null
+  /** A grade is saved (returned or not); the student's work is locked. */
+  graded: boolean
+}
+
+export type SubmissionsResponse = { rows: SubmissionRow[] }
+
+/** One student's work for the teacher. `body` is null until it is turned in. */
+export type StudentWork = SubmissionRow & {
+  body: string | null
+  feedback: string
+  /** Empty until the work is turned in, like `body`. */
+  files: FileMeta[]
+  links: LinkMeta[]
+}
+
+// Phase 5 — the calendar
+
+export type CalendarItemKind = 'due' | 'scheduled_assignment' | 'scheduled_announcement'
+
+export type CalendarItem = {
+  kind: CalendarItemKind
+  /** The deadline for `due`; the moment it goes live for a scheduled post. */
+  at: string
+  space_id: string
+  space_title: string
+  /** The assignment or announcement this entry is about. */
+  ref_id: string
+  title: string
+  /** A student's own derived status, on `due` entries only. */
+  my_status: WorkStatus | null
+}
+
+/** `truncated` is true when the range held more than the 500-entry cap. */
+export type CalendarResponse = { items: CalendarItem[]; truncated: boolean }
+
+// Phase 6 — files
+
+/** A stored file. Its storage key never leaves the server. */
+export type FileMeta = {
+  id: string
+  /** Sanitised by the server, with the extension forced to the detected type. */
+  filename: string
+  content_type: string
+  size_bytes: number
+  created_at: string
+}
+
+/**
+ * `details.reason` on a 400 from the upload and delete endpoints. Branch on
+ * this, never on `message`. `graded` and `turned_in` match the submission
+ * refusals.
+ */
+export type FileRefusalReason =
+  | 'unsupported_type'
+  | 'too_large'
+  | 'empty'
+  | 'length_required'
+  | 'length_mismatch'
+  | 'too_many_files'
+  | 'submission_quota'
+  | 'classroom_quota'
+  | 'graded'
+  | 'turned_in'
+  /** A view link was asked for an Office file: those are download-only. */
+  | 'not_viewable'
+
+// Phase 6b — links on a piece of work, and viewing in the browser
+
+/** A link on a student's work. The server stores `https://` links only. */
+export type LinkMeta = {
+  id: string
+  url: string
+  created_at: string
+}
+
+/**
+ * `details.reason` on a 400 from the link endpoints. A malformed link is
+ * `details.fields.url` instead.
+ */
+export type LinkRefusalReason = 'too_many_links' | 'graded' | 'turned_in'
+
+/**
+ * A short-lived link that shows a PDF or an image in a new tab, on the storage
+ * service's own domain. A bearer pass until `expires_at`: open it, never keep it.
+ */
+export type ViewLink = { url: string; expires_at: string }
+
+// Phase 7 — the class chat
+
+/** One message in a classroom's chat. Plain text: never rendered as HTML. */
+export type ChatMessage = {
+  id: string
+  author_id: string
+  body: string
+  created_at: string
+  /** True only in the teacher's view: a member never receives a deleted message. */
+  deleted: boolean
+}
+
+/** GET /spaces/{id}/messages. */
+export type ChatPage = {
+  /** Oldest first. */
+  messages: ChatMessage[]
+  /** Deleted since `after` — remove them (a member), or mark them deleted (the teacher). */
+  deleted_ids: string[]
+  /** Pass as `before` for the page of older messages; null when there are none. */
+  older_cursor: string | null
+  /** The DATABASE clock: the next poll's `after`. */
+  server_time: string
+  /** The catch-up was too far behind: replace what is shown with `messages`. */
+  reset: boolean
+  chat_locked: boolean
+  can_post: boolean
+  /** The caller's own mute, so the screen can say why they cannot post. */
+  muted: boolean
+}
+
+/** `details.reason` on a 400 from POST /spaces/{id}/messages. */
+export type ChatRefusalReason = 'archived' | 'muted' | 'chat_locked'
+
+// Phase 8 — the parent's read-only overview (prd.md CL-10)
+
+/** One assignment as a parent sees it: a deadline, a derived status, a returned grade. */
+export type ParentAssignment = {
+  id: string
+  title: string
+  due_at: string | null
+  points: number | null
+  status: WorkStatus
+  /** Only once the teacher has returned it. Feedback never comes. */
+  grade: number | null
+}
+
+export type ParentClassroom = {
+  space_id: string
+  title: string
+  status: SpaceStatus
+  subject_name: string
+  teacher_name: string | null
+  assignments: ParentAssignment[]
+}
+
+export type ParentChild = {
+  student_id: string
+  full_name: string | null
+  /** Empty for a linked child who is in no classroom yet. */
+  classrooms: ParentClassroom[]
+}
+
+/** GET /parent/classrooms — one entry per child with a VERIFIED link. */
+export type ParentOverviewResponse = { children: ParentChild[] }

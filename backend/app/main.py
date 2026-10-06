@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.auth.email import drain_pending_emails
 from app.auth.routes import router as auth_router
+from app.classroom.routes import router as classroom_router
+from app.classroom.storage import drain_storage_cleanup
 from app.core.config import get_settings
 from app.core.db import DatabaseUnreachableError, assert_backend_role_cannot_bypass_rls
 from app.core.errors import register_exception_handlers
@@ -65,6 +67,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         drain_pending_emails(timeout=5.0)
     except Exception:  # noqa: BLE001 -- shutdown must complete regardless
         logger.exception("email queue did not drain cleanly during shutdown")
+    # Same reason, classroom Phase 6: deletions of stored files run after the
+    # response, and an undrained one leaves an orphaned object behind.
+    try:
+        drain_storage_cleanup(timeout=5.0)
+    except Exception:  # noqa: BLE001 -- shutdown must complete regardless
+        logger.exception("storage cleanup did not drain cleanly during shutdown")
 
 
 def create_app() -> FastAPI:
@@ -72,7 +80,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=settings.app_name,
-        version="0.1.0",
+        version="0.2.0",
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None if settings.is_production else "/redoc",
         # Finding A5. `docs_url` and `redoc_url` gate only the two HTML VIEWERS.
@@ -113,6 +121,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(auth_router, prefix=settings.api_base_path)
+    app.include_router(classroom_router, prefix=settings.api_base_path)
 
     @app.get("/health", tags=["system"])
     def health() -> dict:

@@ -25,6 +25,16 @@ from pydantic import ValidationError
 from app.core.config import Settings
 
 
+def _real_storage(monkeypatch) -> None:
+    """Production refuses in-memory file storage (classroom Phase 6); every test
+    that expects a production config to BOOT supplies a well-formed S3 one."""
+    monkeypatch.setenv("STORAGE_PROVIDER", "s3")
+    monkeypatch.setenv("STORAGE_S3_ENDPOINT", "https://ref.supabase.co/storage/v1/s3")
+    monkeypatch.setenv("STORAGE_S3_REGION", "ap-southeast-2")
+    monkeypatch.setenv("STORAGE_S3_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setenv("STORAGE_S3_SECRET_ACCESS_KEY", "test-secret-key")
+
+
 class TestEnvironmentIsAClosedSet:
     def test_a_plausible_abbreviation_is_refused(self, monkeypatch):
         """
@@ -46,6 +56,7 @@ class TestEnvironmentIsAClosedSet:
         monkeypatch.setenv("EMAIL_PROVIDER", "resend")
         monkeypatch.setenv("EMAIL_FROM", "no-reply@example.com")
         monkeypatch.setenv("APP_BASE_URL", "https://app.example.com")
+        _real_storage(monkeypatch)
 
         assert Settings().is_production is True
 
@@ -114,6 +125,7 @@ class TestProductionRefusesAnUnusableBaseUrl:
         monkeypatch.setenv("APP_ENV", "production")
         monkeypatch.setenv("EMAIL_PROVIDER", "resend")
         monkeypatch.setenv("EMAIL_FROM", "no-reply@example.com")
+        _real_storage(monkeypatch)
 
     def test_the_localhost_default_is_refused(self, monkeypatch):
         self._production_env(monkeypatch)
@@ -159,4 +171,59 @@ class TestTheProductionGuardIsNowReachable:
         monkeypatch.setenv("APP_BASE_URL", "https://app.example.com")
 
         with pytest.raises(ValidationError, match="EMAIL_PROVIDER"):
+            Settings()
+
+
+class TestFileStorageIsRealInProduction:
+    """
+    Classroom files (Phase 6). `memory` is the development default, and in
+    production it would hold every upload in process memory — gone on the next
+    restart while its database row survived, so every download would fail.
+    """
+
+    def _production(self, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("EMAIL_PROVIDER", "resend")
+        monkeypatch.setenv("EMAIL_FROM", "no-reply@example.com")
+        monkeypatch.setenv("APP_BASE_URL", "https://app.example.com")
+
+    def test_memory_storage_is_refused_in_production(self, monkeypatch):
+        self._production(monkeypatch)
+        monkeypatch.setenv("STORAGE_PROVIDER", "memory")
+        with pytest.raises(ValidationError, match="STORAGE_PROVIDER=memory"):
+            Settings()
+
+    def test_real_storage_boots_in_production(self, monkeypatch):
+        self._production(monkeypatch)
+        _real_storage(monkeypatch)
+        assert Settings().storage_provider == "s3"
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("STORAGE_S3_ENDPOINT", "http://ref.supabase.co/storage/v1/s3"),
+            ("STORAGE_S3_REGION", ""),
+            ("STORAGE_S3_ACCESS_KEY_ID", ""),
+            ("STORAGE_S3_SECRET_ACCESS_KEY", "CHANGE_ME"),
+        ],
+        ids=["plain http", "no region", "no access key", "placeholder secret"],
+    )
+    def test_s3_needs_a_real_https_endpoint_and_keys(self, monkeypatch, key, value):
+        _real_storage(monkeypatch)
+        monkeypatch.setenv(key, value)
+        with pytest.raises(ValidationError, match="STORAGE_PROVIDER=s3"):
+            Settings()
+
+    def test_the_provider_is_a_closed_set_with_forgiving_case(self, monkeypatch):
+        monkeypatch.setenv("STORAGE_PROVIDER", "disk")
+        with pytest.raises(ValidationError):
+            Settings()
+        _real_storage(monkeypatch)
+        monkeypatch.setenv("STORAGE_PROVIDER", " S3 ")
+        assert Settings().storage_provider == "s3"
+
+    @pytest.mark.parametrize("value", ["0", str(9 * 1024 * 1024 + 1)])
+    def test_the_upload_ceiling_stays_under_the_proxy_limit(self, monkeypatch, value):
+        monkeypatch.setenv("MAX_UPLOAD_BYTES", value)
+        with pytest.raises(ValidationError, match="MAX_UPLOAD_BYTES"):
             Settings()

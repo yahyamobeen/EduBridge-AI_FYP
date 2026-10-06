@@ -162,6 +162,28 @@ class Settings(BaseSettings):
     email_from: str = Field(default="", validation_alias="EMAIL_FROM")
     app_base_url: str = Field(default="http://localhost:3000", validation_alias="APP_BASE_URL")
 
+    # ---- Classroom file storage (classroom Phase 6) --------------------------
+    # `memory` keeps objects in process memory — tests and local development
+    # only, and refused in production below: every file would vanish on a
+    # restart while its database row survived. `s3` is Supabase Storage over the
+    # S3 protocol with STORAGE-ONLY access keys (dashboard → Storage → S3
+    # Connection), never the project secret key, which would also bypass every
+    # database policy (owner decision 8, tdd.md §3.6).
+    storage_provider: Literal["memory", "s3"] = Field(
+        default="memory", validation_alias="STORAGE_PROVIDER"
+    )
+    storage_s3_endpoint: str = Field(default="", validation_alias="STORAGE_S3_ENDPOINT")
+    storage_s3_region: str = Field(default="", validation_alias="STORAGE_S3_REGION")
+    storage_s3_access_key_id: str = Field(default="", validation_alias="STORAGE_S3_ACCESS_KEY_ID")
+    storage_s3_secret_access_key: str = Field(
+        default="", validation_alias="STORAGE_S3_SECRET_ACCESS_KEY"
+    )
+    storage_bucket: str = Field(default="classroom-files", validation_alias="STORAGE_BUCKET")
+    # One file's ceiling, in bytes. Next.js silently TRUNCATES a proxied body
+    # past 10 MB (`proxyClientMaxBodySize`), and a truncated PDF still sniffs as
+    # a PDF — so this stays well under it. The database's own ceiling is 9 MiB.
+    max_upload_bytes: int = Field(default=5 * 1024 * 1024, validation_alias="MAX_UPLOAD_BYTES")
+
     # 2FA lockout thresholds (tdd.md §6.9, D7).
     # List of (failed_attempts_threshold, lockout_seconds) pairs, evaluated in
     # order. The HIGHEST threshold whose failed_attempts count is met or
@@ -190,7 +212,7 @@ class Settings(BaseSettings):
         # that should have happened at boot.
         return self.environment == "production"
 
-    @field_validator("environment", "email_provider", mode="before")
+    @field_validator("environment", "email_provider", "storage_provider", mode="before")
     @classmethod
     def _normalise_choice(cls, value: object) -> object:
         """
@@ -307,6 +329,35 @@ class Settings(BaseSettings):
                 "password-reset link is built from it, so a localhost value "
                 "mails links nobody can open and an http:// value puts reset "
                 "tokens in cleartext."
+            )
+        # Classroom files (Phase 6). After the APP_BASE_URL check, so the
+        # existing refusals keep their order and their messages.
+        if self.is_production and self.storage_provider == "memory":
+            raise ValueError(
+                "STORAGE_PROVIDER=memory in production: uploaded files would live in "
+                "process memory and vanish on the next restart while their database "
+                "rows survived. Set STORAGE_PROVIDER=s3 with storage-only S3 keys."
+            )
+        if self.storage_provider == "s3":
+            secret = self.storage_s3_secret_access_key
+            if not (
+                self.storage_s3_endpoint.startswith("https://")
+                and self.storage_s3_region
+                and self.storage_s3_access_key_id
+                and secret
+                and not secret.startswith("CHANGE_ME")
+            ):
+                raise ValueError(
+                    "STORAGE_PROVIDER=s3 requires an https:// STORAGE_S3_ENDPOINT, a "
+                    "STORAGE_S3_REGION and real STORAGE_S3_ACCESS_KEY_ID / "
+                    "STORAGE_S3_SECRET_ACCESS_KEY values (Supabase dashboard → Storage → "
+                    "S3 Connection). Never the project secret key."
+                )
+        if not 1 <= self.max_upload_bytes <= 9 * 1024 * 1024:
+            raise ValueError(
+                "MAX_UPLOAD_BYTES must be between 1 and 9437184 (9 MiB): the Next.js "
+                "proxy silently truncates bodies past 10 MB, and the database refuses "
+                "files above 9 MiB."
             )
         return self
 

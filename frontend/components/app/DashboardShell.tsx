@@ -4,11 +4,26 @@ import { useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import { LanguageSwitcher } from '@/components/layout/LanguageSwitcher'
 import { ArrowIcon } from '@/components/ui/Icon'
-import { Link, useRouter } from '@/i18n/navigation'
+import { Link, usePathname, useRouter } from '@/i18n/navigation'
 import { logout } from '@/lib/api/endpoints'
 import type { MeResponse } from '@/lib/api/types'
 import { avatarInitial, displayName } from '@/lib/auth/displayName'
-import { navFor, ROLE_ACCENT } from '@/lib/auth/navigation'
+import { navFor, ROLE_ACCENT, type NavItem } from '@/lib/auth/navigation'
+
+/**
+ * The item that owns `pathname`: the one whose href is the LONGEST prefix of it,
+ * so `/teacher/classroom/<id>` is My classrooms, not the Dashboard at
+ * `/teacher`. No match marks nothing, rather than guessing. (It used to be the
+ * first item on every page — so a classroom showed "Dashboard" as current.)
+ */
+export function currentItem(items: NavItem[], pathname: string): NavItem | null {
+  let best: NavItem | null = null
+  for (const item of items) {
+    const owns = pathname === item.href || pathname.startsWith(`${item.href}/`)
+    if (owns && (best === null || item.href.length > best.href.length)) best = item
+  }
+  return best
+}
 
 /**
  * The dashboard chrome: the prototype's 256px docked sidebar, the identity
@@ -37,9 +52,16 @@ export function DashboardShell({
   const tApp = useTranslations('app')
   const tDash = useTranslations('dashboard')
   const router = useRouter()
-  const [open, setOpen] = useState(false)
+  const pathname = usePathname()
+  // The page the phone menu was opened on. Since Phase 6c the shell lives in
+  // the (app) layout and is no longer remounted by a navigation, so "open" is
+  // derived from it: following a menu link changes the page and closes the
+  // menu, with no effect and no setState on navigation.
+  const [openOn, setOpenOn] = useState<string | null>(null)
+  const open = openOn === pathname
 
   const items = navFor(me.role)
+  const current = currentItem(items, pathname)
   const accent = ROLE_ACCENT[me.role]
   const initial = avatarInitial(me)
 
@@ -89,13 +111,13 @@ export function DashboardShell({
       </div>
 
       <ul className="flex-grow space-y-2">
-        {items.map((item, index) => (
+        {items.map((item) => (
           <li key={item.key}>
             <Link
               href={item.href}
-              aria-current={index === 0 ? 'page' : undefined}
+              aria-current={item === current ? 'page' : undefined}
               className={
-                index === 0
+                item === current
                   ? 'block rounded bg-primary-container px-4 py-2 font-semibold text-on-primary-container'
                   : 'block rounded px-4 py-2 text-on-surface-variant transition-colors hover:bg-surface-variant'
               }
@@ -134,7 +156,7 @@ export function DashboardShell({
       <div className="md:hidden">
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpenOn(open ? null : pathname)}
           aria-expanded={open}
           aria-controls="mobile-nav"
           className="fixed bottom-4 end-4 z-20 rounded-full bg-primary px-5 py-3 text-label-caps uppercase text-on-primary shadow-lg"

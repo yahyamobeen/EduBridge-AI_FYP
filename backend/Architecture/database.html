@@ -77,6 +77,7 @@
   .pill.sel{background:#15323b;color:#9fdcef;border-color:var(--teal)}
   .pill.ins{background:#1d2e1f;color:#7ee787;border-color:var(--green)}
   .pill.upd{background:#2b220c;color:#f0c674;border-color:var(--amber)}
+  .pill.del{background:#26182e;color:#d2a8ff;border-color:#a371f7}
   .callout{border-left:3px solid var(--teal);background:var(--teal-dim);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0}
   .callout.warn{border-color:var(--amber);background:#2b220c}
   .callout.warn strong{color:var(--amber)}
@@ -108,13 +109,14 @@
   <div class="container">
     <h1>Database</h1>
     <p class="subtitle">Tables by domain, the complete Row-Level Security policy catalogue, and the <code>app.*</code> privileged functions</p>
-    <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql</p>
+    <p class="meta">Snapshot 2026-08-15 · commit eea0e74 · 11 applied migrations · source of truth: supabase/migrations/*.sql
+    · classroom sections re-measured 2026-10-05 on branch add-classroom (33 migration files, all applied and re-verified on the live database — the four earlier 20261004… files on 2026-10-04; 20261004150000, classroom files, 20261005120000, submission links, 20261005130000, the class chat, and 20261005140000, the parent overview, on 2026-10-05)</p>
 
     <div class="grid">
       <div class="stat"><div class="n">PostgreSQL</div><div class="l">Supabase · role <code>app_backend</code> · NOBYPASSRLS</div></div>
-      <div class="stat"><div class="n">46</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
-      <div class="stat"><div class="n">73</div><div class="l">live Row-Level Security policy objects</div></div>
-      <div class="stat"><div class="n">33</div><div class="l">live <code>app.*</code> functions · 35 are SECURITY DEFINER</div></div>
+      <div class="stat"><div class="n">53</div><div class="l">base tables + 2 default partitions + 1 view</div></div>
+      <div class="stat"><div class="n">98</div><div class="l">Row-Level Security policy objects (shadow and live agree, 2026-10-05)</div></div>
+      <div class="stat"><div class="n">72</div><div class="l">live <code>app.*</code> functions · 70 are SECURITY DEFINER</div></div>
     </div>
 
     <section class="prose">
@@ -123,7 +125,7 @@
       does not exist here. Every policy instead reads a transaction-scoped session setting through
       <code>app.current_user_id()</code>, bound by <code>SELECT set_config('app.current_user_id', :uid, true)</code> at
       <span class="ln">backend/app/core/db.py:33-59</span>.</p>
-      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 46 tables cannot render
+      <p>The entity-relationship diagrams below are <strong>clustered one per domain</strong> — 53 tables cannot render
       legibly in a single diagram, and the point of a diagram is to be read. The complete field lists, the full policy
       catalogue with every <code>USING</code> and <code>WITH CHECK</code> predicate, the invariants and the known gaps live in
       <a href="database.md">database.md</a>, which is the authoritative page; this one is its visual companion.</p>
@@ -357,21 +359,38 @@ erDiagram
     classroom_space ||--o{ join_code       : "codes, never student-readable"
     classroom_space ||--o{ enrollment      : roster
     classroom_space ||--o{ announcement    : posts
+    classroom_space ||--o{ assignment      : classwork
+    assignment      ||--o{ assignment_submission : "one per student"
+    assignment      ||--o{ submission_grade      : "teacher-owned, separate table"
+    chapter         |o--o{ assignment      : "tag, same subject (composite FK)"
+    announcement    ||--o{ material_attachment : "teacher files (or)"
+    assignment      ||--o{ material_attachment : "teacher files (or)"
+    assignment_submission ||--o{ submission_file : "student files, max 5"
+    assignment_submission ||--o{ submission_link : "student links, max 5"
+    classroom_space ||--o{ space_message   : "class chat, class-public"
+    app_user        ||--o{ space_message   : "as author_id (RESTRICT)"
     app_user        ||--o{ enrollment      : "as student_id"
-    subject         ||--o{ classroom_space : "NULL for parent spaces"
+    subject         ||--o{ classroom_space : "the class's subject"
+    app_user        ||--o{ teacher_subject_scope : "self-declared by app.create_space"
 
     classroom_space {
         uuid id PK
         uuid owner_id FK
-        space_owner_role owner_role "teacher|parent"
+        space_owner_role owner_role "teacher only (ck_space_owner_is_teacher)"
         uuid subject_id FK "required when teacher"
-        text title
-        space_status status "active|archived"
+        text title "1-120 chars"
+        space_status status "active|archived — never deleted"
+        boolean chat_locked "only the teacher posts while true"
+    }
+    teacher_subject_scope {
+        uuid teacher_id PK
+        uuid subject_id PK
+        timestamptz revoked_at "admin withdraws; never DELETE"
     }
     join_code {
         uuid id PK
         uuid space_id FK
-        text code UK
+        text code UK "8 chars, one live per space"
         boolean revoked
         timestamptz expires_at
     }
@@ -381,16 +400,143 @@ erDiagram
         uuid student_id FK
         timestamptz joined_at
         timestamptz left_at "soft leave"
+        timestamptz removed_at "teacher removal; blocks rejoin"
+        timestamptz muted_at "app.set_student_muted; survives rejoin"
     }
     announcement {
         uuid id PK
         uuid space_id FK
         uuid author_id FK
+        text body "1-5000 chars"
+        timestamptz publish_at "future = scheduled"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    assignment {
+        uuid id PK
+        uuid space_id FK
+        uuid subject_id FK "held to the space's"
+        uuid author_id FK
+        text title
+        smallint points "1-1000 or NULL"
+        timestamptz due_at "after publish_at"
+        uuid chapter_id FK "optional"
+        timestamptz publish_at "future = scheduled"
+    }
+    assignment_submission {
+        uuid id PK
+        uuid assignment_id FK
+        uuid student_id FK
         text body
+        text link_url "https only"
+        timestamptz turned_in_at "NULL = draft"
+    }
+    submission_grade {
+        uuid assignment_id PK
+        uuid student_id PK
+        numeric grade
+        text feedback "private"
+        uuid graded_by FK
+        timestamptz returned_at "student sees it from here"
+    }
+    material_attachment {
+        uuid id PK
+        uuid space_id FK "= the parent's (composite FK)"
+        uuid announcement_id FK "exactly one parent"
+        uuid assignment_id FK
+        text object_key UK "s/space/hex32 (CHECK)"
+        text content_type "pdf png jpeg docx pptx"
+        integer size_bytes "1 B to 9 MiB"
+        text sha256
+    }
+    submission_file {
+        uuid id PK
+        uuid submission_id FK "(id, space, student)"
+        uuid space_id FK
+        uuid student_id FK
+        text object_key UK "u/space/student/hex32 (CHECK)"
+        integer size_bytes
+        text sha256
+    }
+    submission_link {
+        uuid id PK
+        uuid submission_id FK "(id, space, student)"
+        uuid space_id FK
+        uuid student_id FK
+        text url "https only, unique per submission"
+    }
+    space_message {
+        uuid id PK
+        uuid space_id FK
+        uuid author_id FK "the caller (insert policy)"
+        text body "1-1000 chars, plain text"
+        timestamptz created_at "clock_timestamp(), not insertable"
+        timestamptz deleted_at "soft delete, retained"
+        uuid deleted_by FK "the teacher"
     }
     </div></div>
     <p><code>ck_teacher_space_has_subject</code> <span class="ln">:334</span> forces a teacher space to declare its subject,
     because subject-scoping depends on it. Join codes are never readable by students — they receive the code out of band.</p>
+    <div class="callout">
+      <span class="t">Since 20261004120000 — writes go only through functions (B9, B10, B11 closed)</span>
+      <code>app_backend</code> holds <strong>no</strong> write grant on <code>enrollment</code> or <code>join_code</code>, no INSERT or
+      DELETE on <code>classroom_space</code> (only <code>UPDATE (title, status)</code>), and no DELETE on
+      <code>teacher_subject_scope</code>. Classrooms are created by <code>app.create_space</code>, which also self-declares the
+      teacher's subject scope; codes are minted in Python and written by <code>app.rotate_join_code</code>; enrolments change
+      only through <code>app.join_space_by_code</code>, <code>app.leave_space</code> and <code>app.remove_student</code>.
+      Proved on a shadow database: a student's raw <code>INSERT</code> into either table succeeds against the 25 earlier
+      migrations and is <code>permission denied</code> after these two.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261004130000 — announcements: authorship and scheduling (B27 closed)</span>
+      Insert, update and delete each require <code>author_id = cuid() AND app.owns_active_space(space_id)</code>, so an owner
+      can no longer post as someone else and an archived classroom is read-only. <code>UPDATE</code> is narrowed to
+      <code>(body, publish_at)</code>. A future <code>publish_at</code> <strong>schedules</strong> a post:
+      <code>announcement_member_read</code> adds <code>publish_at &lt;= now()</code>, so members cannot read it until then — no
+      job publishes it. The owner's read policy has no time condition. Proved on a shadow database: an owner's raw
+      <code>INSERT</code> with another teacher's <code>author_id</code> succeeds on the 27-migration schema and is refused after.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261004140000 — assignments, submissions and grades</span>
+      The grade is its <strong>own table</strong>: every user shares one database role, so a teacher-owned column on a
+      student-owned row would be writable by both. Neither <code>assignment_submission</code> nor <code>submission_grade</code>
+      has any write grant — students write through <code>app.save_submission_draft</code> / <code>turn_in_submission</code> /
+      <code>unsubmit_submission</code>, teachers through <code>app.save_grade</code>. A teacher reads a student's work only
+      once it is <strong>turned in</strong> and only while the student is an <strong>active</strong> member (leaving ends
+      visibility); a student reads their grade only once it is <strong>returned</strong>; any grade locks the work. Late,
+      missing and graded are derived, never stored. The chapter tag is held to the classroom's subject by a composite
+      foreign key.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261004150000 — classroom files (applied 2026-10-05)</span>
+      The bytes live in a <strong>private bucket</strong> (<code>classroom-files</code>, created by the migration) that only
+      the backend reaches; these two tables hold the metadata and decide who may see each object. A file follows what it is
+      attached to: a member sees a teacher's attachment once its post is live, and a teacher sees a student's file only once
+      the work is turned in and while the student is still a member. The object key <strong>is</strong> the storage boundary,
+      so <code>ck_material_key</code> and <code>ck_subfile_key</code> hold it to <code>s/&lt;space&gt;/…</code> and
+      <code>u/&lt;space&gt;/&lt;student&gt;/…</code> — a forged key is a CHECK violation. Rows are immutable; every write is a
+      function, except the owner's <code>DELETE</code> of an attachment. Quotas — 5 files and 20 MiB per submission, 10 per
+      post, 2 GiB per classroom — run under one advisory lock per classroom.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261005120000 — several links on a piece of work (applied 2026-10-05)</span>
+      A student's work carries up to five <code>https://</code> links, each its own <code>submission_link</code> row,
+      written only by <code>app.add_submission_link</code> / <code>app.remove_submission_link</code> and readable exactly like a
+      file: the student always, the teacher once turned in and while the student stays. The old single
+      <code>assignment_submission.link_url</code> is copied into the table and cleared; the column stays, unread.
+    </div>
+    <div class="callout">
+      <span class="t">Since 20261005130000 — the class chat (applied 2026-10-05)</span>
+      <code>space_message</code> is <strong>class-public</strong> and is never the tutor <code>message</code> table. A member
+      posts with a column-limited <code>INSERT (space_id, author_id, body)</code>, held by <code>space_message_insert</code> to
+      the caller and to <code>app.can_post_message</code>: an active, <strong>unmuted</strong> member of an
+      <strong>unlocked</strong>, active classroom who passes the guardian gate — or its teacher, who may post while it is
+      locked. The time and the moderation columns cannot be supplied. A deletion is a stamp
+      (<code>app.delete_space_message</code>), never a <code>DELETE</code>: members stop reading the row, the teacher keeps
+      it for review. <code>classroom_space.chat_locked</code> joins the owner's column grant; <code>enrollment.muted_at</code>
+      is written by <code>app.set_student_muted</code>. Deleting an account does not delete its messages
+      (<code>author_id</code> is <code>ON DELETE RESTRICT</code>, owner decision 2026-10-05).
+    </div>
 
     <!-- ════════════════════════ ASSESSMENT ════════════════════════ -->
     <h2>Assessment</h2>
@@ -632,14 +778,17 @@ erDiagram
     which means it is silently destroyed by anyone who adds a <code>FOR ALL</code> policy to tidy up.</p>
 
     <!-- ════════════════════════ POLICY CATALOGUE ════════════════════════ -->
-    <h2>The Row-Level Security policy catalogue — all 73</h2>
+    <h2>The Row-Level Security policy catalogue</h2>
     <p>Every policy is <code>TO app_backend</code>; no other role has one. Read <code>cuid()</code> as
     <code>app.current_user_id()</code>. An empty cell means the clause is <em>absent</em>, which is not the same as
     <code>true</code>. <code>file:line</code> points at the <strong>live</strong> definition. The full predicates, with the
-    superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.</p>
+    superseded originals, are in <a href="database.md#the-complete-row-level-security-policy-catalogue">database.md</a>.
+    <strong>98</strong> policy objects are live on a shadow database built from all 33 migrations and on the live
+    database (2026-10-05); the groups
+    below summarise them by domain and are not the complete list — database.md is.</p>
 
     <div class="callout">
-      <span class="t">Why 73, 73 and 72 are all correct</span>
+      <span class="t">Historical (2026-08-16) — why 73, 73 and 72 were all correct</span>
       <code>grep -o 'CREATE POLICY' supabase/migrations/*.sql | wc -l</code> returns <strong>73</strong> — but one of those
       is prose, at <span class="ln">20260802140000:27</span>. There are <strong>72</strong> real
       <code>CREATE POLICY</code> statements. Two of them sit inside the <code>FOREACH</code> loop at
@@ -696,17 +845,43 @@ erDiagram
     </details>
 
     <details>
-      <summary>Classroom — 8 policies</summary>
+      <summary>Classroom — 17 policies</summary>
       <table>
         <tr><th>Table</th><th>Policy</th><th>FOR</th><th>USING</th><th>WITH CHECK</th><th>Live at</th></tr>
         <tr><td><code>classroom_space</code></td><td><code>space_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>owner_id = cuid() OR app.is_enrolled_in(id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:261</span></td></tr>
-        <tr><td><code>classroom_space</code></td><td><code>space_owner_write</code></td><td><span class="pill all">ALL</span></td><td><code>owner_id = cuid()</code></td><td><code>owner_id = cuid()</code> <em>(B10 — no role check)</em></td><td><span class="ln">20260801120100:269</span></td></tr>
-        <tr><td><code>join_code</code></td><td><code>join_code_owner</code></td><td><span class="pill all">ALL</span></td><td><code>app.owns_space(space_id) OR app.is_admin()</code></td><td><code>app.owns_space(space_id)</code></td><td><span class="ln">20260801120100:275</span></td></tr>
+        <tr><td><code>classroom_space</code></td><td><code>space_owner_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>app.owns_space(id)</code></td><td><code>app.owns_space(id)</code> — column grant <code>(title, status)</code>, and <code>chat_locked</code> since <code>20261005130000</code></td><td><span class="ln">20261004120000</span> §2 (replaced <code>space_owner_write</code>, B10)</td></tr>
+        <tr><td><code>join_code</code></td><td><code>join_code_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>— no write grant</td><td><span class="ln">20261004120000</span> §3 (replaced <code>join_code_owner</code>)</td></tr>
         <tr><td><code>enrollment</code></td><td><code>enrollment_visible</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid() OR app.owns_space(space_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:281</span></td></tr>
-        <tr><td><code>enrollment</code></td><td><code>enrollment_student_join</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>student_id = cuid()</code> <em>(B9 — any space)</em></td><td><span class="ln">20260801120100:289</span></td></tr>
-        <tr><td><code>enrollment</code></td><td><code>enrollment_leave</code></td><td><span class="pill upd">UPDATE</span></td><td><code>student_id = cuid() OR app.owns_space(space_id)</code></td><td><em>none — falls back to USING</em></td><td><span class="ln">20260801120100:294</span></td></tr>
-        <tr><td><code>announcement</code></td><td><code>announcement_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>app.is_enrolled_in(space_id) OR app.owns_space(space_id) OR app.is_admin()</code></td><td>—</td><td><span class="ln">20260801120100:298</span></td></tr>
-        <tr><td><code>announcement</code></td><td><code>announcement_write</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>app.owns_space(space_id)</code></td><td><span class="ln">20260801120100:302</span></td></tr>
+        <tr><td colspan="6"><em><code>enrollment_student_join</code> (INSERT into any space) and <code>enrollment_leave</code> (no WITH CHECK) were
+        <strong>dropped</strong> by <span class="ln">20261004120000</span> §4 — finding B9. Enrolment writes go through functions only.</em></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>—</td><td><span class="ln">20261004130000:67</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_member_space_ids()) AND publish_at &lt;= now()</code></td><td>—</td><td><span class="ln">20261004130000:72</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td><span class="ln">20261004130000:76</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td>same — column grant <code>(body, publish_at)</code> only</td><td><span class="ln">20261004130000:80</span></td></tr>
+        <tr><td><code>announcement</code></td><td><code>announcement_delete</code></td><td><span class="pill del">DELETE</span></td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td>—</td><td><span class="ln">20261004130000:85</span></td></tr>
+        <tr><td colspan="6"><em><code>announcement_read</code> and <code>announcement_write</code> (which never checked <code>author_id</code>) were
+        <strong>dropped</strong> by <span class="ln">20261004130000</span> — finding B27.</em></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>—</td><td><span class="ln">20261004140000:234</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_member_space_ids()) AND publish_at &lt;= now()</code></td><td>—</td><td><span class="ln">20261004140000:240</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td><span class="ln">20261004140000:244</span></td></tr>
+        <tr><td><code>assignment</code></td><td><code>assignment_update</code></td><td><span class="pill upd">UPDATE</span></td><td><code>author_id = cuid() AND app.owns_active_space(space_id)</code></td><td>same <strong>and</strong> <code>app.points_compatible(id, points)</code></td><td><span class="ln">20261004140000:248</span></td></tr>
+        <tr><td><code>assignment_submission</code></td><td><code>submission_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261004140000:259</span></td></tr>
+        <tr><td><code>assignment_submission</code></td><td><code>submission_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>turned_in_at IS NOT NULL</code> AND <code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code> — a draft is the student's own</td><td>—</td><td><span class="ln">20261004140000:263</span></td></tr>
+        <tr><td><code>submission_grade</code></td><td><code>grade_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code></td><td>—</td><td><span class="ln">20261004140000:271</span></td></tr>
+        <tr><td><code>submission_grade</code></td><td><code>grade_student_read_returned</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid() AND returned_at IS NOT NULL</code></td><td>—</td><td><span class="ln">20261004140000:275</span></td></tr>
+        <tr><td><code>material_attachment</code></td><td><code>material_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code></td><td>—</td><td><span class="ln">20261004150000:159</span></td></tr>
+        <tr><td><code>material_attachment</code></td><td><code>material_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_member_space_ids()) AND app.material_parent_published(announcement_id, assignment_id)</code></td><td>—</td><td><span class="ln">20261004150000:163</span></td></tr>
+        <tr><td><code>material_attachment</code></td><td><code>material_owner_delete</code></td><td><span class="pill del">DELETE</span></td><td><code>app.owns_active_space(space_id)</code></td><td>—</td><td><span class="ln">20261004150000:168</span></td></tr>
+        <tr><td><code>submission_file</code></td><td><code>subfile_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261004150000:175</span></td></tr>
+        <tr><td><code>submission_file</code></td><td><code>subfile_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>(space_id, student_id) IN (SELECT … FROM app.my_taught_students())</code> AND the submission is turned in — both stated, not inherited</td><td>—</td><td><span class="ln">20261004150000:182</span></td></tr>
+        <tr><td><code>submission_link</code></td><td><code>link_read_own</code></td><td><span class="pill sel">SELECT</span></td><td><code>student_id = cuid()</code></td><td>—</td><td><span class="ln">20261005120000:59</span></td></tr>
+        <tr><td><code>submission_link</code></td><td><code>link_teacher_read</code></td><td><span class="pill sel">SELECT</span></td><td>the file rule: taught student <strong>and</strong> turned in</td><td>—</td><td><span class="ln">20261005120000:63</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_owner_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>space_id IN (SELECT app.my_owned_space_ids()) OR (SELECT app.is_admin())</code> — deleted messages too</td><td>—</td><td><span class="ln">20261005130000:120</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_member_read</code></td><td><span class="pill sel">SELECT</span></td><td><code>deleted_at IS NULL AND space_id IN (SELECT app.my_member_space_ids())</code></td><td>—</td><td><span class="ln">20261005130000:126</span></td></tr>
+        <tr><td><code>space_message</code></td><td><code>space_message_insert</code></td><td><span class="pill ins">INSERT</span></td><td>—</td><td><code>author_id = cuid() AND app.can_post_message(space_id)</code></td><td><span class="ln">20261005130000:130</span></td></tr>
+        <tr><td colspan="6"><em>No write policy on <code>assignment_submission</code>, <code>submission_grade</code> or
+        <code>submission_file</code> or <code>submission_link</code>, no DELETE policy on <code>assignment</code>, no INSERT or UPDATE policy on
+        <code>material_attachment</code>, and no UPDATE or DELETE policy on <code>space_message</code>: every such change is a function (below).</em></td></tr>
       </table>
     </details>
 
@@ -768,12 +943,15 @@ erDiagram
     </details>
 
     <p class="offline-note"><strong>19 + 14 + 8 + 14 + 10 + 8 = 73.</strong> Every live policy object is above; the four
-    objects with no policy at all — <code>question_key</code>, the two default partitions and the unprotected
-    <code>two_factor_status_v</code> view — are listed in
+    objects with no policy at all — <code>question_key</code>, the two default partitions, the unprotected
+    <code>two_factor_status_v</code> view and the private <code>classroom-files</code> bucket's <code>storage.objects</code> — are listed in
     <a href="database.md#objects-with-no-policy">database.md § Objects with no policy</a>.</p>
 
     <!-- ════════════════════════ FUNCTIONS ════════════════════════ -->
-    <h2>The <code>app.*</code> privileged functions — 33 live</h2>
+    <h2>The <code>app.*</code> privileged functions — 72 live</h2>
+    <p><em>Re-measured 2026-10-05 from the catalogue of a shadow database built from all 33 migration files, and matched on the live
+    database; the paragraph below is the 2026-08-15 account and its
+    counts are historical. None of the 72 is executable by <code>PUBLIC</code>.</em></p>
     <p>34 distinct names were ever defined; <code>app.issue_token_for_email</code> was dropped as a byte-for-byte duplicate
     of <code>app.insert_auth_token</code> <span class="ln">20260803160000:151-153</span>. Of the 37 definition statements,
     <strong>35 are <code>SECURITY DEFINER</code></strong> and <strong>36 carry <code>SET search_path = public, pg_temp</code></strong>
@@ -795,13 +973,83 @@ erDiagram
       <summary>Row-Level Security helpers — called by policies, not by routes</summary>
       <table>
         <tr><th>Function</th><th>Volatility</th><th>Definer</th><th>Returns</th><th>Grant</th><th>Defined at</th></tr>
-        <tr><td><code>app.current_user_id()</code></td><td>STABLE</td><td>no</td><td><code>uuid</code> — the bound user, or NULL</td><td>default PUBLIC</td><td><span class="ln">20260801120100:49</span></td></tr>
-        <tr><td><code>app.is_admin()</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — caller is an <code>active</code> <code>admin</code></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:56</span></td></tr>
-        <tr><td><code>app.is_verified_guardian_of(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — a <strong>verified</strong> link exists</td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:67</span></td></tr>
-        <tr><td><code>app.teaches_student_subject(uuid, uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — active enrolment in a space the caller owns <strong>and</strong> a matching scope row</td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:81</span></td></tr>
-        <tr><td><code>app.owns_space(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — <em>(B11: no subject-scope check)</em></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:99</span></td></tr>
-        <tr><td><code>app.is_enrolled_in(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — enrolled and <code>left_at IS NULL</code></td><td>default PUBLIC <em>(C5)</em></td><td><span class="ln">20260801120100:109</span></td></tr>
-        <tr><td><code>app.set_updated_at()</code></td><td>VOLATILE</td><td>no</td><td><code>trigger</code> — 9 tables</td><td>default PUBLIC</td><td><span class="ln">20260801120000:85</span></td></tr>
+        <tr><td><code>app.current_user_id()</code></td><td>STABLE</td><td>no</td><td><code>uuid</code> — the bound user, or NULL</td><td><code>app_backend</code> (C5 closed, <span class="ln">20260816190000</span>)</td><td><span class="ln">20260801120100:49</span></td></tr>
+        <tr><td><code>app.is_admin()</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — caller is an <code>active</code> <code>admin</code></td><td><code>app_backend</code></td><td><span class="ln">20260801120100:56</span></td></tr>
+        <tr><td><code>app.is_verified_guardian_of(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — a <strong>verified</strong> link exists</td><td><code>app_backend</code></td><td><span class="ln">20260801120100:67</span></td></tr>
+        <tr><td><code>app.teaches_student_subject(uuid, uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — active enrolment in a space the caller owns <strong>and</strong> an <strong>unrevoked</strong> scope row</td><td><code>app_backend</code></td><td><span class="ln">20260801120100:81</span>, body replaced <span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.owns_space(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — owner <strong>and</strong> active teacher <strong>and</strong> unrevoked scope (B11 closed)</td><td><code>app_backend</code></td><td><span class="ln">20260801120100:99</span>, body replaced <span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.is_enrolled_in(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — enrolled and <code>left_at IS NULL</code></td><td><code>app_backend</code></td><td><span class="ln">20260801120100:109</span></td></tr>
+        <tr><td><code>app.owns_active_space(uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — <code>owns_space</code> and not archived: the write predicate</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.my_owned_space_ids()</code></td><td>STABLE</td><td>yes</td><td><code>SETOF uuid</code> — read predicate, evaluated once per query</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.my_member_space_ids()</code></td><td>STABLE</td><td>yes</td><td><code>SETOF uuid</code> — active enrolments, evaluated once per query</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.caller_passes_guardian_gate()</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — <code>gate.py</code> in SQL, fails closed</td><td><code>app_backend</code></td><td><span class="ln">20261004120000</span></td></tr>
+        <tr><td><code>app.my_taught_students()</code></td><td>STABLE</td><td>yes</td><td><code>TABLE(space_id, student_id)</code> — active members of the caller's spaces</td><td><code>app_backend</code></td><td><span class="ln">20261004140000:167</span></td></tr>
+        <tr><td><code>app.points_compatible(uuid, smallint)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — owner, and no grade above the points</td><td><code>app_backend</code></td><td><span class="ln">20261004140000:181</span></td></tr>
+        <tr><td><code>app.material_parent_published(uuid, uuid)</code></td><td>STABLE</td><td>yes</td><td><code>boolean</code> — the attachment's post is live</td><td><code>app_backend</code></td><td><span class="ln">20261004150000:122</span></td></tr>
+        <tr><td><code>app.set_updated_at()</code></td><td>VOLATILE</td><td>no</td><td><code>trigger</code> — 17 trigger statements</td><td><code>app_backend</code></td><td><span class="ln">20260801120000:85</span></td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the only writers of enrolments and join codes (<span class="ln">20261004120100</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.create_space(text, uuid)</code></td><td><code>POST /api/spaces</code></td><td><code>created</code> · <code>not_teacher</code> · <code>unknown_subject</code> · <code>classroom_limit</code> (50 active) · <code>scope_revoked</code></td></tr>
+        <tr><td><code>app.rotate_join_code(uuid, text)</code></td><td><code>POST /api/spaces</code>, <code>…/join-code</code></td><td><code>rotated</code> · <code>forbidden</code> · <code>collision</code> (retry)</td></tr>
+        <tr><td><code>app.disable_join_code(uuid)</code></td><td><code>POST /api/spaces/{id}/join-code</code></td><td>boolean</td></tr>
+        <tr><td><code>app.join_space_by_code(text)</code></td><td><code>POST /api/spaces/join</code></td><td><code>joined</code> · <code>already_member</code> · <code>invalid_code</code> (also for a <strong>removed</strong> student) · <code>class_mismatch</code> · <code>classroom_full</code> (300) · <code>gate_pending</code> · <code>not_student</code></td></tr>
+        <tr><td><code>app.leave_space(uuid)</code></td><td><code>DELETE /api/spaces/{id}/membership</code></td><td>boolean; idempotent; works when archived</td></tr>
+        <tr><td><code>app.remove_student(uuid, uuid)</code></td><td><code>DELETE /api/spaces/{id}/members/{student_id}</code></td><td>boolean; sets <code>removed_at</code></td></tr>
+        <tr><td><code>app.space_people(uuid)</code></td><td><code>GET /api/spaces/{id}/people</code></td><td>owner + active members; mute flags to the owner only</td></tr>
+        <tr><td><code>app.my_spaces()</code></td><td><code>GET /api/spaces</code>, <code>GET /api/spaces/{id}</code></td><td>owned + actively enrolled spaces</td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the only writers of submissions and grades (<span class="ln">20261004140000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.save_submission_draft(uuid, text, text)</code></td><td><code>PUT /api/assignments/{id}/submission</code></td><td><code>saved</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code></td></tr>
+        <tr><td><code>app.turn_in_submission(uuid)</code></td><td><code>POST …/submission/turn-in</code></td><td><code>turned_in</code> · <code>already_turned_in</code> · <code>forbidden</code> · <code>graded</code> — stamps <code>clock_timestamp()</code></td></tr>
+        <tr><td><code>app.unsubmit_submission(uuid)</code></td><td><code>POST …/submission/unsubmit</code></td><td><code>unsubmitted</code> · <code>not_turned_in</code> · <code>forbidden</code> · <code>graded</code></td></tr>
+        <tr><td><code>app.save_grade(uuid, uuid, numeric, text, boolean)</code></td><td><code>PUT /api/assignments/{id}/grades/{student_id}</code></td><td><code>saved</code> · <code>forbidden</code> · <code>invalid_grade</code>; returning is one-way</td></tr>
+        <tr><td><code>app.delete_assignment(uuid)</code></td><td><code>DELETE /api/assignments/{id}</code></td><td><code>(deleted, object_keys)</code>; since <span class="ln">20261004150000:321</span> every stored file key, drafts and students who left included</td></tr>
+        <tr><td colspan="3"><em><code>app.submittable_space(uuid)</code> and <code>app.lock_submission(uuid, uuid)</code> are internal — <strong>no
+        grant</strong> to <code>app_backend</code>; one advisory lock per (assignment, student) serialises every write above.</em></td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the only writers of file and link rows (<span class="ln">20261004150000</span>, <span class="ln">20261005120000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.add_submission_file(uuid, text, text, text, integer, text)</code></td><td><code>POST /api/assignments/{id}/submission/files</code></td><td><code>added</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code> · <code>too_many_files</code> (5) · <code>submission_quota</code> (20 MiB) · <code>classroom_quota</code> (2 GiB)</td></tr>
+        <tr><td><code>app.remove_submission_file(uuid)</code></td><td><code>DELETE /api/submission-files/{id}</code></td><td><code>removed</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code>; returns the key to delete after commit</td></tr>
+        <tr><td><code>app.add_material_attachment(uuid, uuid, text, text, text, integer, text)</code></td><td><code>POST /api/announcements/{id}/attachments</code>, <code>POST /api/assignments/{id}/attachments</code></td><td><code>added</code> · <code>forbidden</code> · <code>too_many_files</code> (10) · <code>classroom_quota</code></td></tr>
+        <tr><td colspan="3"><em>Each takes the full object key the backend has <strong>already stored</strong> — object first, row second,
+        so no lock is held across an upload. <code>app.space_storage_bytes(uuid)</code> and <code>app.lock_space_files(uuid)</code>
+        are internal — <strong>no grant</strong>.</em></td></tr>
+        <tr><td><code>app.add_submission_link(uuid, text)</code> <span class="ln">20261005120000:72</span></td><td><code>POST /api/assignments/{id}/submission/links</code></td><td><code>added</code> (also for a link already there) · <code>forbidden</code> · <code>invalid_url</code> · <code>graded</code> · <code>turned_in</code> · <code>too_many_links</code> (5)</td></tr>
+        <tr><td><code>app.remove_submission_link(uuid)</code> <span class="ln">20261005120000:121</span></td><td><code>DELETE /api/submission-links/{id}</code></td><td><code>removed</code> · <code>forbidden</code> · <code>graded</code> · <code>turned_in</code></td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the class chat (<span class="ln">20261005130000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Outcomes</th></tr>
+        <tr><td><code>app.can_post_message(uuid)</code> <span class="ln">20261005130000:89</span></td><td>the <code>space_message_insert</code> policy; <code>GET</code> / <code>POST /api/spaces/{id}/messages</code></td><td><code>true</code> · <code>false</code> — the teacher always (even locked); otherwise unlocked, an active unmuted member, the guardian gate passed; fails closed. Granted, because a policy calls it</td></tr>
+        <tr><td><code>app.delete_space_message(uuid)</code> <span class="ln">20261005130000:137</span></td><td><code>DELETE /api/messages/{id}</code></td><td><code>deleted</code> · <code>already_deleted</code> · <code>forbidden</code> — soft, retained; works on an archived classroom</td></tr>
+        <tr><td><code>app.set_student_muted(uuid, uuid, boolean)</code> <span class="ln">20261005130000:165</span></td><td><code>PUT /api/spaces/{id}/members/{student_id}/mute</code></td><td><code>true</code> · <code>false</code> — the teacher, an active member only; survives leaving and rejoining</td></tr>
+        <tr><td><code>app.space_message_tombstones(uuid, timestamptz)</code> <span class="ln">20261005130000:184</span></td><td><code>GET /api/spaces/{id}/messages</code></td><td>ids deleted since a time — never content — for the teacher and current members</td></tr>
+      </table>
+    </details>
+
+    <details open>
+      <summary>Classroom — the parent's overview (<span class="ln">20261005140000</span>)</summary>
+      <table>
+        <tr><th>Function</th><th>Endpoint</th><th>Returns</th></tr>
+        <tr><td><code>app.guardian_classroom_overview()</code> <span class="ln">20261005140000:29</span></td><td><code>GET /api/parent/classrooms</code></td><td>No parameters — anchored on the caller. A verified child's current classrooms (archived ones labelled), teachers, published assignments due in the last 120 days or undated, the turn-in time, and a grade once returned. Never feedback, work, files, links, chat or classmates; a parent has no read policy on any classroom table</td></tr>
       </table>
     </details>
 
@@ -893,8 +1141,39 @@ erDiagram
       </tr>
       <tr>
         <td><strong>Chat is owner-only</strong></td>
-        <td>A minor's chat is private. No teacher, parent or admin path, and no privileged function touches the three tables. Re-verified; holds.</td>
+        <td>A minor's chat is private. No teacher, parent or admin path, and no privileged function touches the three tables. Re-verified; holds.
+        The class-public <strong>classroom</strong> chat brought into v1 on 2026-10-03 is a separate table (<code>space_message</code>, <code>20261005130000</code>) and must never reuse these.</td>
         <td><span class="ln">20260801120100:432-465</span></td>
+      </tr>
+      <tr>
+        <td><strong>Classroom membership and codes are written only by functions</strong></td>
+        <td><code>app_backend</code> holds no write grant on <code>enrollment</code> or <code>join_code</code>, no INSERT/DELETE on <code>classroom_space</code>, and no DELETE on <code>teacher_subject_scope</code>. Do not grant one back to make an endpoint easier — add a narrow function. <code>test_classroom_rls.py</code> asserts each refusal by its message.</td>
+        <td><span class="ln">20261004120000</span></td>
+      </tr>
+      <tr>
+        <td><strong>Scheduled classroom content is hidden by the read policy</strong></td>
+        <td>A member reads an announcement or assignment only when <code>publish_at &lt;= now()</code>. There is no publisher job and no status column — do not add a <code>published</code> flag, and do not filter in the service instead of the policy.</td>
+        <td><span class="ln">20261004130000</span> · <span class="ln">20261004140000</span></td>
+      </tr>
+      <tr>
+        <td><strong>A teacher-owned field on a student-owned row is its own table</strong></td>
+        <td>Every user shares one database role, so a grade column on the submission would be writable by the student. Hence <code>submission_grade</code>; status is derived, never stored.</td>
+        <td><span class="ln">20261004140000</span></td>
+      </tr>
+      <tr>
+        <td><strong>A stored file is authorized by its row, and its key is held to its owner</strong></td>
+        <td>A download — or a five-minute view link (Phase 6b), for PDF and images only — is handed out only after the file's row is read under Row-Level Security; the bucket is private with no <code>storage.objects</code> policy. <code>ck_material_key</code> / <code>ck_subfile_key</code> refuse a key outside the owner's prefix. Objects are deleted only after the deleting transaction commits, so a rollback can orphan an object, never a row.</td>
+        <td><span class="ln">20261004150000</span></td>
+      </tr>
+      <tr>
+        <td><strong>Who may post in the class chat is the insert policy</strong></td>
+        <td>A muted student, a locked chat, an archived classroom, a student who left and a Class 9–10 student without a verified guardian are each refused by PostgreSQL through <code>app.can_post_message</code>. A deletion is a stamp, never a <code>DELETE</code>. Do not add an UPDATE or DELETE grant, a member read path to deleted rows, or a second way to post.</td>
+        <td><span class="ln">20261005130000</span></td>
+      </tr>
+      <tr>
+        <td><strong>A parent reads the classroom through one function, never through a policy</strong></td>
+        <td>Row-Level Security is per row: a parent policy on the submission or the grade would hand over the answer and the private feedback with them. <code>app.guardian_classroom_overview()</code> returns only what CL-10 allows and is anchored on the caller. Do not add a parent read policy to a classroom table.</td>
+        <td><span class="ln">20261005140000</span></td>
       </tr>
     </table>
 

@@ -10,8 +10,8 @@
 Related documents: [Database](database.html) · [API endpoints](api-endpoints.md) ·
 [architecture.html](architecture.html) (the same content with rendered diagrams)
 
-Contract documents at the repository root: [`prd.md`](../../prd.md) · [`tdd.md`](../../tdd.md) ·
-[`user-stories.md`](../../user-stories.md)
+Contract documents at the repository root: [`prd.md`](../../prd.md) · [`tdd.md`](../../tdd.md).
+`user-stories.md` lives outside the repository, in `Desktop\EduBridge-AI_FYP-planning\`.
 
 **Acronyms are expanded on first use in each section.** API — Application Programming Interface.
 RLS — Row-Level Security. RBAC — Role-Based Access Control. JWT — JSON Web Token. TOTP —
@@ -23,12 +23,13 @@ Unified Configuration (a PostgreSQL runtime setting).
 
 ## 1. Overview
 
-The backend is a **single FastAPI application** with one router. All server logic lives under
-`backend/app/`, split into three packages:
+The backend is a **single FastAPI application** with two routers. All server logic lives under
+`backend/app/`, split into four packages:
 
 | Package | Contents |
 |---|---|
-| `app/auth/` | The only router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
+| `app/auth/` | The authentication router (`routes.py`), the service layer, dependencies, tokens, the gate, the onboarding derivation, email, TOTP, backup codes, Turnstile |
+| `app/classroom/` | The classroom router (`routes.py`, classroom Phases 2–8), its role dependencies, request/response schemas, the service, join-code generation (`codes.py`), the stream (`announcements.py`), assignments and grading (`assignments.py`), the derived work status (`status.py`), the shared schedule check (`scheduling.py`), the calendar (`calendar.py`), the keyset cursor (`pagination.py`), and files: the byte rules (`files.py`), the database side (`file_service.py`) and the object store (`storage.py`), a student's links (`links.py`), the class chat (`chat.py`), and the parent's read-only overview (`parent.py`) — §2.8, §9.5 |
 | `app/core/` | Configuration, the database engines and the per-transaction user binding, the error envelope, the rate limiter |
 | `app/models/` | SQLAlchemy ORM (Object-Relational Mapper) declarations and the Python enumerations that mirror the PostgreSQL types |
 
@@ -45,14 +46,19 @@ repository root.
 
 | Metric | Value | Command |
 |---|---|---|
-| Python source files | **26** | `find backend/app -type f -name "*.py" \| wc -l` |
-| Routers | **1** (`app/auth/routes.py:79`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
-| Implemented routes | **17** | `grep -c "^@router\." backend/app/auth/routes.py` |
-| Routes specified in `tdd.md` §3.1 + §7.2 | **48** | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
-| Specified but **not** implemented | **31** | 48 − 17 |
-| Applied migrations | **11** | `ls supabase/migrations/*.sql \| wc -l` |
-| Test files | **25** (10 unit, 15 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
-| `app.*` privileged functions called from Python | **24 distinct, 28 call sites** | `grep -rnE "SELECT (\*\|[a-z_, ]+) FROM app\.\|SELECT app\." backend/app --include=*.py` |
+| Python source files | **44** | `find backend/app -type f -name "*.py" \| wc -l` |
+| Routers | **2** (`app/auth/routes.py:90`, `app/classroom/routes.py:85`) | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` |
+| Implemented routes | **64** (21 + 43) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
+| Routes specified in `tdd.md` | **87** (83 in v0.4.0, plus Phase 6b's 4) | see [api-endpoints.md](api-endpoints.md) for the row-by-row derivation |
+| Specified but **not** implemented | **23** | 87 − 64 |
+| Applied migrations | **33** (all applied; `20261005140000`, the parent overview, on 2026-10-05) | `ls supabase/migrations/*.sql \| wc -l` |
+| Test files | **53** (22 unit, 31 integration) | `find backend/tests/unit -name "test_*.py" \| wc -l` · `find backend/tests/integration -name "test_*.py" \| wc -l` |
+| `app.*` privileged functions called from Python | **56 distinct** | `grep -rhoE "(FROM\|SELECT) app\.[a-z0-9_]+" backend/app --include=*.py \| sort -u` finds 53; it cannot see `app.owns_active_space`, selected through a fixed-literal f-string in `classroom/service.py:71` (`require_owner`), `app.is_enrolled_in`, which follows a comma in `classroom/announcements.py:38` and `classroom/assignments.py:61`, or `app.can_post_message`, which follows one in `classroom/chat.py:60` |
+
+*Re-measured 2026-10-05 (classroom Phase 8); the rest of this page is the 2026-08-15 account unless a
+section says otherwise, and its `file:line` citations into `auth/` predate Phases 3–5. Citations into
+`main.py`, `core/ratelimit.py` and `core/config.py` were re-verified on 2026-10-05, when Phase 6
+moved all three — most had drifted well before that.*
 
 ### Directories that are scaffolded, with no implementation
 
@@ -92,22 +98,22 @@ service code runs inside.
 ```
 HTTP request
   │
-  1  CORSMiddleware                       main.py:61
-  2  request_context middleware           main.py:69   → X-Request-ID and three security headers
+  1  CORSMiddleware                       main.py:100
+  2  request_context middleware           main.py:108  → X-Request-ID and three security headers
   3  route function                       auth/routes.py
-  4  enforce(...) rate limiter            core/ratelimit.py:117
+  4  enforce(...) rate limiter            core/ratelimit.py:160
   5  authenticated dependency             auth/dependencies.py:29   → binds app.current_user_id
   6  service function                     auth/service.py
   7  SQLAlchemy Core text()               → PostgreSQL under Row-Level Security
 ```
 
-### 2.1 CORS (Cross-Origin Resource Sharing) — `app/main.py:61`
+### 2.1 CORS (Cross-Origin Resource Sharing) — `app/main.py:100`
 
 `allow_origins` comes from `settings.cors_origins` and `allow_credentials=True`. The comment at
-`main.py:57-60` records why a wildcard is refused: with credentials enabled Starlette does **not**
+`main.py:96-99` records why a wildcard is refused: with credentials enabled Starlette does **not**
 send a literal `*`, it echoes the requesting origin back, so a wildcard would let any site make
 credentialed calls — and the refresh cookie is a credential. `Settings._production_is_actually_hardened`
-(`core/config.py:159`) raises at startup if `"*"` appears in `cors_origins` while the environment is
+(`core/config.py:304`) raises at startup if `"*"` appears in `cors_origins` while the environment is
 production.
 
 > **Known defect D4 (findings register).** A 500 response bypasses CORS and every security header.
@@ -115,7 +121,7 @@ production.
 > middleware stack in a way that does not re-enter the CORS layer, so a browser sees an opaque
 > network failure rather than the `INTERNAL_ERROR` envelope. Recorded here, fixed in a later phase.
 
-### 2.2 Request-context middleware — `app/main.py:69`
+### 2.2 Request-context middleware — `app/main.py:108`
 
 One `uuid4` per request, stored on `request.state.request_id`, echoed as `X-Request-ID`, and
 attached to the body of any 500 (`core/errors.py:152`). It also sets `X-Content-Type-Options:
@@ -127,24 +133,24 @@ nosniff`, `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer` on every re
 ### 2.3 Route — `app/auth/routes.py`
 
 The single router is created at `routes.py:79` and mounted at `settings.api_base_path` (default
-`/api`) by `main.py:84`. Handlers are thin: they enforce a rate limit, call one service function,
+`/api`) by `main.py:123`. Handlers are thin: they enforce a rate limit, call one service function,
 and shape the response model. The only route logic that is not a pass-through is the refresh-cookie
 write, which appears in three handlers (`routes.py:119`, `routes.py:188`, `routes.py:220`).
 
 A standing note sits at the top of the file (`routes.py:81-85`): **no route depends on
 `get_service_db`.** See §4.
 
-`GET /health` is defined on the application rather than the router (`main.py:86`), so it sits
+`GET /health` is defined on the application rather than the router (`main.py:126`), so it sits
 outside `/api` and outside the rate limiter.
 
 > **Known defect D16.** `/health` is unauthenticated, unrate-limited, and reports
-> `settings.environment` in its body (`main.py:91`).
+> `settings.environment` in its body (`main.py:131`).
 
-### 2.4 Rate limiter — `app/core/ratelimit.py:117`
+### 2.4 Rate limiter — `app/core/ratelimit.py:160`
 
 `enforce(request, bucket=..., limit=..., subject=...)` is called as the first statement of every
 rate-limited handler. It is an **in-process fixed-window counter** over a module-level dictionary
-guarded by a `threading.Lock` (`ratelimit.py:77-78`). Its own module docstring states the limit of
+guarded by a `threading.Lock` (`ratelimit.py:120-121`). Its own module docstring states the limit of
 that design, and it is quoted here rather than paraphrased:
 
 > "SCOPE, STATED PLAINLY: this is an IN-PROCESS fixed-window counter. It is a real control for a
@@ -154,18 +160,18 @@ that design, and it is quoted here rather than paraphrased:
 > upgrade, and the interface here does not change when it happens."
 > — `backend/app/core/ratelimit.py:9-14`
 
-Two keying strategies (`ratelimit.py:81`):
+Two keying strategies (`ratelimit.py:124`):
 
 - **Pre-authentication** buckets (`register`, `login`, `refresh`) key on `request.client.host`. The
-  comment at `ratelimit.py:93-96` records that behind a proxy this is the proxy's address, and that
+  comment at `ratelimit.py:135-139` records that behind a proxy this is the proxy's address, and that
   `X-Forwarded-For` is deliberately **not** trusted because any caller can set it.
 - **Authenticated** buckets pass `subject=str(ctx.user_id)` so the bucket is per-user. The reason is
   the deployment target: a Pakistani school laboratory or a mobile carrier puts a whole cohort
   behind one public address, so an address-keyed limit on the guardian-status poll would let fifteen
-  students exhaust the allowance for the building (`ratelimit.py:82-90`).
+  students exhaust the allowance for the building (`ratelimit.py:125-133`).
 
 A second, per-account layer exists for the 2FA (two-factor authentication) endpoints. The address
-ceilings are deliberately loose and the real bound is `enforce_subject` (`ratelimit.py:127`), called
+ceilings are deliberately loose and the real bound is `enforce_subject` (`ratelimit.py:170`), called
 from inside the service once a token has identified whose account it is
 (`service.py:720`, `:802`, `:923`, `:1042`).
 
@@ -174,19 +180,19 @@ from inside the service once a token has identified whose account it is
 | `login` | 10 / 60 s | — | `ratelimit.py:39` |
 | `register` | 5 / 300 s | — | `ratelimit.py:40` |
 | `refresh` | 30 / 60 s | — | `ratelimit.py:41` |
-| `guardian_status` | 60 / 60 s (per user) | — | `ratelimit.py:47` |
-| `guardian_invite` | 5 / 300 s (per user) | — | `ratelimit.py:48` |
-| `guardian_confirm` | 10 / 60 s (per user) | — | `ratelimit.py:49` |
-| `2fa_enroll` | 60 / 300 s | 5 / 300 s | `ratelimit.py:61`, `:72` |
-| `2fa_confirm` | 100 / 300 s | 5 / 300 s | `ratelimit.py:62`, `:73` |
-| `2fa_verify` | 200 / 300 s | 10 / 300 s | `ratelimit.py:63`, `:74` |
-| `2fa_resend` | 60 / 300 s | 3 / 300 s | `ratelimit.py:64`, `:75` |
-| `email_verify` | 100 / 300 s | — | `ratelimit.py:65` |
-| `email_resend` | 30 / 300 s | — | `ratelimit.py:66` |
-| `password_forgot` | 30 / 300 s | — | `ratelimit.py:67` |
-| `password_reset` | 60 / 300 s | — | `ratelimit.py:68` |
+| `guardian_status` | 60 / 60 s (per user) | — | `ratelimit.py:55` |
+| `guardian_invite` | 5 / 300 s (per user) | — | `ratelimit.py:56` |
+| `guardian_confirm` | 10 / 60 s (per user) | — | `ratelimit.py:57` |
+| `2fa_enroll` | 60 / 300 s | 5 / 300 s | `ratelimit.py:69`, `:95` |
+| `2fa_confirm` | 100 / 300 s | 5 / 300 s | `ratelimit.py:70`, `:96` |
+| `2fa_verify` | 200 / 300 s | 10 / 300 s | `ratelimit.py:71`, `:97` |
+| `2fa_resend` | 60 / 300 s | 3 / 300 s | `ratelimit.py:72`, `:98` |
+| `email_verify` | 100 / 300 s | — | `ratelimit.py:73` |
+| `email_resend` | 30 / 300 s | — | `ratelimit.py:74` |
+| `password_forgot` | 30 / 300 s | — | `ratelimit.py:75` |
+| `password_reset` | 60 / 300 s | — | `ratelimit.py:76` |
 
-`rate_limited_with_retry` (`ratelimit.py:135`) puts a real `retry_after` into `details` so the
+`rate_limited_with_retry` (`ratelimit.py:178`) puts a real `retry_after` into `details` so the
 client's countdown is honest.
 
 > **Known defect E3.** `Retry-After` is placed in the JSON body's `details`, not in the HTTP
@@ -246,8 +252,120 @@ queries. The ORM declarations in `app/models/` exist for the few statements that
 (`revoke_user_tokens` at `auth/tokens.py:150` is the only ORM write in the request path) and as
 documentation of the schema; the schema itself is owned by the migrations.
 
-There is **no SQL string interpolation anywhere** — this was checked across the whole backend during
-the Epic 1 review and recorded as verified-correct in the findings register.
+There is **no SQL string interpolation of a value anywhere** — this was checked across the whole
+backend during the Epic 1 review and recorded as verified-correct in the findings register. Three
+places build a statement's *shape* from **fixed literals** chosen in code (a dynamic `SET` list or a
+choice between two function names) and mark it `# noqa: S608` with the reason: `auth/service.py`'s
+`update_me`, and `classroom/service.py`'s `require_owner` and `update_space`. Every value is still a
+bound parameter.
+
+### 2.8 The classroom router — `app/classroom/` (classroom Phases 2–8)
+
+Same layers as above, with one difference that matters: **the database decides which classroom a
+caller may touch.** The route's dependency decides only *who* may call
+(`classroom/dependencies.py` — `participant` and `gated_student` wrap `require_guardian_verified`;
+leaving uses `require_role('student')` alone, because leaving is a consent right). The service then
+calls an `app.*` function (`20261004120100`), which reads the actor from `app.current_user_id()`
+and **returns an outcome string instead of raising**; `service.py` maps each outcome to a
+catalogued error, so a refusal is never a 500.
+
+Three conventions in `classroom/service.py`:
+
+- **Existence never leaks.** An unknown id and someone else's id both raise `forbidden_scope()`,
+  byte-identical (pinned by `test_classroom_api.py`).
+- **Pre-check, then a backstop.** Writes call `require_owner` (`:71`) first; `rls_refusal_as_forbidden`
+  (`:55`) turns a SQLSTATE `42501` — the database catching a check the service missed — into a logged
+  403 rather than a 500.
+- **No `commit()`.** As everywhere: the binding is transaction-scoped and `authenticated` commits.
+
+The stream (classroom Phase 3) is its own module, `classroom/announcements.py`, because it adds two
+rules the rest of the service does not have:
+
+- **Scheduling is the database's job, not the service's.** A future `publish_at` hides a post from
+  members through the read policy (`20261004130000`); the service runs the same list query for owner
+  and member and never filters scheduled rows itself. It checks only that a requested time is in the
+  future and within a year — against the **database** clock (`SELECT now()`), because the 2026-08-17
+  session-policy work measured the application and database clocks 1.1 s apart.
+- **Lists are keyset-paginated**, not offset-paginated: `classroom/pagination.py` encodes the last
+  row's `(publish_at, id)` as an opaque base64 cursor and refuses a timezone-naive one, so a page
+  boundary cannot skip or repeat a post when new ones arrive. Later classroom lists reuse it.
+
+Assignments and grading (classroom Phase 4) live in `classroom/assignments.py`, on the same two
+rules (the schedule check is shared, `classroom/scheduling.py`), plus three of their own:
+
+- **Status is derived, never stored.** `classroom/status.py` is a pure function of `turned_in_at`,
+  `due_at` and `returned_at` against the database clock — assigned, turned in, done late, missing,
+  graded. A stored status would drift the first time a teacher moved a deadline.
+- **Every submission and grade write is an `app.*` function** (`20261004140000`): neither table
+  carries a write grant, because a column grant cannot tell a teacher from a student. The service
+  maps each outcome; a state refusal is `400` with `details.reason` (`graded`, `turned_in`).
+- **Visibility is the database's.** The list and detail queries are the same for owner and member:
+  RLS hides a student's draft from the teacher until it is turned in, a grade from the student until
+  it is returned, and both from the teacher once the student leaves.
+
+The calendar (classroom Phase 5, `classroom/calendar.py`) has **no table, no migration and no policy
+of its own**: one `UNION ALL` over the assignment and announcement tables, run under their policies,
+so it can only show what the caller could already see. The scheduled-post branches add
+`space_id IN (SELECT app.my_owned_space_ids())` explicitly, though a member could not read a future
+row anyway. The range is bounded (62 days) and the result capped (500, with `truncated`).
+
+Files (classroom Phase 6) split three ways, so each rule sits where it can be tested alone:
+
+- **`classroom/files.py` is pure** — no database, no storage. It counts the raw body against
+  `Content-Length` (uploads are never multipart: Starlette's parser does not cap a file part, and
+  the Next.js proxy silently truncates past 10 MB), reads the type from the first bytes, refuses
+  macro-bearing Office files, cleans the name and forces its extension, mints the object key and
+  builds the download headers.
+- **`classroom/file_service.py` keeps the bucket in step with the rows.** The object is stored
+  **first** and its row written **second**, through an `app.*` function that checks the lock and
+  the quotas (`20261004150000`), so no lock is held while a body crosses the network; a refusal
+  deletes the object at once. A download reads the row under RLS before it opens the object, so who
+  may see a file is decided by the policies, never here.
+- **The upload handlers are the only `async` routes**, because they must read the request stream;
+  every database step still runs in the threadpool (`run_in_threadpool`), like the synchronous
+  routes. A cheap membership or ownership check runs **before** the body is read, so an outsider
+  never gets to send 5 MB.
+
+Phase 6b adds two things on the same rules. **Links** (`classroom/links.py`) are rows of their own
+(`20261005120000`), up to five per piece of work, written only by `app.add_submission_link` /
+`app.remove_submission_link` and read under the file's policy — so the student's draft keeps no
+`link_url` any more. **Viewing** (`file_service.view_link`) reads the file's row exactly as a
+download does, then signs a five-minute link to the storage service (§9.5): the browser opens
+the file on Supabase's domain, never in the application's own pages, and only a PDF or an image —
+Office files are download-only (owner decision 2026-10-05).
+
+The class chat (classroom Phase 7, `classroom/chat.py`, `20261005130000`) is **class-public** and
+is never the tutor conversation (invariant 8 in [database.md](database.md)). Three rules of its own:
+
+- **Who may post is the insert policy.** A student writes `space_message` directly — a
+  column-limited `INSERT` that `space_message_insert` holds to the caller and to
+  `app.can_post_message` (unmuted, unlocked, active, the guardian gate passed; the teacher always).
+  The service asks the same function first only so a member's refusal is a `details.reason` they
+  can act on — `archived`, `muted`, `chat_locked`.
+- **Polling, with the database's clock.** The poll's cursor is the reading transaction's `now()`,
+  never Python's; each catch-up re-reads a 15-second overlap, because insert order is not commit
+  order, and the client merges by id. Deletions reach a member as ids only
+  (`app.space_message_tombstones`), since a member cannot read a deleted row; a catch-up more than
+  200 messages behind starts again from the newest page (`reset`). SSE or WebSockets, and a shared
+  rate-limit store, are the scale-out path (`tdd.md` §3.6).
+- **Moderation is retained, and audited.** The teacher's delete stamps the row
+  (`app.delete_space_message`) and keeps it readable to them; mute is `enrollment.muted_at`
+  (`app.set_student_muted`); lock is `classroom_space.chat_locked`, through the existing `PATCH`.
+  Deleting and muting write `audit_log` rows.
+
+The parent's overview (classroom Phase 8, `classroom/parent.py`, `20261005140000`) is the one
+classroom route a parent reaches (`require_role('parent')` — the guardian gate is a student rule).
+It reads **one function and no table**: `app.guardian_classroom_overview()` takes no parameters,
+so it is anchored on the caller and cannot be aimed at another family, and it returns only what
+`prd.md` CL-10 allows — a verified child's classrooms and teachers, published assignments and
+deadlines, and a grade once returned. A function rather than parent read policies, because a
+policy releases whole rows: the feedback beside the grade, the work beside the turn-in time. The
+service derives each status from the turn-in time with `status.py` and does not send the time.
+
+Rate-limit buckets `classroom_read` / `classroom_write` / `classroom_join` (`ratelimit.py:105-107`),
+`file_upload` (30 per hour) / `file_download` (60 per minute, `:111-112`), and `chat_poll` (60 per
+minute) / `chat_post` (10 per minute, `:117-118`), all per user. Route table:
+[api-endpoints.md §2.8](api-endpoints.md). The object store itself is §9.5.
 
 ---
 
@@ -291,7 +409,7 @@ The application **refuses to start** if its own connection can bypass Row-Level 
 pg_roles WHERE rolname = current_user` and raises `UnsafeDatabaseRoleError` (`core/db.py:103`) if
 either is true. Being unable to *check* is also a refusal, reported separately as
 `DatabaseUnreachableError` (`core/db.py:107`) — the two mean opposite things and need different
-responses from whoever reads the log. The check is wired into the lifespan at `main.py:37`.
+responses from whoever reads the log. The check is wired into the lifespan at `main.py:40`.
 
 ### 3.2 What Card 1.5 promises
 
@@ -440,7 +558,7 @@ grep -rnE "SELECT (\*|[a-z_, ]+) FROM app\.|SELECT app\." backend/app --include=
 Client                Route              authenticated dep       PostgreSQL (app_backend)
   │  Authorization: Bearer <JWT>
   ├───────────────────►│
-  │                    │  enforce(...)  ← in-process, no I/O   core/ratelimit.py:117
+  │                    │  enforce(...)  ← in-process, no I/O   core/ratelimit.py:160
   │                    ├──────────────────►│
   │                    │                   │  decode_access_token   auth/security.py:92
   │                    │                   │  (signature + type=="access"; no database)
@@ -489,9 +607,9 @@ dump but not the application secret.
 
 | Kind | Lifetime | Where it lives | The endpoint(s) that accept it |
 |---|---|---|---|
-| `refresh` | `refresh_token_ttl_days`, default **7 days** (`core/config.py:50`) | `auth_token`, hashed. Plaintext goes **only** into an httpOnly, path-scoped `refresh_token` cookie (`routes.py:119-132`) — deliberately absent from `AccessTokenResponse` (`routes.py:133-139`) | `POST /api/auth/refresh` only |
-| `two_factor_enrollment` | `enrollment_token_ttl_seconds` = **900 s** (`core/config.py:51`) | `auth_token`, hashed. Plaintext returned in the login response body | `POST /api/auth/2fa/enroll`, `POST /api/auth/2fa/confirm` |
-| `two_factor_pending` | `pending_token_ttl_seconds` = **300 s** (`core/config.py:52`) | `auth_token`, hashed. Plaintext returned in the login response body | `POST /api/auth/2fa/verify`, `POST /api/auth/2fa/resend` |
+| `refresh` | `refresh_token_ttl_days`, default **7 days** (`core/config.py:64`) | `auth_token`, hashed. Plaintext goes **only** into an httpOnly, path-scoped `refresh_token` cookie (`routes.py:119-132`) — deliberately absent from `AccessTokenResponse` (`routes.py:133-139`) | `POST /api/auth/refresh` only |
+| `two_factor_enrollment` | `enrollment_token_ttl_seconds` = **900 s** (`core/config.py:65`) | `auth_token`, hashed. Plaintext returned in the login response body | `POST /api/auth/2fa/enroll`, `POST /api/auth/2fa/confirm` |
+| `two_factor_pending` | `pending_token_ttl_seconds` = **300 s** (`core/config.py:66`) | `auth_token`, hashed. Plaintext returned in the login response body | `POST /api/auth/2fa/verify`, `POST /api/auth/2fa/resend` |
 | `two_factor_email_otp` | **600 s** (`_EMAIL_OTP_TTL_SECONDS`, `service.py:95`) | `auth_token`, hashed. The six-digit code is emailed | `POST /api/auth/2fa/confirm`, `POST /api/auth/2fa/verify` — as the `code` field, not as the credential |
 | `email_verify` | **3600 s** (`_EMAIL_LINK_TTL_SECONDS`, `service.py:92`) | `auth_token`, hashed. Plaintext in an emailed link | `POST /api/auth/email/verify` |
 | `password_reset` | **3600 s** (same constant) | `auth_token`, hashed. Plaintext in an emailed link | `POST /api/auth/password/reset` |
@@ -501,7 +619,7 @@ Alongside these sit two JWTs, which are **not** rows in `auth_token` and are not
 
 | JWT `type` claim | Lifetime | Issued by | Accepted by |
 |---|---|---|---|
-| `access` | `access_token_ttl_minutes`, default **15 min** (`core/config.py:49`) | `create_access_token` (`auth/security.py:58`) | every authenticated route, via `decode_access_token`'s default `expected_type="access"` (`auth/security.py:92`) |
+| `access` | `access_token_ttl_minutes`, default **15 min** (`core/config.py:63`) | `create_access_token` (`auth/security.py:58`) | every authenticated route, via `decode_access_token`'s default `expected_type="access"` (`auth/security.py:92`) |
 | `onboarding` | same 15 min | `create_onboarding_token` (`auth/security.py:78`); issued by `verify_email` (`service.py:1111-1114`) | **nothing yet.** The default decode requires `type == "access"`, so this token is rejected by every business route including `/auth/me` — which is exactly the `tdd.md` §3.1 rule that email verification alone must not become a complete login |
 
 > **Known defect E2.** An issued access token cannot be revoked. Logout revokes refresh tokens only
@@ -667,9 +785,10 @@ representative guardian status from `guardian_link`, ordered `(status = 'verifie
 created_at DESC LIMIT 1` (`dependencies.py:183-189`) so that a student with several parent links
 gets the most favourable one. A pending gate raises `GATE_PENDING` (403, `core/errors.py:73`).
 
-> **Note.** `require_guardian_verified` is exported and tested but **wired to no route** — the
-> learning endpoints it protects (`/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`,
-> `/api/reports/*`) are among the 31 that do not exist. See [api-endpoints.md](api-endpoints.md).
+> **Note.** `require_guardian_verified` has been wired since classroom Phase 2, through
+> `participant` and `gated_student` (`classroom/dependencies.py:22`, `:35`). The learning endpoints it
+> was written for (`/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`,
+> `/api/reports/*`) are still among the 35 that do not exist. See [api-endpoints.md](api-endpoints.md).
 
 ### 8.4 The write boundary
 
@@ -737,7 +856,7 @@ widened. `test_config_hardening.py` now pins both halves.
 deliberate (`email.py:58-67`): the OTP is stored as an HMAC hash, so a code that is neither
 delivered nor logged cannot be recovered by anyone, and 2FA enrolment by email simply could not be
 completed on a developer machine. The safety of that decision rests entirely on
-`_production_is_actually_hardened` (`core/config.py:166-171`) refusing to start with
+`_production_is_actually_hardened` (`core/config.py:309-314`) refusing to start with
 `EMAIL_PROVIDER=logging` in production.
 
 **Dispatch is asynchronous, and that is a security control, not a performance one.**
@@ -750,7 +869,7 @@ stopwatch could enumerate the user table. `drain_pending_emails` (`email.py:173`
 and graceful shutdown.
 
 > **Known defects A3, D1 and D8.** `email_provider` is an unvalidated string, so a typo falls
-> through to the logging sender *and* past the production guard at `config.py:166`, writing every
+> through to the logging sender *and* past the production guard at `config.py:309`, writing every
 > two-factor code and reset link to stdout. Emails are dispatched **before** the transaction commits
 > (`service.py:198` runs before `get_db`'s commit), so a rolled-back registration still sends a
 > verification link. The queue leaks a `Future` per message into `_pending` (`email.py:170`) and its
@@ -772,7 +891,7 @@ factory functions build the catalogued errors — `validation_error` (`:27`), `u
 `guardian_not_found` (`:89`), `two_factor_invalid` (`:93`), `pending_token_expired` (`:97`),
 `token_expired` (`:105`).
 
-**No endpoint invents a code.** `tdd.md` §7.3 (line 1073) states the rule, and the code follows it at
+**No endpoint invents a code.** `tdd.md` §7.3 (line 1110) states the rule, and the code follows it at
 `service.py:1057-1065`: `/2fa/resend` against a TOTP enrolment answers `400 VALIDATION_ERROR` with
 `details.fields`, not a bespoke `INVALID_METHOD`, because a code outside the catalogue reaches the
 client as an unrecognised string and renders as "something went wrong".
@@ -791,8 +910,8 @@ resend for a link that already worked sends the user round a loop they have fini
 
 ### 9.3 Configuration validation — `app/core/config.py`
 
-`Settings` (`config.py:10`) reads `backend/.env` through pydantic-settings. The class docstring
-(`config.py:11-24`) records a real, silent failure: pydantic-settings matches on the **field name**,
+`Settings` (`config.py:16`) reads `backend/.env` through pydantic-settings. The class docstring
+(`config.py:17-30`) records a real, silent failure: pydantic-settings matches on the **field name**,
 so `environment` looked for `ENVIRONMENT` while `.env.example` set `APP_ENV`, which was therefore
 ignored — along with `JWT_ACCESS_TTL_MINUTES` and `JWT_REFRESH_TTL_DAYS`. Because `environment`
 gates `/docs` exposure and the refresh cookie's `secure` flag, a deployment stayed in development
@@ -803,13 +922,13 @@ Four validators refuse to start rather than run misconfigured:
 
 | Validator | File:line | Refuses |
 |---|---|---|
-| `_secret_is_strong_enough` | `config.py:106` | `jwt_secret` / `jwt_refresh_secret` under 32 characters or starting `CHANGE_ME` |
-| `_totp_key_must_be_a_fernet_key` | `config.py:120` | a `TOTP_ENCRYPTION_KEY` that is a placeholder or not a valid Fernet key — Fernet raises at *first use*, which would otherwise be the middle of a user's 2FA enrolment, as a 500 |
-| `_turnstile_key_is_not_a_placeholder` | `config.py:145` | the placeholder `TURNSTILE_SECRET_KEY` |
-| `_production_is_actually_hardened` | `config.py:159` | `"*"` in `cors_origins` in production; `EMAIL_PROVIDER=logging` in production; **any real provider** (`resend` or `sendgrid`) without `EMAIL_FROM`; a non-`https://` `APP_BASE_URL` in production |
+| `_secret_is_strong_enough` | `config.py:231` | `jwt_secret` / `jwt_refresh_secret` under 32 characters or starting `CHANGE_ME` |
+| `_totp_key_must_be_a_fernet_key` | `config.py:245` | a `TOTP_ENCRYPTION_KEY` that is a placeholder or not a valid Fernet key — Fernet raises at *first use*, which would otherwise be the middle of a user's 2FA enrolment, as a 500 |
+| `_turnstile_key_is_not_a_placeholder` | `config.py:270` | the placeholder `TURNSTILE_SECRET_KEY` |
+| `_production_is_actually_hardened` | `config.py:303` | `"*"` in `cors_origins` in production; `EMAIL_PROVIDER=logging` in production; **any real provider** (`resend` or `sendgrid`) without `EMAIL_FROM`; a non-`https://` `APP_BASE_URL` in production; since classroom Phase 6, `STORAGE_PROVIDER=memory` in production and — in **any** environment — `STORAGE_PROVIDER=s3` without an `https://` endpoint, a region and real keys (a `CHANGE_ME` secret is refused), or a `MAX_UPLOAD_BYTES` outside 1 byte–9 MiB |
 
 `totp_encryption_key` and `turnstile_secret_key` have **no defaults** on purpose
-(`config.py:58-63`): a defaulted encryption key is worse than a missing one, because every
+(`config.py:120-132`): a defaulted encryption key is worse than a missing one, because every
 deployment that forgot to set it would share the same key and nobody would find out.
 
 > **A3, A4, A5 and D11 — FIXED, Phase 1 (2026-08-16).**
@@ -835,6 +954,16 @@ deployment that forgot to set it would share the same key and nobody would find 
 > previously bypassed the production check *and* selected the thing that check exists to prevent.
 > Pinned by `tests/unit/test_config_hardening.py`.
 
+**Classroom file storage (Phase 6, `config.py:165-185`).** `STORAGE_PROVIDER` is a `Literal`
+(`memory` · `s3`, normalised like the other two choices) and defaults to `memory`, so a fresh clone
+and every unit test run without credentials; production refuses it, because every file would
+vanish on a restart while its row survived. `s3` reads `STORAGE_S3_ENDPOINT`, `STORAGE_S3_REGION`
+and **storage-only** S3 access keys — never the project secret key, which would also bypass every
+database policy. `STORAGE_BUCKET` defaults to `classroom-files`; `MAX_UPLOAD_BYTES` to 5 MiB,
+with a 9 MiB ceiling because the database refuses anything larger and the Next.js proxy truncates
+past 10 MB. Template: `backend/.env.example`; deployment: `render.yaml` (`STORAGE_PROVIDER=s3`,
+the endpoint, region and both keys `sync: false`).
+
 ### 9.4 Captcha, passwords and TOTP
 
 `verify_turnstile_token` (`auth/turnstile.py:23`) **fails closed**: a network failure, a non-JSON
@@ -853,13 +982,63 @@ a gap measurable from anywhere, which `tdd.md` §6.11 forbids "by body, status c
 
 TOTP secrets are encrypted with Fernet before storage (`auth/totp.py:104`), with the key in
 application configuration and not in the database, so a database dump alone yields no usable secrets
-(`config.py:54-56`). Backup codes are argon2id-hashed (`auth/backup_codes.py:33`), which is why
+(`config.py:116-118`). Backup codes are argon2id-hashed (`auth/backup_codes.py:33`), which is why
 verification iterates the unused hashes (`service.py:974-986`) instead of doing a hash lookup.
 
 > **Known defects A9, D7 and A7.** `/2fa/enroll` skips the lockout check (`service.py:688` has no
 > `locked_until` branch, unlike `two_factor_confirm` at `service.py:824-826`) — **and it sends
 > mail**. The TOTP check passes a float where a `datetime` is expected. Backup-code download can
 > silently produce no file, and the codes are shown once and then lost.
+
+### 9.5 Object storage — `app/classroom/storage.py` (classroom Phases 6 and 6b)
+
+The same shape as the email seam, and for the same reason: a `Protocol` (`storage.py:47`) with
+`put`, `open`, `delete_many` and `view_url`; `InMemoryObjectStorage` (`:63`) for tests and local work;
+`S3ObjectStorage` (`:87`) — Supabase Storage over the S3 protocol through `boto3`, path-style
+addressing, checksums only when an operation requires one (botocore 1.36+ otherwise adds headers
+an S3-compatible service may refuse), imported only when `STORAGE_PROVIDER=s3`; and a cached
+factory, `get_object_storage` (`:181`). Downloads stream in 64 KiB chunks, and `open` fails
+**before** the first byte if the object is missing.
+
+**`view_url` (Phase 6b)** signs a GET locally — no request is made — for five minutes, with
+`response-content-disposition` set to `inline` under the cleaned name, `response-content-type` to
+the sniffed type and `response-cache-control` to `private, no-store`. The client sets
+`signature_version="s3v4"` explicitly: left to its default, botocore pre-signs with Signature
+Version 2, which Supabase refuses (`403 "Missing signature"`); requests were already Version 4.
+Measured on the real bucket (2026-10-05): the link answered 200 inline with the overrides honoured,
+a tampered key was refused (403) and an expired link was refused (400). `InMemoryObjectStorage`
+answers `memory://<key>`, so local viewing needs `STORAGE_PROVIDER=s3`.
+
+**Storage follows the database transaction** — finding D1's lesson, applied to objects:
+
+| Helper | When the object is deleted |
+|---|---|
+| `delete_now` (`:210`) | At once: the object was stored a moment ago and the database refused its row |
+| `track_upload` (`:216`) | Only if the transaction **rolls back** — the row it belongs to never existed |
+| `delete_after_commit` (`:221`) | Only once the deleting transaction **commits** — a failed request never loses a file whose row survived |
+
+Two `Session` event hooks carry it out: `after_commit` (`:227`) and `after_soft_rollback` (`:234`,
+not `after_rollback`, for the reason given in `email.py`). Deletion runs on a two-worker pool after
+the response, and a failure is **logged, never raised**: an orphaned object costs storage, while
+a crashed worker would lose every later deletion silently. `drain_storage_cleanup` (`:242`) is
+called from the lifespan at shutdown (`main.py:72-75`), next to the email drain.
+
+⚠️ **Callers go through `storage.get_object_storage()`**, never a name imported from the module:
+`tests/integration/conftest.py` replaces the factory with a fresh in-memory store for every test,
+so no test can reach real storage — and a captured reference would slip past it.
+
+⚠️ **Supabase's S3 endpoint is not S3 in two ways, both found by the real-bucket smoke test on
+2026-10-05 and invisible to the in-memory store:**
+
+- **A batch delete must say its body is XML.** botocore sends `DeleteObjects` with no
+  `Content-Type`; Supabase then does not read the body and answers `400 "must have required
+  property 'Body'"`. Every deletion failed — and, by design, only in a log line. `_label_xml_body`
+  (`:168`) adds `Content-Type: application/xml` before the request is signed.
+- **A missing object is recognised by its 404, not its code.** Supabase sends
+  `<Code>NoSuchKey</Code>` inside a namespaced `<Error>` element, which botocore parses to an
+  **empty** code, so `open` tests the HTTP status.
+
+Both are pinned by `TestS3Requests` in `tests/unit/test_classroom_files.py`, without a network.
 
 ---
 
@@ -868,10 +1047,10 @@ verification iterates the unused hashes (`service.py:974-986`) instead of doing 
 | Document | What it is | Where |
 |---|---|---|
 | `prd.md` | Product Requirements Document — the four roles, the monetisation model, §4.3 the parental-consent gate (line 275), MON-2 the fail-closed subscription rule | [`../../prd.md`](../../prd.md) |
-| `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 165), §6.8 Row-Level Security (line 858), §6.9 two-factor authentication (line 893), §6.11 client-side security (line 988), §7.2 the consolidated endpoint catalogue (line 1026), §7.3 the error model (line 1043) | [`../../tdd.md`](../../tdd.md) |
-| `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | [`../../user-stories.md`](../../user-stories.md) |
-| `database.html` / `database.md` | Tables by domain, the **complete Row-Level Security policy catalogue**, the `app.*` privileged functions with signature and grant, and findings B1–B19 | [database.html](database.html) |
-| `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 31 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |
+| `tdd.md` | Technical Design Document — §3.1 the auth component and its endpoint table (line 168), §6.8 Row-Level Security (line 895), §6.9 two-factor authentication (line 930), §6.11 client-side security (line 1025), §7.2 the consolidated endpoint catalogue (line 1063), §7.3 the error model (line 1080) | [`../../tdd.md`](../../tdd.md) |
+| `user-stories.md` | 12 epics. Card 1.5 Access Control and Row-Level Security (line 129), Card 1.6 Guardian Invitation and Confirmation (line 154) | outside the repository: `Desktop\EduBridge-AI_FYP-planning\user-stories.md` |
+| `database.html` / `database.md` | Tables by domain, the **complete Row-Level Security policy catalogue**, the `app.*` privileged functions with signature and grant, and findings B1–B27 | [database.html](database.html) |
+| `api-endpoints.md` | Every implemented route → handler → service function with `file:line`, mapped to its `tdd.md` §3.1 row, plus the explicit list of the 28 specified-but-missing routes | [api-endpoints.md](api-endpoints.md) |
 | `backend/README.md` | Environment variables, the running and testing commands, and the standing `SECURITY DEFINER` rule quoted in §4.3 | [`../README.md`](../README.md) |
 
 ### Rendering the diagrams offline

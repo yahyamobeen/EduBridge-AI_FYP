@@ -97,6 +97,26 @@ TWO_FA_CONFIRM_USER_LIMIT = Limit(max_requests=5, window_seconds=300)
 TWO_FA_VERIFY_USER_LIMIT = Limit(max_requests=10, window_seconds=300)
 TWO_FA_RESEND_USER_LIMIT = Limit(max_requests=3, window_seconds=300)
 
+# Classroom (tdd.md §3.6). All keyed on the USER (`subject=`), never the address:
+# a school lab is one IP. Reads and writes are loose — they exist so a runaway
+# client loop cannot hammer the database, not to bound an attack. JOIN is the
+# one brute-force surface: 32^8 codes at 10 guesses per 5 minutes per account
+# makes guessing a live code hopeless.
+CLASSROOM_READ_LIMIT = Limit(max_requests=120, window_seconds=60)
+CLASSROOM_WRITE_LIMIT = Limit(max_requests=30, window_seconds=60)
+CLASSROOM_JOIN_LIMIT = Limit(max_requests=10, window_seconds=300)
+# Classroom files (Phase 6), also per user. An upload is up to 5 MiB and a
+# storage write, so it is metered by the hour; a download streams from storage,
+# so it is metered more tightly than an ordinary read.
+FILE_UPLOAD_LIMIT = Limit(max_requests=30, window_seconds=3600)
+FILE_DOWNLOAD_LIMIT = Limit(max_requests=60, window_seconds=60)
+# The class chat (Phase 7), per user. A poll every 5 s is 12 a minute per open
+# tab; 60 leaves room for two tabs, catching up and loading older messages.
+# Posting is rate-limited because prd.md CL-5 requires it: 10 a minute is a
+# conversation, not a flood.
+CHAT_POLL_LIMIT = Limit(max_requests=60, window_seconds=60)
+CHAT_POST_LIMIT = Limit(max_requests=10, window_seconds=60)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 

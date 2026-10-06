@@ -1,23 +1,52 @@
 import { apiFetch, endSession, rememberSession } from './client'
 import type {
+  Announcement,
+  AnnouncementCreateRequest,
+  AnnouncementPage,
+  AnnouncementUpdateRequest,
+  AssignmentCreateRequest,
+  AssignmentDetail,
+  AssignmentPage,
+  AssignmentUpdateRequest,
+  BoardCode,
+  CalendarResponse,
+  ChaptersResponse,
+  ChatMessage,
+  ChatPage,
   EmailResendRequest,
   EmailVerifyRequest,
   EmailVerifyResponse,
   EnumsResponse,
+  FileMeta,
+  GradeRequest,
   GuardianConfirmRequest,
   GuardianConfirmResponse,
   GuardianInviteRequest,
   GuardianInviteResponse,
   GuardianStatusResponse,
+  JoinCodeResponse,
+  JoinResponse,
+  LinkMeta,
   LoginRequest,
   LoginResponse,
   MeResponse,
   MeUpdateRequest,
+  MySubmission,
+  ParentOverviewResponse,
   PasswordChangeRequest,
   PasswordForgotRequest,
   PasswordResetRequest,
+  PeopleResponse,
   RegisterRequest,
   RegisterResponse,
+  SpaceCreateRequest,
+  SpaceDetail,
+  SpaceListResponse,
+  SpaceUpdateRequest,
+  StudentWork,
+  SubjectsResponse,
+  SubmissionDraftRequest,
+  SubmissionsResponse,
   TwoFactorConfirmRequest,
   TwoFactorConfirmResponse,
   TwoFactorEnrollRequest,
@@ -27,6 +56,7 @@ import type {
   TwoFactorStatusResponse,
   TwoFactorVerifyRequest,
   TwoFactorVerifyResponse,
+  ViewLink,
 } from './types'
 
 /**
@@ -271,4 +301,333 @@ export async function logout(): Promise<void> {
     // outcome, especially on the shared devices prd.md §3.1 describes.
     endSession()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Classroom (tdd.md §3.6). All authenticated, so all client-only (see the note
+// at the top of this file). Ids are encoded because they arrive from the URL.
+// ---------------------------------------------------------------------------
+
+const seg = (id: string) => encodeURIComponent(id)
+const withSignal = (signal?: AbortSignal) => (signal ? { signal } : {})
+
+export function listSpaces(signal?: AbortSignal): Promise<SpaceListResponse> {
+  return apiFetch<SpaceListResponse>('/spaces', withSignal(signal))
+}
+
+export function createSpace(body: SpaceCreateRequest): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>('/spaces', { method: 'POST', body })
+}
+
+export function getSpace(id: string, signal?: AbortSignal): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>(`/spaces/${seg(id)}`, withSignal(signal))
+}
+
+export function updateSpace(id: string, body: SpaceUpdateRequest): Promise<SpaceDetail> {
+  return apiFetch<SpaceDetail>(`/spaces/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function changeJoinCode(
+  id: string,
+  action: 'rotate' | 'disable',
+): Promise<JoinCodeResponse> {
+  return apiFetch<JoinCodeResponse>(`/spaces/${seg(id)}/join-code`, {
+    method: 'POST',
+    body: { action },
+  })
+}
+
+export function joinSpace(code: string): Promise<JoinResponse> {
+  return apiFetch<JoinResponse>('/spaces/join', { method: 'POST', body: { code } })
+}
+
+/** Idempotent: 204 whether or not the caller was a member. */
+export function leaveSpace(id: string): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(id)}/membership`, { method: 'DELETE' })
+}
+
+export function getPeople(id: string, signal?: AbortSignal): Promise<PeopleResponse> {
+  return apiFetch<PeopleResponse>(`/spaces/${seg(id)}/people`, withSignal(signal))
+}
+
+export function removeMember(id: string, studentId: string): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(id)}/members/${seg(studentId)}`, { method: 'DELETE' })
+}
+
+export function listSubjects(
+  board: BoardCode,
+  classLevel: number,
+  signal?: AbortSignal,
+): Promise<SubjectsResponse> {
+  const query = new URLSearchParams({ board, class_level: String(classLevel) })
+  return apiFetch<SubjectsResponse>(`/reference/subjects?${query}`, withSignal(signal))
+}
+
+// Phase 3 — the stream
+
+export function listAnnouncements(
+  spaceId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<AnnouncementPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+  return apiFetch<AnnouncementPage>(
+    `/spaces/${seg(spaceId)}/announcements${query}`,
+    withSignal(signal),
+  )
+}
+
+export function createAnnouncement(
+  spaceId: string,
+  body: AnnouncementCreateRequest,
+): Promise<Announcement> {
+  return apiFetch<Announcement>(`/spaces/${seg(spaceId)}/announcements`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function updateAnnouncement(
+  id: string,
+  body: AnnouncementUpdateRequest,
+): Promise<Announcement> {
+  return apiFetch<Announcement>(`/announcements/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function deleteAnnouncement(id: string): Promise<void> {
+  return apiFetch<void>(`/announcements/${seg(id)}`, { method: 'DELETE' })
+}
+
+// Phase 4 — assignments, submissions and grades
+
+export function listAssignments(
+  spaceId: string,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<AssignmentPage> {
+  const query = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+  return apiFetch<AssignmentPage>(
+    `/spaces/${seg(spaceId)}/assignments${query}`,
+    withSignal(signal),
+  )
+}
+
+export function createAssignment(
+  spaceId: string,
+  body: AssignmentCreateRequest,
+): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/spaces/${seg(spaceId)}/assignments`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function getAssignment(id: string, signal?: AbortSignal): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/assignments/${seg(id)}`, withSignal(signal))
+}
+
+export function updateAssignment(
+  id: string,
+  body: AssignmentUpdateRequest,
+): Promise<AssignmentDetail> {
+  return apiFetch<AssignmentDetail>(`/assignments/${seg(id)}`, { method: 'PATCH', body })
+}
+
+export function deleteAssignment(id: string): Promise<void> {
+  return apiFetch<void>(`/assignments/${seg(id)}`, { method: 'DELETE' })
+}
+
+export function saveSubmission(
+  id: string,
+  body: SubmissionDraftRequest,
+): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission`, { method: 'PUT', body })
+}
+
+/** Idempotent: turning in twice answers with the current state. */
+export function turnInSubmission(id: string): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission/turn-in`, {
+    method: 'POST',
+  })
+}
+
+export function unsubmitSubmission(id: string): Promise<MySubmission> {
+  return apiFetch<MySubmission>(`/assignments/${seg(id)}/submission/unsubmit`, {
+    method: 'POST',
+  })
+}
+
+export function listSubmissions(
+  id: string,
+  signal?: AbortSignal,
+): Promise<SubmissionsResponse> {
+  return apiFetch<SubmissionsResponse>(
+    `/assignments/${seg(id)}/submissions`,
+    withSignal(signal),
+  )
+}
+
+export function getStudentWork(
+  id: string,
+  studentId: string,
+  signal?: AbortSignal,
+): Promise<StudentWork> {
+  return apiFetch<StudentWork>(
+    `/assignments/${seg(id)}/submissions/${seg(studentId)}`,
+    withSignal(signal),
+  )
+}
+
+export function saveGrade(
+  id: string,
+  studentId: string,
+  body: GradeRequest,
+): Promise<StudentWork> {
+  return apiFetch<StudentWork>(`/assignments/${seg(id)}/grades/${seg(studentId)}`, {
+    method: 'PUT',
+    body,
+  })
+}
+
+export function listChapters(
+  subjectId: string,
+  signal?: AbortSignal,
+): Promise<ChaptersResponse> {
+  return apiFetch<ChaptersResponse>(
+    `/reference/subjects/${seg(subjectId)}/chapters`,
+    withSignal(signal),
+  )
+}
+
+// Phase 5 — the calendar
+
+/** `from` and `to` are ISO instants with an offset, at most 62 days apart (half-open). */
+export function getCalendar(
+  from: string,
+  to: string,
+  signal?: AbortSignal,
+): Promise<CalendarResponse> {
+  const query = new URLSearchParams({ from, to })
+  return apiFetch<CalendarResponse>(`/calendar?${query}`, withSignal(signal))
+}
+
+// Phase 6 — files. Uploads are a raw body, never multipart; the server counts
+// it against Content-Length and reads the type from the bytes. Downloads come
+// back as a Blob, so the access token never has to appear in a URL.
+
+function upload(path: string, file: File): Promise<FileMeta> {
+  return apiFetch<FileMeta>(path, {
+    method: 'POST',
+    rawBody: file,
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Upload-Filename': encodeURIComponent(file.name),
+    },
+  })
+}
+
+export function uploadSubmissionFile(assignmentId: string, file: File): Promise<FileMeta> {
+  return upload(`/assignments/${seg(assignmentId)}/submission/files`, file)
+}
+
+export function uploadAssignmentAttachment(
+  assignmentId: string,
+  file: File,
+): Promise<FileMeta> {
+  return upload(`/assignments/${seg(assignmentId)}/attachments`, file)
+}
+
+export function uploadAnnouncementAttachment(
+  announcementId: string,
+  file: File,
+): Promise<FileMeta> {
+  return upload(`/announcements/${seg(announcementId)}/attachments`, file)
+}
+
+export function downloadSubmissionFile(fileId: string): Promise<Blob> {
+  return apiFetch<Blob>(`/submission-files/${seg(fileId)}/content`, { responseType: 'blob' })
+}
+
+export function downloadAttachment(fileId: string): Promise<Blob> {
+  return apiFetch<Blob>(`/attachments/${seg(fileId)}/content`, { responseType: 'blob' })
+}
+
+export function deleteSubmissionFile(fileId: string): Promise<void> {
+  return apiFetch<void>(`/submission-files/${seg(fileId)}`, { method: 'DELETE' })
+}
+
+export function deleteAttachment(fileId: string): Promise<void> {
+  return apiFetch<void>(`/attachments/${seg(fileId)}`, { method: 'DELETE' })
+}
+
+// Phase 6b — links on a piece of work, and viewing a file in the browser.
+
+export function addSubmissionLink(assignmentId: string, url: string): Promise<LinkMeta> {
+  return apiFetch<LinkMeta>(`/assignments/${seg(assignmentId)}/submission/links`, {
+    method: 'POST',
+    body: { url },
+  })
+}
+
+export function deleteSubmissionLink(linkId: string): Promise<void> {
+  return apiFetch<void>(`/submission-links/${seg(linkId)}`, { method: 'DELETE' })
+}
+
+/** A five-minute link for a PDF or an image; Office files answer `not_viewable`. */
+export function viewSubmissionFile(fileId: string): Promise<ViewLink> {
+  return apiFetch<ViewLink>(`/submission-files/${seg(fileId)}/view`)
+}
+
+export function viewAttachment(fileId: string): Promise<ViewLink> {
+  return apiFetch<ViewLink>(`/attachments/${seg(fileId)}/view`)
+}
+
+// Phase 7 — the class chat
+
+/**
+ * The chat poll. `after` (a previous `server_time`) asks for what is new;
+ * `before` (an `older_cursor`) for the page before; neither, for the newest page.
+ */
+export function getMessages(
+  spaceId: string,
+  query: { after?: string; before?: string } = {},
+  signal?: AbortSignal,
+): Promise<ChatPage> {
+  const params = new URLSearchParams()
+  if (query.after) params.set('after', query.after)
+  if (query.before) params.set('before', query.before)
+  const qs = params.toString()
+  return apiFetch<ChatPage>(
+    `/spaces/${seg(spaceId)}/messages${qs ? `?${qs}` : ''}`,
+    withSignal(signal),
+  )
+}
+
+export function postMessage(spaceId: string, body: string): Promise<ChatMessage> {
+  return apiFetch<ChatMessage>(`/spaces/${seg(spaceId)}/messages`, {
+    method: 'POST',
+    body: { body },
+  })
+}
+
+/** Soft: the teacher keeps reading it. Deleting twice is not an error. */
+export function deleteMessage(messageId: string): Promise<void> {
+  return apiFetch<void>(`/messages/${seg(messageId)}`, { method: 'DELETE' })
+}
+
+export function setMemberMuted(
+  spaceId: string,
+  studentId: string,
+  muted: boolean,
+): Promise<void> {
+  return apiFetch<void>(`/spaces/${seg(spaceId)}/members/${seg(studentId)}/mute`, {
+    method: 'PUT',
+    body: { muted },
+  })
+}
+
+// Phase 8 — the parent's read-only overview
+
+export function getParentClassrooms(signal?: AbortSignal): Promise<ParentOverviewResponse> {
+  return apiFetch<ParentOverviewResponse>('/parent/classrooms', withSignal(signal))
 }

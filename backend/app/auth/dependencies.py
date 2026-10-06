@@ -229,8 +229,15 @@ def require_subject_scope(
     never the path parameter. A route with no `{subject_id}` segment will make
     FastAPI demand it as a query parameter instead, which fails visibly.
     """
+    # `revoked_at IS NULL` since 20261004120000: scope is self-declared when a
+    # teacher creates a classroom, and an administrator withdraws it by stamping
+    # `revoked_at` rather than deleting the row (a deleted row would be silently
+    # re-declared by the teacher's next classroom).
     row = ctx.session.execute(
-        text("SELECT 1 FROM teacher_subject_scope WHERE teacher_id = :tid AND subject_id = :sid"),
+        text(
+            "SELECT 1 FROM teacher_subject_scope "
+            "WHERE teacher_id = :tid AND subject_id = :sid AND revoked_at IS NULL"
+        ),
         {"tid": ctx.user_id, "sid": subject_id},
     ).one_or_none()
     if row is None:

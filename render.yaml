@@ -150,6 +150,28 @@ services:
       - key: CORS_ORIGINS
         sync: false
 
+      # Classroom files (Phase 6). `memory` is refused above by
+      # APP_ENV=production: every file would vanish on a restart while its
+      # database row survived. The private bucket `classroom-files` is created
+      # by migration 20261004150000 (STORAGE_BUCKET defaults to it).
+      - key: STORAGE_PROVIDER
+        value: s3
+
+      # https://<project-ref>.supabase.co/storage/v1/s3 and the project's
+      # region. config.py refuses a non-https endpoint.
+      - key: STORAGE_S3_ENDPOINT
+        sync: false
+      - key: STORAGE_S3_REGION
+        sync: false
+
+      # STORAGE-ONLY S3 access keys: Supabase dashboard → Storage → S3
+      # Connection → New access key. Never the project secret key, which would
+      # also bypass every database policy. boto3 is in requirements.txt.
+      - key: STORAGE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_S3_SECRET_ACCESS_KEY
+        sync: false
+
   # ───────────────────────── Next.js ─────────────────────────
   - type: web
     name: edubridge-frontend
