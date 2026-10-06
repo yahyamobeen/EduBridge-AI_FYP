@@ -15,11 +15,11 @@ Every count here has the command that produced it beside it. Run from `frontend/
 |---|---|---|
 | Pages | **30** (4 added by classroom Phase 2, 2 by Phase 5, 1 by Phase 8) | `find app -name "page.tsx" \| wc -l` |
 | Route groups | **3** | `find app -type d -name "(*)" \| wc -l` |
-| Test files | **44** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
+| Test files | **45** | `find . -path ./node_modules -prune -o -path ./.next -prune -o \( -name "*.test.ts" -o -name "*.test.tsx" \) -print \| wc -l` |
 | Locales | **3** (`en`, `ur`, `ur-Latn`) | `ls messages/` |
-| Leaf message keys per locale | **787**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
+| Leaf message keys per locale | **785**, identical across all three and in the same order | see `README.md` § *How those numbers were measured* |
 
-*Re-measured 2026-10-05 (classroom Phase 8).*
+*Re-measured 2026-10-06 (the roster card removed).*
 
 `node_modules/` and `.next/` are excluded from every count.
 
@@ -120,10 +120,10 @@ Three pages, one per role that has a dashboard:
 
 | Route | File | Component | `allow` |
 |---|---|---|---|
-| `/dashboard` | `(app)/dashboard/page.tsx:13-17` | `StudentDashboard` | `['student']` — `components/app/Dashboards.tsx:34` |
-| `/teacher` | `(app)/teacher/page.tsx:13-17` | `TeacherDashboard` | `['teacher']` — `Dashboards.tsx:80` |
-| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:103` |
-| `/admin` | `(app)/admin/page.tsx:13-17` | `AdminDashboard` | `['admin']` — `Dashboards.tsx:145` |
+| `/dashboard` | `(app)/dashboard/page.tsx:13-17` | `StudentDashboard` | `['student']` — `components/app/Dashboards.tsx:29` |
+| `/teacher` | `(app)/teacher/page.tsx:13-17` | `TeacherDashboard` | `['teacher']` — `Dashboards.tsx:70` |
+| `/parent` | `(app)/parent/page.tsx:13-17` | `ParentDashboard` | `['parent']` — `Dashboards.tsx:99` |
+| `/admin` | `(app)/admin/page.tsx:13-17` | `AdminDashboard` | `['admin']` — `Dashboards.tsx:141` |
 
 **`/admin` was built in phase 1b**, which closes defect **A6**. Administrators reach it after signing
 in at an unlisted path served by `(auth)/admin-login/page.tsx` — see *The unlisted administrator
@@ -294,7 +294,7 @@ The parent's overview (classroom Phase 8):
   saying so. The sidebar marks it current by the longest-prefix rule (`/parent/classroom` beats the
   dashboard's `/parent`).
 
-The dashboards are shells. `Dashboards.tsx:9-22` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:188`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary — and, **since classroom Phase 6c, the classroom card**: `ClassroomsCard` (`components/app/ClassroomsCard.tsx:24`) replaced the student's "My classes" and the teacher's "My classrooms" placeholders, which kept saying "Not available yet" for a feature built in Phase 2. It lists up to three active classrooms from `GET /api/spaces` (the teacher's with member counts), says what to do when there are none — join with a code, or create the first — and, if the request fails, still offers the way in; it never shows the pill. The teacher's "Class roster" placeholder is unchanged, pending the owner's decision (its body promises "who has not joined yet", which the API cannot know; each classroom's People tab is the roster).
+The dashboards are shells. `Dashboards.tsx:9-22` records why: no dashboard data endpoint exists in the contract, so the panels name what will live there and say plainly that it is not available yet, rather than rendering the mockups' invented 78% exam readiness. `PlaceholderCard` (`components/app/DashboardShell.tsx:188`) renders the "not yet available" pill. What *is* real on these pages is the navigation and the role boundary — and, **since classroom Phase 6c, the classroom card**: `ClassroomsCard` (`components/app/ClassroomsCard.tsx:24`) replaced the student's "My classes" and the teacher's "My classrooms" placeholders, which kept saying "Not available yet" for a feature built in Phase 2. It lists up to three active classrooms from `GET /api/spaces` (the teacher's with member counts), says what to do when there are none — join with a code, or create the first — and, if the request fails, still offers the way in; it never shows the pill. The teacher's "Class roster" placeholder was **removed** (owner decision, 2026-10-06): its body promised "who has not joined yet", which no endpoint can know, and each classroom's People tab already is the roster. The teacher's classroom card takes the whole row (`span={12}`), and `Dashboards.test.tsx` pins both.
 
 ---
 
@@ -318,7 +318,7 @@ export function RequireRole({ allow, children }: { allow: Role[]; children: (me:
 constructed at all until `me` exists, so there is no branch on which a component can render with an
 undefined user. `SessionGuard` shares `me` through a context (`useMe`, `:121`); `RequireRole` reads it
 from there, so a page's role check makes no second request. Call sites: `Dashboards.tsx:29`, `:70`,
-`:98`, `:140`, and the Settings, classroom and calendar pages.
+`:99`, `:141`, and the Settings, classroom and calendar pages.
 
 ### The three checks, in order
 
@@ -691,7 +691,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **787 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **785 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785).
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 

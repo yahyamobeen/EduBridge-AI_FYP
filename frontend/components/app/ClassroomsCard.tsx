@@ -21,7 +21,13 @@ import type { SpaceSummary } from '@/lib/api/types'
 
 const SHOWN = 3
 
-export function ClassroomsCard({ role, span }: { role: 'student' | 'teacher'; span: 4 | 8 }) {
+export function ClassroomsCard({
+  role,
+  span,
+}: {
+  role: 'student' | 'teacher'
+  span: 4 | 8 | 12
+}) {
   const t = useTranslations('dashboard.cards')
   const [spaces, setSpaces] = useState<SpaceSummary[] | null>(null)
   const [failed, setFailed] = useState(false)
@@ -43,7 +49,7 @@ export function ClassroomsCard({ role, span }: { role: 'student' | 'teacher'; sp
   return (
     <section
       className={`col-span-1 rounded-md border border-outline-variant bg-surface p-6 ${
-        span === 8 ? 'md:col-span-8' : 'md:col-span-4'
+        { 4: 'md:col-span-4', 8: 'md:col-span-8', 12: 'md:col-span-12' }[span]
       }`}
     >
       <h3 className="mb-2 font-headline text-headline-md text-on-surface">

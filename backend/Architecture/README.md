@@ -49,7 +49,7 @@ documents that are wrong.
 | Base tables | **53** (+2 default partitions, +1 view) | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` minus the 2 `PARTITION OF` rows |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
 | Backend test files | **53** (pytest — 22 `tests/unit`, 31 `tests/integration`) | `find backend/tests -name 'test_*.py' \| wc -l` |
-| Frontend test files | **44** (Vitest) | `find frontend -path frontend/node_modules -prune -o -name '*.test.ts' -print -o -name '*.test.tsx' -print \| wc -l` |
+| Frontend test files | **45** (Vitest) | `find frontend -path frontend/node_modules -prune -o -name '*.test.ts' -print -o -name '*.test.tsx' -print \| wc -l` |
 | Findings from the Epic 1 review | **35**, all recorded, none hidden | 10 live through the API, 19 database defence-in-depth, 5 latent, 17 correctness, 6 gaps |
 
 *Every row but the last re-measured 2026-10-05 on branch `add-classroom` (classroom Phase 8); the

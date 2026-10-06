@@ -111,8 +111,8 @@
     <div class="grid">
       <div class="stat"><div class="n">30</div><div class="l">pages (<code>find app -name page.tsx | wc -l</code>, 2026-10-05)</div></div>
       <div class="stat"><div class="n">3</div><div class="l">route groups — (site) (auth) (app)</div></div>
-      <div class="stat"><div class="n">44</div><div class="l">test files (Vitest)</div></div>
-      <div class="stat"><div class="n">3 × 787</div><div class="l">locales × leaf message keys</div></div>
+      <div class="stat"><div class="n">45</div><div class="l">test files (Vitest)</div></div>
+      <div class="stat"><div class="n">3 × 785</div><div class="l">locales × leaf message keys</div></div>
       <div class="stat"><div class="n">memory</div><div class="l">where the access token lives</div></div>
     </div>
 
@@ -230,9 +230,9 @@ flowchart TB
           <tr><td><code>(auth)</code></td><td><code>/onboarding/plan</code></td><td><strong>the one step reachable after being <code>active</code></strong> <span class="ln">:13-17</span></td></tr>
           <tr><td><code>(auth)</code></td><td><code>/verify-email</code>, <code>/forgot-password</code>, <code>/reset-password</code></td><td>email + password flows</td></tr>
           <tr><td><code>(auth)</code></td><td><code>/guardian/confirm</code></td><td>where the invitation email lands; authenticated as the <strong>parent</strong> <span class="ln">:16-21</span></td></tr>
-          <tr><td><code>(app)</code></td><td><code>/dashboard</code></td><td><code>StudentDashboard</code> — <code>allow={['student']}</code> <span class="ln">Dashboards.tsx:34</span></td></tr>
-          <tr><td><code>(app)</code></td><td><code>/teacher</code></td><td><code>TeacherDashboard</code> — <code>allow={['teacher']}</code> <span class="ln">Dashboards.tsx:80</span></td></tr>
-          <tr><td><code>(app)</code></td><td><code>/parent</code></td><td><code>ParentDashboard</code> — <code>allow={['parent']}</code> <span class="ln">Dashboards.tsx:108</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/dashboard</code></td><td><code>StudentDashboard</code> — <code>allow={['student']}</code> <span class="ln">Dashboards.tsx:29</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/teacher</code></td><td><code>TeacherDashboard</code> — <code>allow={['teacher']}</code> <span class="ln">Dashboards.tsx:70</span></td></tr>
+          <tr><td><code>(app)</code></td><td><code>/parent</code></td><td><code>ParentDashboard</code> — <code>allow={['parent']}</code> <span class="ln">Dashboards.tsx:99</span></td></tr>
           <tr><td><code>(app)</code></td><td><code>/admin</code></td><td><code>AdminDashboard</code> — built in phase 1b, closing A6. Five FR-K1 placeholder cards plus the privacy panel</td></tr>
           <tr><td><code>(app)</code></td><td><code>/classroom</code></td><td><code>StudentClassrooms</code> — list + join form, <code>allow={['student']}</code>. Classroom Phase 2 (2026-10-04)</td></tr>
           <tr><td><code>(app)</code></td><td><code>/classroom/[spaceId]</code></td><td><code>StudentClassroom</code> — on demand; owner controls render from the server's <code>viewer_role</code>, never the session role</td></tr>
@@ -256,7 +256,9 @@ flowchart TB
         analytics have a way of surviving into a demo and then into a report. What <em>is</em> real on these
         pages is the navigation and the role boundary — and, since classroom Phase 6c, the classroom card
         <span class="ln">ClassroomsCard.tsx:24</span>, which lists up to three of the caller's real
-        classrooms and never says "Not available yet", not even when its request fails.</p>
+        classrooms and never says "Not available yet", not even when its request fails. The teacher's "Class roster"
+        placeholder was removed on 2026-10-06 — each classroom's People tab is the roster — and the classroom card
+        took its row.</p>
     </section>
 
     <section class="prose">
@@ -665,7 +667,7 @@ function resolve(path: string): string {
     <section class="prose">
       <h2>Internationalisation <span class="ln">i18n/routing.ts</span></h2>
       <p>Three locales <span class="ln">:16-37</span> — <code>en</code>, <code>ur</code>,
-        <code>ur-Latn</code> — with <strong>787 leaf message keys each (2026-10-05), identical across all three</strong>, and in the same order.
+        <code>ur-Latn</code> — with <strong>785 leaf message keys each (2026-10-06), identical across all three</strong>, and in the same order.
         <code>localeDetection: false</code> <span class="ln">:36</span>: left on, next-intl negotiates from
         <code>Accept-Language</code> and a <code>NEXT_LOCALE</code> cookie, so a browser configured for Urdu
         — entirely normal in this audience — would be redirected to <code>/ur</code> before the visitor had

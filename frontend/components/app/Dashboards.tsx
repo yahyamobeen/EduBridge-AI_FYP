@@ -78,8 +78,9 @@ export function TeacherDashboard() {
           </header>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
-            <ClassroomsCard role="teacher" span={8} />
-            <PlaceholderCard span={4} title={tc('rosterTitle')} body={tc('rosterBody')} />
+            {/* The whole row: each classroom's People tab is the roster, so the
+                "Class roster" placeholder that sat here was removed (2026-10-06). */}
+            <ClassroomsCard role="teacher" span={12} />
             {/* Subject-scoped only: there is no teacher-wide weekly report. */}
             <PlaceholderCard span={6} title={tc('reportsTitle')} body={tc('reportsBody')} />
             <PlaceholderCard span={6} title={tc('sloTitle')} body={tc('sloBody')} />

@@ -110,7 +110,7 @@ State a brief plan up front, then verify each step:
 
 **Verification here IS tests — this repository has them.** 53 backend test files (22 in
 `backend/tests/unit`, 31 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-05)
-and 44 frontend test files. Report the
+and 45 frontend test files. Report the
 real result before saying done; never "should pass".
 
 | Change touches | Verify with |
