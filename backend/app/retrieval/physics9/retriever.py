@@ -564,11 +564,13 @@ class PhysicsRetriever:
             if p.exists() and p.is_dir():
                 return p
 
+        this_dir = Path(__file__).resolve().parent
         backend_dir = Path(__file__).resolve().parents[3]
         repo_root = backend_dir.parent
         workspace_root = repo_root.parent
 
         candidates = [
+            this_dir / "pages",
             backend_dir / "data" / "physics9" / "pages",
             workspace_root / "edubridge-chatbot-SEND-THIS" / "shared" / "pages",
         ]

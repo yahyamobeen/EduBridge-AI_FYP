@@ -150,6 +150,14 @@ services:
       - key: CORS_ORIGINS
         sync: false
 
+      # ───────────── Class 9 Physics Visual Tutor ─────────────
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-3.6-flash"
+      - key: PHYSICS_PAGES_DIR
+        value: "app/retrieval/physics9/pages"
+
   # ───────────────────────── Next.js ─────────────────────────
   - type: web
     name: edubridge-frontend
