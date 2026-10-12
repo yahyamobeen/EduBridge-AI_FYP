@@ -364,6 +364,27 @@ external URL in an `<img>` is blocked by the browser.
 **Interfaces:** `Retriever.search(question, top_k, chapter) -> (hits, timings)` with three
 implementations; `PhysicsGenerator.stream(question, hits, history, lang)`.
 
+**The service itself lives at `ml/serving/`** — a separate deployable, never imported by
+`backend/`. `POST /retrieve` takes `{question, top_k, chapter?}` and returns
+`{pages, scores, encode_ms, search_ms, cached, checkpoint}`; `GET /health` reports
+readiness, the loaded checkpoint and the cache hit rate. Two properties of its design are
+load-bearing rather than incidental:
+
+- **A cache hit never touches the model lock.** The page embeddings are read-only after
+  startup, so a cached query runs MaxSim concurrently while a novel query holds the
+  encoder. With one serialised model, this is what stops a repeated question queueing
+  behind a new one — and in a classroom the same questions repeat constantly, which is
+  why §8.2's cache is the mechanism that satisfies NFR-1 rather than the model's raw
+  speed.
+- **`MAX_WAIT_S` must stay below the backend's read timeout.** The service bounds its
+  queue and answers `503`; if it waited longer than the caller, the caller would abandon
+  the request first and degrade on a transport error instead of a clean "busy", losing
+  the distinction between *overloaded* and *unreachable*.
+
+⚠️ `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone —
+the file must be supplied at build time. `ml/serving/DEPLOY.md` carries the runbook and
+`ml/serving/measure.py` produces the latency figures this section's claims rest on.
+
 ### 3.3 Skills & MCP Subsystem — `backend/app/skills/`, `backend/app/mcp/` **[P0 self-skills / P1 full MCP]**
 
 **Responsibilities:** implement self-created skills and integrate audited third-party skills/MCP servers behind a uniform **skill contract**; every call brokered by the Secure Skills & MCP Layer.

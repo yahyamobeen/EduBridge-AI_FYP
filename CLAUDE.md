@@ -42,7 +42,10 @@ EduBridge-AI_FYP/
 ├── supabase/migrations/   ← 11 applied SQL migrations. Never edit an applied one.
 ├── tools/                 ← the user-stories LaTeX generator and its checks
 ├── prd.md · tdd.md · user-stories.md · sprint-plan.md
-├── ml/ · mcp-servers/ · infra/    ← scaffolded, no implementation (.gitkeep only)
+├── ml/serving/            ← the ColQwen2 retrieval service. A SEPARATE deployable with
+│                            its own deps, Dockerfile and lint config — the backend
+│                            reaches it over HTTP and never imports it
+├── ml/eval/ · mcp-servers/ · infra/    ← scaffolded, no implementation (.gitkeep only)
 └── render.yaml            ← Render blueprint for both services
 ```
 
@@ -152,7 +155,8 @@ surface the conflict and ask — never resolve it quietly.
 | Backend | **18 routes, all authentication or reference.** One router (`app/auth/routes.py`). `tdd.md` specifies **49 endpoints — 31 do not exist.** Phase 1b added `POST /auth/admin/login` to both sides of that ledger at once. |
 | Frontend | 20 pages, 3 route groups, 3 locales. Auth and onboarding journeys complete. |
 | Database | 11 applied migrations, 33 `app.*` functions, 73 Row-Level Security policies. |
-| `ml/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
+| `ml/serving/` | **The ColQwen2 retrieval service** (`tdd.md` §3.2a) — FastAPI, the 200-page embedding index, MaxSim, a query-embedding cache, and a 39-check self-test that needs no model. A separate deployable: its own `requirements.txt`, `Dockerfile` and ruff config, and `backend/requirements.txt` must never grow a torch dependency. ⚠️ Its `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone alone. |
+| `ml/eval/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 
 Against the 38 user-story cards: **Epic 1 (identity, authentication, consent) is roughly 80%
 built. Epics 2 and 4–8 have no backend at all** — including the whole tutor and the secure-skills
