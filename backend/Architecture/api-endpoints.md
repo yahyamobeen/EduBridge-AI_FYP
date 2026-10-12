@@ -21,7 +21,7 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **24** | 21 in `backend/app/auth/routes.py` + 3 in `backend/app/tutor/routes.py` |
+| Implemented routes | **26** | `grep -c '^@router\.' backend/app/auth/routes.py backend/app/tutor/routes.py` → 21 auth + 5 tutor |
 | Routers in the backend | **2** | `auth_router` (`app/auth/routes.py`) and `tutor_router` (`app/tutor/routes.py`) |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
@@ -311,6 +311,31 @@ on 2026-10-13.
 | `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` (all in `dependencies=[…]`) | **none** | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
 | `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
 | `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
+| `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | none | §3.2 |
+| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | none | §3.2 |
+
+**Persistence.** `POST .../chat` now writes the turn: a `chat_session` row (carrying the
+anchor), a `message` row per side of the exchange, and one `visual_aid` row holding the
+cited pages. Its response gained `session_id`, `message_id` and `retriever`.
+
+Three properties worth knowing before changing any of it:
+
+1. **Ownership is enforced by Row-Level Security, not by a predicate.** No query in
+   `tutor/service.py` carries `WHERE student_id = :me`; `ctx.session` is already bound to
+   the acting user and `chat_session_owner` does the rest. So there is no filter to
+   forget — and nothing here opens a teacher, parent or admin read path, which chat
+   content must never have (`prd.md` §4.2, TEL-3).
+2. **A session that is not yours and a session that does not exist both answer
+   `403 FORBIDDEN_SCOPE`.** Answering differently would confirm that an id exists, and
+   §7.3 catalogues no 404.
+3. ⚠️ **`history` in the request is ignored when `session_id` is given.** The stored
+   transcript is the source of truth; honouring a client-supplied transcript on a
+   resumed session would let a caller put words in the assistant's mouth and have the
+   model treat them as its own prior answer.
+
+⚠️ These two routes and the persistence writes **depend on migration
+`20261013120000_tutor_session_anchor.sql`, which is not applied.** Until the owner
+applies it, `POST .../chat` fails on the `subject`/`class_level`/`chapter` insert.
 
 `/info` returns `{subject, class_level, board, book_pages, retriever, checkpoint}`.
 **`retriever`** is `remote` · `local` · `heuristic` — it replaced a `has_real_embeddings`
