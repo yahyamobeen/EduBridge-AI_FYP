@@ -30,7 +30,7 @@ The backend is a **FastAPI application**. Server logic lives under
 |---|---|
 | `app/auth/` | Auth router (`routes.py`), service layer, dependencies, tokens, parental-consent gate, onboarding derivation, email, TOTP, backup codes, Turnstile |
 | `app/tutor/` | Tutor router (`routes.py`), Class 9 student guards, and textbook page scan asset endpoints |
-| `app/retrieval/` | Visual retrieval module (`physics9/`): late-interaction ColQwen2/ColPali embeddings retriever, MaxSim similarity scoring, multimodal Gemini generator, multilingual grounding |
+| `app/retrieval/` | Visual retrieval (`physics9/`). `base.py` the book structure, the `Hit`/`Timings` shapes and the `Retriever` protocol; `heuristic.py` the 63-sub-topic keyword index (also the degraded tier); `remote.py` HTTP to the ColQwen2 service, **the default**; `local.py` in-process ColQwen2 + MaxSim, needs the `[retrieval]` extra; `service.py` tier selection and degradation; `generator.py` the Gemini call. ⚠️ `torch` is in neither `requirements.txt` nor the main dependencies — `local.py` imports it inside functions so the module stays importable where the extra is absent, which is every deployment host |
 | `app/core/` | Configuration, database engines and per-transaction user binding, error envelope, rate limiter |
 | `app/models/` | SQLAlchemy ORM declarations and Python enumerations mirroring PostgreSQL types |
 
@@ -222,7 +222,7 @@ Three dependencies wrap it (`dependencies.py:98-105`), none of which opens a pri
 |---|---|---|---|
 | `require_role(*roles)` | `dependencies.py:108` | Role gate; raises 403 `FORBIDDEN_SCOPE` | the three guardian routes |
 | `require_subject_scope` | `dependencies.py:123` | Teacher must hold a `teacher_subject_scope` row for the path's `{subject_id}` | **no route yet** — exported for the classroom endpoints |
-| `require_guardian_verified` | `dependencies.py:158` | The parental-consent gate | **no route yet** — the learning endpoints it protects do not exist |
+| `require_guardian_verified` | `dependencies.py:241` | The parental-consent gate | **Active** on `POST /api/tutor/class9/physics/chat` (`tutor/routes.py:83`) — the first learning endpoint to exist. ⚠️ Not on the sibling page-scan route, which has no auth at all (defect **P1**, `tdd.md` §14.2) |
 
 `require_subject_scope` carries a long comment (`dependencies.py:134-147`) explaining that it must
 be used as `Depends(require_subject_scope)` on a route declaring `{subject_id}` in its path, because

@@ -301,16 +301,47 @@ production actually calls, not through the ORM.
 
 ### 2.7 Class 9 Physics Visual Retrieval Tutor (PCTB)
 
+**This table describes the code as it is, not as intended.** The previous revision asserted a
+`tutor_chat` rate limit, `require_role('student')` on the page-scan route, and "full ColQwen2
+MaxSim" — **none of which exist.** Every handler name and line below was re-read from source
+on 2026-10-13.
+
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/tutor/class9/physics/chat` | `physics_chat_endpoint` `tutor/routes.py:34` | `answer_physics_query` `retrieval/physics9/service.py:17` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | `tutor_chat` (20 / min) | §3.2 row `tdd.md:239` (specialized) |
-| `GET /api/tutor/class9/physics/pages/{page_num}` | `physics_page_scan_endpoint` `tutor/routes.py:84` | `get_page_image_path` | `FileResponse` | `require_role('student')` | none | Visual grounding asset |
-| `GET /api/tutor/class9/physics/info` | `physics_tutor_info_endpoint` `tutor/routes.py:101` | metadata inspection | `PhysicsTutorInfoResponse` | none | none | Health & model telemetry |
+| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` (all in `dependencies=[…]`) | **none** | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
+| `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
+| `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
 
-Grounds answers directly in the 200 pages of the Punjab Curriculum and Textbook Board (PCTB) Class 9 Physics textbook.
-Uses dual-path retrieval: full ColQwen2 multi-vector MaxSim late-interaction when embeddings/model are loaded, and
-sublinear token-overlap matching fallback when running lightweight test or resource-constrained nodes.
-Integrated multimodal generation uses Gemini 2.5 Flash with fallback to grounded template generation.
+`/info` returns `{subject, class_level, board, book_pages, retriever, checkpoint}`.
+**`retriever`** is `remote` · `local` · `heuristic` — it replaced a `has_real_embeddings`
+boolean that could not tell "the retrieval service is cold" apart from "this host has no
+model at all", which is the one thing the endpoint exists to report. `checkpoint` is empty
+unless the local tier actually loaded a file, so it never implies a resident model.
+
+**Three gaps this table used to hide:**
+
+1. ⚠️ **The page-scan route has no authentication** — no `dependencies=`, no `ctx` parameter.
+   The frontend's `/api/:path*` rewrite makes it same-origin, so every one of the 200 PCTB
+   scans is reachable without an account. Recorded as defect **P1** in `tdd.md` §14.2.
+2. ⚠️ **There is no rate limit.** `tutor_chat` is not a bucket in `app/core/ratelimit.py`;
+   the string appears only in this document and in four test *names*. The handler also
+   cannot call `enforce(...)`: its guards live in `dependencies=[…]`, so it has no
+   `AuthContext` and no `Request` in scope. Adding a limit requires taking `ctx` as a
+   parameter.
+3. ⚠️ **ColQwen2 does not run.** `service.py:28` hard-codes `load_model=False`, and `torch`
+   and `colpali-engine` are in neither `requirements.txt` (what Render installs) nor
+   `pyproject.toml`. What answers is the keyword index in `retrieval/physics9/retriever.py`
+   (`_heuristic_match`, 63 sub-topics plus 33 anchors) feeding the top-3 page scans to
+   Gemini's vision model. The `.pt` embedding file is gitignored, and on the one path where
+   it *is* found it is stacked to float32 and then never read.
+
+Also note: `generator.py:54` pins **`gemini-3.6-flash`**, not the "Gemini 2.5 Flash" an
+earlier revision of this page and `HISTORY.md` both claimed.
+
+Upstream failures do **not** use the §7.3 envelope today — they return `200` with a nullable
+`gen_error` string (`PhysicsChatResponse.gen_error`, `tutor/routes.py:77`), which defeats the
+rule that clients branch on `code`. `tdd.md` §3.2a specifies `503 MODEL_UNAVAILABLE` /
+`422 NOT_GROUNDED` instead; neither has a factory in `app/core/errors.py` yet.
 
 ### 2.8 Outside the router
 

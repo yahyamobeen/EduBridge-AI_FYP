@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import AuthContext
 from app.core.errors import AppError
 from app.main import create_app
+from app.retrieval.physics9.base import CHAPTERS, chapter_of
 from app.retrieval.physics9.generator import PhysicsGenerator
-from app.retrieval.physics9.retriever import CHAPTERS, PhysicsRetriever, chapter_of
+from app.retrieval.physics9.heuristic import HeuristicRetriever
 from app.retrieval.physics9.service import answer_physics_query
 from app.tutor.routes import require_class_9_student
 
@@ -28,18 +29,41 @@ def test_chapter_mapping():
 
 
 def test_retriever_search_top_k():
-    retriever = PhysicsRetriever(load_model=False)
-    hits, encode_s, search_s = retriever.search("thermocouple working", top_k=3)
+    retriever = HeuristicRetriever()
+    hits, timings = retriever.search("thermocouple working", top_k=3)
     assert len(hits) == 3
     assert all("page" in h and "chapter" in h and "score" in h and "url" in h for h in hits)
     # Thermocouple is in chapter 7 (p154-155)
     pages = [h["page"] for h in hits]
     assert 154 in pages or 155 in pages
-    assert encode_s >= 0.0
-    assert search_s >= 0.0
+    # The heuristic tier has no query encoder, so `encode` is genuinely zero.
+    assert timings.encode == 0.0
+    assert timings.search >= 0.0
 
 
-def test_generator_fallback_multilingual():
+def test_anchor_is_a_prior_not_a_filter():
+    """An anchored chapter reorders; it never drops pages from other chapters.
+
+    Guards the failure the anchor is designed to avoid: a prerequisite question asked
+    while anchored to another chapter must still return something (tdd.md §5.3f).
+    """
+    retriever = HeuristicRetriever()
+    unanchored, _ = retriever.search("vernier callipers parts", top_k=3)
+    anchored, _ = retriever.search("vernier callipers parts", top_k=3, chapter=7)
+
+    assert len(anchored) == len(unanchored) == 3
+    # Chapter 1 content, asked while anchored to chapter 7: still returned, not filtered.
+    assert {h["page"] for h in anchored} == {h["page"] for h in unanchored}
+
+
+def test_generator_fallback_multilingual(monkeypatch):
+    # `PhysicsGenerator.__init__` reads `api_key or os.environ["GEMINI_API_KEY"]`, so
+    # passing "" does NOT select the no-key path — it falls through to the environment.
+    # Without this the test passed in CI (no key) and, on a developer machine with a key
+    # set, made a REAL paid Gemini call and then failed on its assertions. A unit test
+    # must not reach the network: `tests/unit` is the suite that runs with no connection
+    # string and no live project (backend/CLAUDE.md §5).
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     gen = PhysicsGenerator(api_key="")
     hits = [
         {"page": 155, "chapter": 7, "score": 18.0, "url": "/api/tutor/class9/physics/pages/155"}

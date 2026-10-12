@@ -7,12 +7,13 @@ textbook accurately retrieve the exact ground-truth pages.
 from __future__ import annotations
 
 import pytest
-from app.retrieval.physics9.retriever import PhysicsRetriever
+
+from app.retrieval.physics9.heuristic import HeuristicRetriever
 
 
 @pytest.fixture
-def retriever() -> PhysicsRetriever:
-    return PhysicsRetriever()
+def retriever() -> HeuristicRetriever:
+    return HeuristicRetriever()
 
 
 @pytest.mark.parametrize(
@@ -146,12 +147,12 @@ def retriever() -> PhysicsRetriever:
     ],
 )
 def test_retriever_accuracy(
-    retriever: PhysicsRetriever,
+    retriever: HeuristicRetriever,
     query: str,
     expected_pages: list[int],
     desc: str,
 ) -> None:
-    hits, _, _ = retriever.search(query, top_k=3)
+    hits, _ = retriever.search(query, top_k=3)
     retrieved_page_numbers = [h["page"] for h in hits]
     # Check that at least one of the expected ground truth pages is in the top-3 hits
     matched = any(p in retrieved_page_numbers for p in expected_pages)

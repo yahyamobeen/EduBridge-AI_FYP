@@ -24,7 +24,7 @@ from app.auth.dependencies import (
 )
 from app.core.errors import forbidden_scope
 from app.models.enums import UserRole
-from app.retrieval.physics9.retriever import BOOK_PAGES
+from app.retrieval.physics9.base import BOOK_PAGES
 from app.retrieval.physics9.service import answer_physics_query, get_physics_retriever
 
 logger = logging.getLogger("edubridge.tutor.routes")
@@ -144,6 +144,11 @@ def get_physics_tutor_info():
         "class_level": 9,
         "board": "PCTB",
         "book_pages": BOOK_PAGES,
-        "has_real_embeddings": retriever.has_real_embeddings,
-        "checkpoint": retriever.checkpoint,
+        # `retriever` replaces the previous `has_real_embeddings` boolean, which could
+        # not distinguish the three tiers — and a boolean that reads "no" for both "the
+        # service is cold" and "this host has no model at all" hides the one thing this
+        # endpoint exists to tell you. `checkpoint` is empty unless the local tier
+        # loaded a file, so it never implies a model that is not resident.
+        "retriever": retriever.name,
+        "checkpoint": getattr(retriever, "checkpoint", ""),
     }
