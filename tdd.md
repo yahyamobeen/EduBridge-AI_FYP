@@ -241,7 +241,36 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 |--------|------|------|------|---------|
 | POST | `/api/tutor/ask` | Yes | Student (gate-verified) | Text/voice question → streamed grounded answer (SSE) |
 | POST | `/api/tutor/explain-step` | Yes | Student | Expand a specific solution step (FR-1) |
+| GET | `/api/tutor/sessions` | Yes | Student (owner) | List own chat sessions, newest first |
 | GET | `/api/tutor/sessions/{id}` | Yes | Student (owner) | Retrieve own chat session |
+| GET | `/api/tutor/figures/{visual_aid_id}` | Yes | Student (owner) | The cropped figure for one `visual_aid` row (§3.2a) |
+
+**Wire contract for `/api/tutor/ask`** — previously unspecified, which is how the pilot came
+to ship a non-streaming JSON body instead (v0.4.0).
+
+Request: `{ message: str(1..2000), lang: "en"|"ur"|"ur-Latn", session_id: uuid|null,
+chapter: int|null }`. A null `session_id` opens a session; `chapter` sets the anchor on that
+first turn only.
+
+Response: `text/event-stream`. Four event types, in this order:
+
+| Event | Payload | Note |
+|---|---|---|
+| `pages` | `{pages:[{page,chapter,score,url}], timings:{encode,search}, retriever:"remote"\|"local"\|"heuristic"}` | **Emitted before generation starts**, so citations render while text streams. `retriever` names the path that answered — a degraded answer must be visibly degraded. |
+| `token` | `{text: str}` | Incremental generated text. |
+| `figure` | `{visual_aid_id, page, caption}` | Optional, at most one per turn (§3.2a). |
+| `done` | `{message_id, timings:{encode,search,generate}}` | The assistant turn is persisted **before** this fires. |
+
+Transport errors use the §7.3 envelope and the codes already catalogued there —
+`503 MODEL_UNAVAILABLE`, `422 NOT_GROUNDED`, `429 RATE_LIMITED`. An `error` event is **not**
+an event type: a failure before the first byte is an ordinary HTTP error response, and a
+failure mid-stream closes the stream after a `done` carrying what was produced. ⚠️ A 200
+response carrying a nullable `gen_error` string is **not** an acceptable failure shape — it
+defeats the rule at §7.3 that clients branch on `code`.
+
+**History window:** the last **4 turns** (2 exchanges) of the session are replayed to the
+generator. Older turns are persisted but not resent. ⚠️ The replayed turns carry **no
+identifiers** — see §5.9.
 
 **Key design decisions:**
 - The orchestrator is a **LangGraph state machine** (nodes = guardrail, parse, route, retrieve, generate, visual, guard-out, speak). State is typed; each node is independently testable (NFR-6).
@@ -250,6 +279,90 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 - **Grounding guard:** if retrieval is below the similarity threshold, the node returns a "no confident curriculum-grounded answer" result rather than free-generating (PRD §20).
 
 **Interfaces:** `AgentGraph.run(query_ctx) -> stream`, node callables, `ToolClient.call(skill, args)` (vetted).
+
+### 3.2a Class 9 Physics pilot — `backend/app/tutor/`, `backend/app/retrieval/physics9/` **[PILOT]**
+
+A deliberately narrow first tutor: **one subject, one book, one class.** It exists to answer
+whether visual retrieval over page scans is viable at all, before the §3.2 orchestrator,
+the §12 knowledge base or the §5.5 text index are built. None of those exist yet.
+**Everything in this section is scoped to the pilot and is not the design for the general
+tutor.**
+
+**Pilot endpoints** (in addition to §3.2, which they do not replace):
+
+| Method | Path | Auth | Role | Purpose |
+|---|---|---|---|---|
+| GET | `/api/tutor/class9/physics/pages/{page_num}` | Yes | Student (Class 9) | One 150 DPI page scan, for a citation preview |
+| GET | `/api/tutor/class9/physics/info` | Yes | Student | Pilot metadata: book page count, loaded checkpoint, retriever mode |
+
+⚠️ `POST /api/tutor/class9/physics/chat` shipped in v0.4.0 and is **superseded by
+`/api/tutor/ask`**; it is not part of this contract. ⚠️ Both routes above shipped
+**unauthenticated**, which is recorded as a known defect, not as the design — see §14.2.
+
+**Retrieval: ColQwen2 late-interaction over page images.** No OCR, no text index, no
+`curriculum_item` rows. The book is 200 page scans; each page is a multi-vector matrix
+(755 × 128) and a query is scored by **MaxSim** — per query-token maximum over page patches,
+summed. Settled by measurement, not preference:
+
+| | ColQwen2 | ColPali |
+|---|---|---|
+| base | Qwen2-VL 2.2B | PaliGemma 3.0B |
+| vectors/page | 755 | 1031 |
+| median query encode (CPU, bf16) | **6.1 s** | 12.7 s |
+
+ColQwen2 wins on three grounds: Qwen2-VL is substantially more multilingual than PaliGemma,
+which matters because Urdu is the product's distinctive claim (§I18N); its native dynamic
+resolution suits 1049×1387 portrait scans, where ColPali's fixed 448×448 square distorts the
+aspect ratio; and query encoding is the only hot path, since a novel question's embedding
+cannot be cached. ⚠️ **Accuracy is not yet a result** — 5 and 3 scored questions respectively.
+The latency gap is.
+
+**Why this is not §5.5.** §5.5 remains the design for the text knowledge base. The pilot
+needs no vector database at all: 200 pages is a single stacked tensor and an `einsum`,
+measured at **18 ms**. A dedicated ANN store earns its place around 10⁴–10⁵ pages, and
+introducing one here would add a network hop and a dependency to solve a problem that does
+not exist. **Transcription does not scale** — 8,000 pages across ~40 books is hundreds of
+verified-transcription sessions, and visual retrieval needs none; that is the strongest
+argument for the approach and the reason the pilot takes this shape.
+
+**Citations are page numbers, not `slo` ids.** §4.5 specifies `curriculum_item`/`slo` ids,
+and the pilot has neither — the KB layer is deferred (`20260801120000_initial_schema.sql`
+SCOPE block). A pilot citation is `(p155)` plus the page scan. ⚠️ **Correct answers are page
+*sets*, not single pages:** the *Thermocouple Thermometer* heading sits at the end of p154
+and its body on p155, so both are correct, and an evaluation scoring only p155 marks a
+working retriever wrong. This was found by adversarial review of our own labels.
+
+**Deployment seam.** The model does not run in the backend process. `RETRIEVAL_MODE` selects
+`remote` (HTTP to `RETRIEVAL_ENDPOINT`, the default), `local` (in-process, for a GPU box or a
+development machine) or `heuristic`. The backend therefore carries **no `torch` dependency**;
+it is an optional extra. A remote failure degrades to `heuristic` and the `pages` event names
+the path that answered.
+
+**`heuristic` is a real tier, not a stub.** A hand-maintained syllabus index (63 sub-topics,
+9 chapters) maps keywords to page sets. It serves two purposes the neural retriever cannot:
+it answers while a cold or stopped retrieval host starts, and it is the correct mechanism for
+**explicit references** — "Example 7.1", "numerical 7.3" are an index lookup, not a
+similarity search.
+
+**Single instance.** One process, one model, **one uvicorn worker** — each worker loads its
+own ~5 GB copy. The forward pass is lock-serialised, so requests queue; the wait is bounded
+and returns `503 MODEL_UNAVAILABLE` rather than growing without limit. This is why the
+§3.2a rate-limit bucket is a correctness control and not merely abuse protection.
+
+**Rate limit:** bucket `tutor_ask`, **20 requests / minute per user**, via
+`app/core/ratelimit.py`. ⚠️ Per-IP limits must stay institution-aware (§6.3) — a whole school
+behind one NAT would otherwise self-DoS.
+
+**Figure crops.** The generator may return one normalised bounding box per turn
+(`{page, box:[x0,y0,x1,y1], caption}`, coordinates in 0–1). The backend crops the scan and
+serves the crop from `/api/tutor/figures/{visual_aid_id}`; the box is persisted on the
+`visual_aid` row (`kind='figure'`). ⚠️ The box is **untrusted model output** (§4.6): clamp to
+0–1, reject inverted or zero-area boxes, cap the aspect ratio. ⚠️ The crop must be served
+**same-origin** — the frontend CSP is `img-src 'self' data:` with no `remotePatterns`, so an
+external URL in an `<img>` is blocked by the browser.
+
+**Interfaces:** `Retriever.search(question, top_k, chapter) -> (hits, timings)` with three
+implementations; `PhysicsGenerator.stream(question, hits, history, lang)`.
 
 ### 3.3 Skills & MCP Subsystem — `backend/app/skills/`, `backend/app/mcp/` **[P0 self-skills / P1 full MCP]**
 
@@ -290,6 +403,19 @@ Routing is driven by the subject's **`content_strategy`** column (four values), 
 - **Similarity threshold** gates whether to answer, render a visual, or degrade (PRD §20).
 
 **Interfaces:** `Retriever.search(query, filters) -> [hit]`, `Retriever.rerank(hits)`, `Grounder.assemble(hits) -> context`.
+
+⚠️ **Unbuilt, and the Class 9 Physics pilot does not go through here.** The pilot occupies a
+subpackage of this one (`app/retrieval/physics9/`) but implements **§3.2a**, not this
+section: no BGE-M3, no ANN store, no reranker, no `curriculum_item` ids — it scores a query
+against page-image multi-vectors directly. Physics is `branch_a_english_source` above and
+will route through this design once the knowledge base exists; until then the two coexist.
+
+⚠️ **Two different `Retriever` protocols are specified in this document, deliberately.** This
+section's is `search(query, filters) -> [hit]`, with reranking as a second call. §3.2a's is
+`search(question, top_k, chapter) -> (hits, timings)` — no `filters` because there is no
+metadata to filter on, no `rerank` because late interaction *is* the ranking, and `timings`
+because the pilot's purpose is measurement. **They are not the same interface and must not be
+collapsed into one before the KB lands.** Whichever survives, the other's call sites change.
 
 ### 3.5 Assessment — `backend/app/assessment/` **[P1]**
 
@@ -555,6 +681,9 @@ class TutorState(TypedDict):
     is_voice: bool
     language: Literal["en","ur","roman_ur"]
     subject: str; klass: int; board: Literal["PCTB","STBB"]; task: str
+    anchor_chapter: int | None  # session anchor: a retrieval PRIOR, never a filter (§5.3f)
+    history: list[Turn]        # last 4 turns; see below
+    is_followup: bool          # true -> reuse prior hits, skip retrieval
     guard_in: GuardVerdict    # allow | block(reason)
     route: Literal["A","B"]
     hits: list[RetrievalHit]  # carry Postgres ids
@@ -566,6 +695,16 @@ class TutorState(TypedDict):
     media: MediaRef | None    # tts+avatar
     degrade: str | None       # reason if degraded
 ```
+
+**Conversation window: the last 4 turns** (2 exchanges). Older turns are persisted and not
+resent. The bound is deliberate — an unbounded window grows the prompt without bound and,
+for a hosted generator, grows the exposure with it. ⚠️ Replayed turns carry **no
+identifiers** (§5.9, deviation V3).
+
+**`is_followup` exists because most turns are not retrieval turns.** "Explain that again",
+"why?", "give me another example" carry no new content words; re-retrieving on them wastes
+the hot path and can silently *change* the pages under a student mid-explanation. A follow-up
+reuses the previous turn's `hits`.
 
 ### 4.2 Graph nodes & edges
 
@@ -668,7 +807,18 @@ Each table lists notable columns, keys, and indexes (full DDL for core tables in
 - **(c) Assessment:** `past_paper(id, board_id🔗, class, subject_id🔗, year)`, `question(id, past_paper_id🔗?, stem, choices jsonb, primary_slo_id🔗, UNIQUE)` — **no key column here**, `question_key(question_id🔗🔑, answer_key, rationale)` — **server-only table, never in any client schema/route** (NFR-8 backstop), `question_slo(question_id🔗, slo_id🔗, is_primary, PK(...))`, `item_difficulty(question_id🔗🔑, irt_a, irt_b, irt_c)`, `slo_frequency_cluster(id, slo_id🔗, board_id🔗, freq_score, years)`, `quiz(id, space_id🔗, subject_id🔗, created_by🔗, source⋈enum, time_open, time_close, one_attempt=true, shuffle=true)`, `quiz_question(quiz_id🔗, question_id🔗, PK(...))`, `quiz_attempt(id, quiz_id🔗, student_id🔗, state⋈enum, started_at, submitted_at, score, version, UNIQUE(quiz_id,student_id))`, `attempt_answer(id, attempt_id🔗, question_id🔗, response, correct)`.
 - **(d) Learner analytics (OLTP current-state):** `mastery_estimate(student_id🔗, slo_id🔗, p_mastery, p_transit, p_guess, p_slip, updated_at, version, PK(student_id,slo_id))`, `coverage_record(id, student_id🔗, subject_id🔗, coverage_pct, as_of)`, `exam_readiness_score(id, student_id🔗, subject_id🔗, score, expected_marks, computed_at)`, `review_schedule(id, student_id🔗, slo_id🔗, due_at, interval)`.
 - **(e) Classroom:** `classroom_space(id, owner_id🔗, owner_role, subject_scope, status)`, `join_code(id, space_id🔗, code🔑, revoked, expires_at)`, `enrollment(id, space_id🔗, student_id🔗, joined_at, left_at, UNIQUE(space_id,student_id))`, `announcement(id, space_id🔗, author_id🔗, body, ts)`.
-- **(f) Tutor:** `chat_session(id, student_id🔗, started_at)`, `message(id, session_id🔗, role, content, slo_refs uuid[], ts)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
+- **(f) Tutor:** `chat_session(id, student_id🔗, started_at, ended_at, subject, class_level, chapter)`, `message(id, session_id🔗, role⋈enum, content, slo_refs uuid[], created_at)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
+  - **Session anchor** — `subject text`, `class_level smallint`, `chapter smallint`, all
+    **nullable**, added for the §3.2a pilot. The anchor is a **retrieval prior, not a
+    filter**: hard-scoping a session to its chapter makes a prerequisite question ("what is
+    a mole again?") fail silently, so in-chapter pages get a score bonus and an
+    out-of-chapter page still wins when it scores better.
+  - ⚠️ **`message.role` is the `message_role` enum `('student','assistant','system')`** — the
+    first label is `student`, **not** `user`. The API speaks `user`; the mapping happens at
+    the boundary. Nothing is migrated for this.
+  - **Pilot citations live in `visual_aid.payload`**, with `kind='figure'` (a label the enum
+    already carries) holding the retrieved page set and any figure box. `slo_refs` stays
+    null until the KB layer exists, so no schema change is needed to cite a page.
 - **(g) Security & platform:** `agent_component(id, kind⋈enum{skill,mcp_server}, name, source, version, status⋈enum, UNIQUE(kind,name,version))` — **skill and mcp_server unified into one table** so `permission_manifest` can hold a single valid FK (a polymorphic reference to two tables is not expressible), `permission_manifest(id, component_id🔗 UNIQUE, granted_scopes text[], db_scopes text[], network jsonb, resource_limits jsonb)`, `agent_sbom_entry(id, component_id🔗, provenance, permissions jsonb, hash, admitted_at)`, `vetting_result(id, component_id🔗, findings jsonb, claim_vs_actual jsonb, verdict⋈enum, ts)`, `audit_log(id, actor_id🔗?, action, target, tool_call jsonb, ts)` — security trail, `api_request_log(id, request_id, actor_id🔗?, method, endpoint, path, status_code, message, latency_ms, ip, ts)` — **operational per-call access log (daily-partitioned; admin daily-logs panel)**, (`rate_limit_bucket` → Redis).
 
 ### 5.4 Physical design & DDL
@@ -721,6 +871,19 @@ Dedicated vector DB (**ChromaDB primary; FAISS for scale — [PROPOSED]**). One 
 - **Active-version pinning (fixes edition mixing):** every `kb_items`/`figures`/`urdu_notes` query filters `kb_version = live version` (from `kb_document.is_live`, §5.4), so a version bump never returns a mix of curriculum years.
 - **Owner-only chat:** the `chat` collection is queried **only with a `student_id` equality filter** — no cross-student retrieval of minors' chat (§5.9).
 - **Write path:** on `curriculum_item`/`urdu_note_item`/`textbook_figure` insert/update, or a `kb_document` version bump/flip-to-live, an async **(re)index job** upserts vectors keyed by Postgres id and **retires** superseded-version vectors.
+
+⚠️ **None of this is built, and the Class 9 Physics pilot does not use it.** This section
+remains the design for the **text** knowledge base, and the vector DB choice is still
+`[PROPOSED]` (§14.2). The pilot retrieves over **page images** with ColQwen2 multi-vector
+MaxSim and needs no ANN store at all — 200 pages is one stacked tensor and an `einsum`,
+measured at 18 ms. See **§3.2a**. Two consequences worth stating so the two designs are not
+confused later:
+
+- A dedicated ANN store earns its place around 10⁴–10⁵ vectors. Adding one for 200 pages
+  would be a network hop and a dependency bought for nothing.
+- Nothing above is invalidated by the pilot. When the text KB lands, the question of whether
+  one store serves both — a multi-vector collection alongside the 1024-dim one — is open and
+  belongs with the §14.2 vector-DB decision, not here.
 
 ### 5.6 Analytics & measurement layer (star schema / OLAP)
 
@@ -1079,7 +1242,12 @@ Standard envelope: `{ "error": { "code": "...", "message": "...", "details": {..
 
 > ⚠️ **This is the one route where both meanings of `401 UNAUTHENTICATED` are live at once** — an expired access token *and* a wrong password. Clients keep an allow-list of 401 codes worth retrying after a token refresh, and `UNAUTHENTICATED` is necessarily on it. **A client must therefore opt this route out of refresh-and-retry**, or every mistyped password silently fires a token refresh and replays the request. The reference client does so with `noRetry: true` (`lib/api/endpoints.ts`). The guard that shields `/2fa/confirm` — "the credential travelled as `bearer`" — does not apply here, because this credential travels in the body.
 
-Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3).
+Rate-limited responses include `Retry-After` + `X-RateLimit-*` headers (SEC-3). ⚠️ **Not yet
+emitted.** `app/core/ratelimit.py` puts the value in `details.retry_after` in the body and
+sets no header; `frontend/lib/api/errors.ts` reads the body field, so the client works. The
+requirement stands and the gap is recorded in §14.2 — the header is the correct fix, and it
+is deliberately **not** bundled into the §3.2a pilot work, because `rate_limited_with_retry`
+is shared by all 24 buckets and changing it is its own change with its own verification.
 
 **Session lifetime (v0.3.8).** A refresh chain has an **absolute ceiling** of
 `SESSION_ABSOLUTE_TTL_DAYS` (default 14) measured from when the chain BEGAN, carried forward across
@@ -1157,7 +1325,14 @@ Python ≥3.12, `uv`; Node ≥20 (Next.js); Docker + docker-compose; PostgreSQL 
 | `EMBEDDING_ENDPOINT`, `RERANK_ENDPOINT`, `GUARDRAIL_ENDPOINT` | — | model services |
 | `TTS_MCP`, `STT_MCP`, `OCR_MCP` | — | MCP server addresses |
 | `RATE_LIMIT_DEFAULT` | e.g. `60/min` | per-user/IP quota (SEC-3) |
-| `SIM_THRESHOLD` | **[PROPOSED]** | grounding similarity gate |
+| `SIM_THRESHOLD` | **[PROPOSED]** | grounding similarity gate. ⚠️ **Not comparable across retrieval models** — MaxSim sums per-query-token maxima and ColPali/ColQwen2 have different token and patch counts, so "14.2 beats 11.8" across models is meaningless. For §3.2a the gate is the **top1−top2 score gap**, not the absolute score, and its value is to be **read off the eval set** (mean gap on hits vs on misses; if those separate, the gap *is* the threshold, found empirically). Still `[PROPOSED]` because only 5 of 53 labelled questions have been scored — the method is settled, the number is not |
+| `RETRIEVAL_MODE` | `remote` | `remote` · `local` · `heuristic` (§3.2a). `remote` keeps the backend free of `torch`; `local` loads the model in-process and needs the `[retrieval]` extra |
+| `RETRIEVAL_ENDPOINT` | — | Retrieval service base URL; required when `RETRIEVAL_MODE=remote` |
+| `RETRIEVAL_SHARED_SECRET` | — | Bearer secret the retrieval service checks (secret). The service also binds to `127.0.0.1` behind its tunnel, so this is defence in depth, not the only control |
+| `GEMINI_API_KEY` | — | Generation for the §3.2a pilot (secret). ⚠️ Read from the environment only — never logged, never written to a file, never returned by any endpoint. ⚠️ A hosted generator **deviates from AD-3 and NFR-7**; recorded in §14.2, not amended away |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | Pinned deliberately. ⚠️ Do not pin a model whose retirement date has passed, and do not list speculative future versions in a failover chain — an unavailable name costs a retry per attempt |
+| `PHYSICS_EMBEDDINGS_PATH` | — | Path to `pages.colqwen2.pt`. Used only when `RETRIEVAL_MODE=local` |
+| `PHYSICS_PAGES_DIR` | — | Directory of 200 page scans, served by `/api/tutor/class9/physics/pages/{n}` |
 | `EMAIL_PROVIDER` | `logging` | `logging` (dev/CI) · `sendgrid` (production, chosen v0.3.9) · `resend` (retained, unused). A **`Literal`** — a value outside the three is refused at boot, not ignored (A3). `logging` is refused in production |
 | `SENDGRID_API_KEY` | — | SendGrid Web API key (`SG.…`); required when `EMAIL_PROVIDER=sendgrid` |
 | `EMAIL_FROM` | — | Required by **every** real provider; the application refuses to start without it. For SendGrid: a verified Single Sender, or an address on an authenticated domain. ⚠️ An unauthenticated single sender delivers but commonly lands in **spam** — domain authentication (SPF/DKIM) is the fix, and it is a DNS change |
@@ -1368,6 +1543,37 @@ This TDD was subjected to an **adversarial critical review** (an independent rev
 **Open question on 2FA:** whether to offer "remember this device" (e.g. 30 days) to reduce friction for young students. It weakens the control on shared devices — which is exactly the cohort in question — so it is **not** designed in. **[PROPOSED — confirm]**
 
 **Still open (decisions, not defects):** deployment target §2.4, vector DB choice §5.5, GPU spec, similarity threshold `SIM_THRESHOLD`, and the Class-11 ICS subject list (PRD §2.5).
+
+#### Known deviations — the Class 9 Physics pilot (§3.2a)
+
+Recorded, **not amended away.** Every clause below stands as written; the pilot is knowingly
+outside it. This register exists so a reader of `prd.md`/`tdd.md` is never misled into
+thinking the shipped software meets a requirement it does not, and so each item has an owner
+and a trigger rather than being quietly absorbed.
+
+| # | Clause | What it requires | Where the pilot stands | What closes it |
+|---|---|---|---|---|
+| **V1** | AD-3 (§2.3) | self-hosted Qwen primary; a hosted API is a **circuit-breaker fallback only**; embeddings/rerank/guardrails *always* self-hosted | Google Gemini is the **primary** generator | A GPU budget. Self-hosting a VLM that can read a 150 DPI scan is the blocker, not the architecture |
+| **V2** | NFR-7 (PRD) | "Runs on open/self-hosted models, **no dependence on a paid API**" | The tutor does not function without Gemini | As V1 |
+| **V3** | PRD §26.1, §5.9 | minors' data **"never used to train models"** | Gemini's **free tier** is documented as using submitted prompts to improve Google's products | A paid tier (no-training terms), **or** a disclosure in the guardian consent flow. ⚠️ **This is the one that blocks real students** — it is a P0 commitment to parents, not an implementation detail. Development against the team's own test accounts does not engage it |
+| **V4** | SEC-1 / SEC-2 (PRD), §4.6 | input **and** output guardrails are P0; `guard_in`/`guard_out` sit on the graph | Neither exists in the physics path; retrieved page content is not delimited as untrusted data | The §3.2 orchestrator, where the guardrail nodes live |
+| **V5** | FR-7 / AI-M3 / PRD §12.5 | Urdu answers use the **board-aligned Urdu** glossary term | The system prompt keeps technical terms in **English** ("thermocouple", never a translation) | The `glossary_term` table, which does not exist — the KB layer is deferred. ⚠️ Our own measurement cuts the other way: Roman-Urdu retrieval *outperforms* English because the English term survives transliteration, so this is a genuine product question, not an oversight. **Left as-is for the initial version; decide with the supervisor** |
+| **V6** | §7.2 | rate-limited responses carry `Retry-After` + `X-RateLimit-*` | Body field only (`details.retry_after`) | A change to the shared `rate_limited_with_retry`, affecting all 24 buckets — its own change |
+
+**Mitigation applied to V3 regardless, because it is free and materially narrows the claim:**
+the Gemini request carries **only the question text and the page images** — no user id, no
+session id, no name, no email, nothing tying a prompt to a child, in the current turn or in
+any replayed history turn. An anonymous physics question is a much weaker claim on "data
+about minors" than an identified one. Asserted by a unit test so it cannot regress.
+
+#### Known defects — recorded, fix deferred by the owner
+
+| # | Defect | Why it is deferred |
+|---|---|---|
+| **P1** | The pilot's page-scan and `info` routes shipped with **no authentication**, and the frontend proxy makes them same-origin — so all 200 PCTB scans are reachable without logging in | The fix is the classroom feature's private-bucket + signed-URL pattern, and `app/classroom/` is a `.gitkeep` on this branch. Best done after that merge. ⚠️ Also a licensing exposure if the repository is public |
+| **P2** | With no Gemini key, or on a Gemini `429`, the generator returns physics **written from the model's own memory** and cites a page for it — which the system prompt in the same file explicitly forbids | Owner's call: ColQwen2 first. ⚠️ Of the two, this is the one that misleads a student |
+| **P3** | `test_physics9_accuracy.py` draws its `expected_pages` from the same keyword table the retriever matches against, so it asserts the dictionary returns its own contents | 161 lines that cannot fail for any reason worth knowing. Superseded by the eval set |
+| **P4** | `QDRANT_URL`/`QDRANT_API_KEY`/`QDRANT_COLLECTION` are set in deployment environments but read by **no application code** — only a standalone script, which also hard-codes a live cluster URL and a developer's local path | Harmless but misleading: it reads as a working feature. At 200 pages MaxSim is 18 ms (§3.2a) |
 
 ### 14.3 Changes in v0.3.2
 
