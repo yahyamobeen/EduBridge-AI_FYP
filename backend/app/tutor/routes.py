@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -36,6 +36,7 @@ from app.retrieval.physics9.service import (
     get_physics_retriever,
 )
 from app.tutor import service as tutor_service
+from app.tutor.figures import crop_page, parse_box
 from app.tutor.streaming import SSE_HEADERS, event_stream
 
 logger = logging.getLogger("edubridge.tutor.routes")
@@ -343,6 +344,46 @@ def get_tutor_session(
         subject=str(ctx.user_id),
     )
     return SessionDetail(**tutor_service.get_session(ctx.session, session_id))
+
+
+@router.get(
+    "/figures/{message_id}",
+    dependencies=[Depends(require_guardian_verified)],
+)
+def get_tutor_figure(
+    message_id: UUID,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> Response:
+    """The cropped figure for one answer (`tdd.md` §3.2a, `prd.md` MM-1).
+
+    ⚠️ Unlike the page-scan endpoint beside it, this one IS authenticated and
+    owner-scoped: the box is read through `visual_aid_owner`, so another student's
+    figure is simply not found. Served same-origin because the frontend CSP is
+    `img-src 'self' data:` — an external URL in an `<img>` would be blocked.
+    """
+    stored = tutor_service.message_figure(ctx.session, message_id)
+    if stored is None:
+        raise forbidden_scope("That figure is not available.")
+
+    # Re-validated on the way out, not trusted because it was validated on the way in.
+    # A row written by an older revision, or by anything other than this code path, is
+    # still untrusted input by the time it reaches `Image.crop`.
+    box = parse_box(stored, book_pages=BOOK_PAGES)
+    retriever = get_physics_retriever()
+    if box is None or not retriever.pages_dir:
+        raise forbidden_scope("That figure is not available.")
+
+    image = crop_page(retriever.pages_dir, box)
+    if image is None:
+        raise forbidden_scope("That figure is not available.")
+
+    return Response(
+        content=image,
+        media_type="image/jpeg",
+        # Private: this is a crop of a specific student's answer, and a shared cache
+        # holding it would serve it to the next person behind the same proxy.
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/class9/physics/pages/{page_num}")

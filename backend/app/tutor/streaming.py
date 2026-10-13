@@ -30,7 +30,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.retrieval.physics9.base import BOOK_PAGES
 from app.tutor import service as tutor_service
+from app.tutor.figures import MarkerGuard, parse_box
 
 logger = logging.getLogger("edubridge.tutor.streaming")
 
@@ -94,10 +96,15 @@ def event_stream(
 
     chunks: list[str] = []
     gen_error: str | None = None
+    # Holds back any trailing text that could be the start of the figure marker, so
+    # `@@FIG` never reaches the student because a chunk boundary fell mid-sentinel.
+    guard = MarkerGuard()
     try:
         for chunk in token_source:
-            chunks.append(chunk)
-            yield frame("token", {"text": chunk})
+            visible = guard.feed(chunk)
+            if visible:
+                chunks.append(visible)
+                yield frame("token", {"text": visible})
     except Exception as exc:
         # Mid-stream failure. The status line is long gone, so this cannot become a 503;
         # it is reported on `done` and the client renders the citations it already has
@@ -105,13 +112,38 @@ def event_stream(
         gen_error = "MODEL_UNAVAILABLE"
         logger.warning("generation failed mid-stream (%s: %s)", type(exc).__name__, exc)
 
+    tail, raw_figure = guard.finish()
+    if tail:
+        chunks.append(tail)
+        yield frame("token", {"text": tail})
+
     reply = "".join(chunks)
+    # A bad box costs the figure, never the answer - `parse_box` returns None rather
+    # than raising, and the prose has already been sent by this point anyway.
+    figure = parse_box(raw_figure, book_pages=BOOK_PAGES) if raw_figure else None
 
     message_id: UUID | None = None
     if reply:
         # Both turns, together, at the end - see this module's docstring.
         tutor_service.append_message(db, session_id, "user", question)
-        message_id = tutor_service.append_message(db, session_id, "assistant", reply, pages=hits)
+        message_id = tutor_service.append_message(
+            db, session_id, "assistant", reply, pages=hits, figure=figure
+        )
+        if figure is not None:
+            # Emitted after persistence: the id the client fetches the crop with is the
+            # `visual_aid` row's, and there is nothing to fetch before the row exists.
+            # Keyed on the MESSAGE id, not the `visual_aid` row's. There is exactly one
+            # figure per message, so the message id is the natural key - and the client
+            # already has it from `done`, so no second identifier has to travel.
+            yield frame(
+                "figure",
+                {
+                    "message_id": str(message_id),
+                    "page": figure.page,
+                    "caption": figure.caption,
+                    "url": f"/api/tutor/figures/{message_id}",
+                },
+            )
 
     yield frame(
         "done",

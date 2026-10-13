@@ -7,9 +7,9 @@ a failure after the first byte cannot become an HTTP status.
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import AuthContext, authenticated, require_guardian_verified
@@ -190,7 +190,10 @@ def test_midstream_failure_reports_on_done_and_keeps_what_arrived(monkeypatch):
 
     assert resp.status_code == 200  # the status was committed before the failure
     events = _events(resp.text)
-    assert [name for name, _ in events].count("token") == 2
+    # The text, not the frame count: the marker guard holds back a trailing tail and
+    # flushes it at the end, so the number of frames is an implementation detail.
+    streamed = "".join(json.loads(data)["text"] for name, data in events if name == "token")
+    assert streamed == "Heat is energy in "
     assert "MODEL_UNAVAILABLE" in dict(events)["done"]
     # What did arrive is still the student's transcript.
     assert db.inserts_into("message")[1]["content"] == "Heat is energy in "
@@ -251,24 +254,44 @@ def test_dependency_outlives_the_stream():
     )
 
 
-@pytest.mark.parametrize(
-    "secret",
-    ["user_id", "session_id", "email", "@", "student_id"],
-)
-def test_no_identity_reaches_gemini(secret):
+def test_no_identity_reaches_gemini():
     """The mitigation deviation V3 rests on (tdd.md §14.2).
 
     Only the question text and the page images leave the platform. An anonymous physics
     question is a materially weaker claim on "data about minors" than an identified one,
     and this is the assertion that keeps it true.
+
+    ⚠️ Asserts on real identity VALUES, deliberately, rather than on substrings like
+    "@" or "user_id". An earlier version searched for "@" and began failing when the
+    system prompt gained the `@@FIGURE` sentinel - a test that fails for a reason
+    unrelated to its subject gets deleted rather than fixed, and this one must survive.
     """
+    user_id = "6f0a1e6c-6a7f-4f0e-9a1d-2b3c4d5e6f70"
+    session_id = "11111111-2222-3333-4444-555555555555"
+    email = "student@example.edu.pk"
+    full_name = "Ayesha Khan"
+
     generator = PhysicsGenerator(api_key="k", pages_dir=None)
     payload = generator.build_payload(
         question="what is heat",
-        hits=[{"page": 151, "chapter": 7, "score": 18.0, "url": "/api/x/151"}],
+        hits=[
+            {
+                "page": 151,
+                "chapter": 7,
+                "score": 18.0,
+                "url": "/api/x/151",
+                # Even if a caller passes identifiers alongside the hit, none of them
+                # may reach the request body.
+                "student_id": user_id,
+                "session_id": session_id,
+            }
+        ],
         history=[{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}],
     )
-    assert secret not in repr(payload)
+
+    body = repr(payload)
+    for value in (user_id, session_id, email, full_name):
+        assert value not in body, f"{value!r} reached the Gemini payload"
 
 
 def test_history_is_bounded_to_four_turns():

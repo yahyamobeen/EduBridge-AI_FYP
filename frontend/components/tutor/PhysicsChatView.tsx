@@ -18,6 +18,7 @@ import type {
   RetrieverTier,
   TurnIntent,
   TutorDoneEvent,
+  TutorFigureEvent,
   TutorPagesEvent,
   TutorSessionSummary,
   TutorTokenEvent,
@@ -36,6 +37,8 @@ type MessageWithCitations = PhysicsChatMessage & {
   intent?: TurnIntent
   /** True while tokens are still arriving, so the caret can show. */
   streaming?: boolean
+  /** The cropped figure, when the generator pointed at one. */
+  figure?: { url: string; caption: string; page: number }
 }
 
 /**
@@ -127,6 +130,19 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
             const last = next[next.length - 1]
             if (last && last.role === 'assistant') {
               next[next.length - 1] = { ...last, content: last.content + text }
+            }
+            return next
+          })
+        } else if (event === 'figure') {
+          const frame = data as TutorFigureEvent
+          setMessages((current) => {
+            const next = [...current]
+            const last = next[next.length - 1]
+            if (last && last.role === 'assistant') {
+              next[next.length - 1] = {
+                ...last,
+                figure: { url: frame.url, caption: frame.caption, page: frame.page },
+              }
             }
             return next
           })
@@ -438,6 +454,26 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
                     {t('retry')}
                   </button>
                 </div>
+              )}
+
+              {/*
+                The cropped figure. Same-origin by necessity: the CSP is
+                `img-src 'self' data:`, so an external URL here is blocked.
+              */}
+              {msg.figure && (
+                <figure className="mt-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={msg.figure.url}
+                    alt={msg.figure.caption || `${t('page')} ${msg.figure.page}`}
+                    className="max-h-64 w-auto rounded-lg border border-outline-variant/40 bg-surface"
+                  />
+                  {msg.figure.caption && (
+                    <figcaption className="mt-1 text-xs text-on-surface-variant">
+                      {msg.figure.caption}
+                    </figcaption>
+                  )}
+                </figure>
               )}
 
               {/* Citations Preview Chips */}

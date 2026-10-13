@@ -389,6 +389,20 @@ export type TutorPagesEvent = {
 export type TutorTokenEvent = { text: string }
 
 /**
+ * The `figure` frame: at most one per turn, emitted after persistence.
+ *
+ * ⚠️ `url` is served by our own API and MUST be used as given. The CSP is
+ * `img-src 'self' data:` with no `remotePatterns`, so an external image URL in
+ * an `<img>` is blocked by the browser.
+ */
+export type TutorFigureEvent = {
+  message_id: string
+  page: number
+  caption: string
+  url: string
+}
+
+/**
  * The `done` frame: the turn is persisted and the stream is closing.
  *
  * `error` is null on success, or a §7.3 code when generation failed AFTER the

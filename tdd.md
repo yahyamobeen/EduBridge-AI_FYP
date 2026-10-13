@@ -243,7 +243,7 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | POST | `/api/tutor/explain-step` | Yes | Student | Expand a specific solution step (FR-1) |
 | GET | `/api/tutor/sessions` | Yes | Student (owner) | List own chat sessions, newest first |
 | GET | `/api/tutor/sessions/{id}` | Yes | Student (owner) | Retrieve own chat session |
-| GET | `/api/tutor/figures/{visual_aid_id}` | Yes | Student (owner) | The cropped figure for one `visual_aid` row (§3.2a) |
+| GET | `/api/tutor/figures/{message_id}` | Yes | Student (owner) | The cropped figure for one answer (§3.2a). Keyed on the MESSAGE id, not the `visual_aid` row's: there is one figure per message, and the client already has the message id from `done` |
 
 **Wire contract for `/api/tutor/ask`** — previously unspecified, which is how the pilot came
 to ship a non-streaming JSON body instead (v0.4.0).
@@ -258,7 +258,7 @@ Response: `text/event-stream`. Four event types, in this order:
 |---|---|---|
 | `pages` | `{pages:[{page,chapter,score,url}], timings:{encode,search}, retriever:"remote"\|"local"\|"heuristic"\|"reused", intent:"retrieve"\|"reference"\|"followup"}` | **Emitted before generation starts**, so citations render while text streams. ⚠️ `retriever` and `intent` are **separate and both required**: `heuristic`+`reference` is a correct exercise lookup, while `heuristic`+`retrieve` is a degraded answer because the retrieval service was unreachable. With only one field a client must either alarm on both or neither. `reused` means no retrieval ran at all. |
 | `token` | `{text: str}` | Incremental generated text. |
-| `figure` | `{visual_aid_id, page, caption}` | Optional, at most one per turn (§3.2a). |
+| `figure` | `{message_id, page, caption, url}` | Optional, at most one per turn (§3.2a). Emitted **after** persistence, because `url` addresses a row that must exist first. ⚠️ `url` is same-origin and must be used as given — the frontend CSP is `img-src 'self' data:`. |
 | `done` | `{session_id, message_id, timings, error}` | The turn is persisted **before** this fires. `error` is null on success, or a §7.3 code when generation failed **after** the first byte — see below. `message_id` is null when nothing was produced and therefore nothing was stored. |
 
 **Failures split on one line: has a byte been sent yet?**
@@ -388,13 +388,39 @@ and returns `503 MODEL_UNAVAILABLE` rather than growing without limit. This is w
 `app/core/ratelimit.py`. ⚠️ Per-IP limits must stay institution-aware (§6.3) — a whole school
 behind one NAT would otherwise self-DoS.
 
-**Figure crops.** The generator may return one normalised bounding box per turn
-(`{page, box:[x0,y0,x1,y1], caption}`, coordinates in 0–1). The backend crops the scan and
-serves the crop from `/api/tutor/figures/{visual_aid_id}`; the box is persisted on the
-`visual_aid` row (`kind='figure'`). ⚠️ The box is **untrusted model output** (§4.6): clamp to
-0–1, reject inverted or zero-area boxes, cap the aspect ratio. ⚠️ The crop must be served
-**same-origin** — the frontend CSP is `img-src 'self' data:` with no `remotePatterns`, so an
-external URL in an `<img>` is blocked by the browser.
+**Figure crops.** `prd.md` MM-1's visual ladder opens with "retrieve the indexed textbook
+figure", and there is no `textbook_figure` index because the KB layer is deferred. But the
+generator is already looking at the page, so it reports where the figure is: the system
+prompt asks for one trailing line, `@@FIGURE {"page": N, "box": [x0,y0,x1,y1], "caption": …}`,
+with coordinates as fractions of the page. The backend crops the scan and serves it from
+`/api/tutor/figures/{message_id}`; the validated box is persisted on the `visual_aid` row
+(`kind='figure'`) so the figure survives a reload.
+
+⚠️ **The box is untrusted model output** (§4.6, MM-2) and is clamped, bounded and
+sanity-checked before it reaches Pillow — **not** because the model is expected to be
+malicious, but because a model that is merely *wrong* produces a one-pixel crop or a
+4000:1 sliver, and either reaches the student as a broken figure they cannot interpret.
+Slight overshoot (−0.02, 1.03) is **clamped rather than rejected**, because models produce
+it routinely and the figure was essentially right. Inverted and zero-area boxes are
+refused here specifically because **Pillow accepts them** and returns an empty image,
+which arrives as a broken picture rather than an error. A box that fails validation costs
+the **figure**, never the answer — the prose is already streaming by then.
+
+⚠️ **The marker is stripped from the token stream with a held-back tail.** `@@FIG` in one
+token and `URE {…}` in the next is ordinary — the model and the network both split
+wherever they like — so emitting each chunk as it arrives leaks the sentinel into the
+answer, visibly, and only sometimes. The last `len(marker) − 1` characters are withheld
+until they are known not to be a prefix.
+
+⚠️ **The crop is served same-origin and the route is authenticated and owner-scoped**,
+unlike the page-scan endpoint beside it (defect P1): the box is read through
+`visual_aid_owner`, so another student's figure simply is not found. Same-origin is a
+hard requirement, not a preference — the frontend CSP is `img-src 'self' data:` with no
+`remotePatterns`, so an external URL in an `<img>` is blocked by the browser.
+
+**Pillow** is declared directly in `backend/pyproject.toml` even though `qrcode[pil]`
+already pulled it in: depending on a library only through another package's extra is how a
+dependency silently disappears.
 
 **Interfaces:** `Retriever.search(question, top_k, chapter) -> (hits, timings)` with three
 implementations; `PhysicsGenerator.stream(question, hits, history, lang)`.

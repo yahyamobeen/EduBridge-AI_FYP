@@ -100,6 +100,7 @@ def append_message(
     role: str,
     content: str,
     pages: list[dict[str, Any]] | None = None,
+    figure: Any = None,
 ) -> UUID:
     """Persist one turn, with its cited pages when it has any.
 
@@ -123,7 +124,7 @@ def append_message(
         .one()
     )
 
-    if pages:
+    if pages or figure is not None:
         db.execute(
             text(
                 "INSERT INTO visual_aid (message_id, kind, payload) "
@@ -143,8 +144,22 @@ def append_message(
                                 "chapter": hit.get("chapter"),
                                 "score": hit.get("score"),
                             }
-                            for hit in pages
-                        ]
+                            for hit in (pages or [])
+                        ],
+                        # The validated crop region, so the figure survives a reload.
+                        # Stored already clamped and bounded - `parse_box` ran before
+                        # this, and nothing downstream re-validates.
+                        **(
+                            {
+                                "figure": {
+                                    "page": figure.page,
+                                    "box": [figure.x0, figure.y0, figure.x1, figure.y1],
+                                    "caption": figure.caption,
+                                }
+                            }
+                            if figure is not None
+                            else {}
+                        ),
                     }
                 ),
             },
@@ -330,3 +345,24 @@ def get_session(db: Session, session_id: UUID) -> dict[str, Any]:
             for row in rows
         ],
     }
+
+
+def message_figure(db: Session, message_id: UUID) -> dict[str, Any] | None:
+    """The stored crop region for one assistant turn, or None.
+
+    Read under RLS through `visual_aid_owner`, so a message belonging to another
+    student simply is not found - which is why this endpoint is safe in a way the
+    page-scan endpoint is not (defect P1).
+    """
+    row = (
+        db.execute(
+            text(
+                "SELECT payload FROM visual_aid WHERE message_id = :mid AND kind = 'figure' LIMIT 1"
+            ),
+            {"mid": message_id},
+        )
+        .scalars()
+        .one_or_none()
+    )
+    figure = (row or {}).get("figure") if row else None
+    return figure if isinstance(figure, dict) else None

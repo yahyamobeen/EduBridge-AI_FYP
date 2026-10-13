@@ -456,3 +456,63 @@ describe('PhysicsChatView history', () => {
     })
   })
 })
+
+describe('PhysicsChatView figures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the cropped figure with its caption', async () => {
+    vi.mocked(askTutor).mockReturnValueOnce(
+      (async function* () {
+        yield {
+          event: 'pages',
+          data: {
+            pages: [PAGE_155],
+            retriever: 'remote',
+            intent: 'retrieve',
+            timings: { search: 0.01 },
+          },
+        }
+        yield { event: 'token', data: { text: 'A thermocouple has two junctions.' } }
+        yield {
+          event: 'figure',
+          data: {
+            message_id: 'm1',
+            page: 155,
+            caption: 'Fig. 7.8 Thermocouple',
+            url: '/api/tutor/figures/m1',
+          },
+        }
+        yield {
+          event: 'done',
+          data: { session_id: 's1', message_id: 'm1', timings: {}, error: null },
+        }
+      })(),
+    )
+
+    renderChat()
+    fireEvent.click(screen.getByText(en.tutor.chat.chip1))
+
+    await waitFor(() => {
+      const image = screen.getByAltText('Fig. 7.8 Thermocouple')
+      // ⚠️ Same-origin, as given by the server. The CSP is `img-src 'self' data:`,
+      // so an absolute external URL here would be blocked by the browser.
+      expect(image).toHaveAttribute('src', '/api/tutor/figures/m1')
+      expect(screen.getByText('Fig. 7.8 Thermocouple')).toBeInTheDocument()
+    })
+  })
+
+  it('shows no figure when the answer had none', async () => {
+    vi.mocked(askTutor).mockReturnValueOnce(
+      streamOf({ pages: [PAGE_155], chunks: ['No diagram needed.'] }),
+    )
+    renderChat()
+    fireEvent.click(screen.getByText(en.tutor.chat.chip1))
+
+    await waitFor(() => {
+      expect(screen.getByText('No diagram needed.')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+})

@@ -46,6 +46,19 @@ TEACHING
 - Explain, do not transcribe. Short sentences, one idea at a time.
 - If asked to solve a numbered exercise question, give a hint and the method
   first. Provide the full worked solution only if asked again.
+
+FIGURES
+- If one of the pages shown carries a figure, diagram or table that genuinely
+  helps answer this question, end your reply with a single line in exactly this
+  form, after all the prose, and write nothing after it:
+
+  @@FIGURE {"page": 155, "box": [0.12, 0.34, 0.88, 0.71], "caption": "Fig. 7.8 Thermocouple"}
+
+- `box` is [left, top, right, bottom] as fractions of the page, 0 to 1, where
+  0,0 is the top-left corner. Enclose the figure and its caption, not the whole
+  page and not a sliver.
+- Only one figure, and only when it adds something the words do not. If no
+  figure helps, omit the line entirely - do not emit an empty or guessed box.
 """
 
 

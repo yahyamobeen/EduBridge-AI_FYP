@@ -21,7 +21,7 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **27** | `grep -c '^@router\.' backend/app/auth/routes.py backend/app/tutor/routes.py` → 21 auth + 6 tutor |
+| Implemented routes | **28** | `grep -c '^@router\.' backend/app/auth/routes.py backend/app/tutor/routes.py` → 21 auth + 7 tutor |
 | Routers in the backend | **2** | `auth_router` (`app/auth/routes.py`) and `tutor_router` (`app/tutor/routes.py`) |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
@@ -312,6 +312,7 @@ on 2026-10-13.
 | `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
 | `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
 | `POST /api/tutor/ask` | `ask` | `retrieve_for_turn` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** | §3.2 |
+| `GET /api/tutor/figures/{message_id}` | `get_tutor_figure` | `tutor/service.py` `message_figure` + `tutor/figures.py` `crop_page` | → `image/jpeg` | `require_role('student')`, `require_guardian_verified` | none | §3.2a |
 | `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
 | `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | `tutor_sessions` (60/min per user) | §3.2 |
 
