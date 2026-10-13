@@ -115,7 +115,9 @@ describe('PhysicsChatView', () => {
   })
 
   it('allows switching response language before sending', async () => {
-    vi.mocked(askTutor).mockReturnValueOnce(streamOf({ chunks: ['Pascal ka qanoon ye bayan karta hai...'] }))
+    vi.mocked(askTutor).mockReturnValueOnce(
+      streamOf({ chunks: ['Pascal ka qanoon ye bayan karta hai...'] }),
+    )
 
     renderChat()
 
@@ -275,7 +277,10 @@ describe('PhysicsChatView streaming', () => {
 
     fireEvent.click(screen.getByText(en.tutor.chat.chip2))
     await waitFor(() => {
-      expect(askTutor).toHaveBeenNthCalledWith(2, expect.objectContaining({ session_id: 'sess-42' }))
+      expect(askTutor).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ session_id: 'sess-42' }),
+      )
     })
   })
 
@@ -439,7 +444,9 @@ describe('PhysicsChatView history', () => {
     fireEvent.click(screen.getByLabelText(en.tutor.chat.history))
     await waitFor(() => expect(screen.getByText('earlier question')).toBeInTheDocument())
     fireEvent.click(screen.getByText('earlier question'))
-    await waitFor(() => expect(screen.queryByText(en.tutor.chat.history)).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByText(en.tutor.chat.history)).not.toBeInTheDocument(),
+    )
 
     fireEvent.click(screen.getByText(en.tutor.chat.chip1))
     await waitFor(() => {

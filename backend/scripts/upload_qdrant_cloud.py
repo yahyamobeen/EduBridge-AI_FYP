@@ -100,11 +100,11 @@ def main() -> None:
     print("Collection created successfully.")
 
     # Batch upload
-    BATCH_SIZE = 10
+    batch_size = 10
     total_pages = len(pages)
     points_buffer: list[models.PointStruct] = []
 
-    print(f"\nUploading {total_pages} pages in batches of {BATCH_SIZE}...")
+    print(f"\nUploading {total_pages} pages in batches of {batch_size}...")
     for idx, (page_num, tensor) in enumerate(zip(pages, embeddings, strict=True), start=1):
         # Convert tensor to float32 list of lists (shape: [num_patches, 128])
         vector_matrix = tensor.to(torch.float32).cpu().tolist()
@@ -122,7 +122,7 @@ def main() -> None:
         )
         points_buffer.append(point)
 
-        if len(points_buffer) >= BATCH_SIZE:
+        if len(points_buffer) >= batch_size:
             client.upsert(collection_name=COLLECTION_NAME, points=points_buffer)
             print(f"  [✓] Indexed {idx}/{total_pages} pages (latest: Page {page_num})")
             points_buffer = []

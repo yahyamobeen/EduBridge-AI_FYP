@@ -103,14 +103,16 @@ describe('SubjectModal', () => {
   })
 
   it('sends a message and renders response with page citations in physics chat', async () => {
-    vi.mocked(askTutor).mockReturnValueOnce(streamOf("Newton's first law states that an object remains at rest unless acted upon.", [
+    vi.mocked(askTutor).mockReturnValueOnce(
+      streamOf("Newton's first law states that an object remains at rest unless acted upon.", [
         {
           page: 58,
           chapter: 3,
           score: 0.92,
           url: '/api/tutor/class9/physics/pages/58',
         },
-      ]))
+      ]),
+    )
 
     renderModal({ isOpen: true })
 

@@ -250,7 +250,7 @@ class PhysicsGenerator:
         with httpx.Client(timeout=30.0) as client:
             for m in models_to_try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-                for attempt in range(2):
+                for _attempt in range(2):
                     try:
                         resp = client.post(
                             url,
@@ -262,15 +262,19 @@ class PhysicsGenerator:
                             candidates = res_data.get("candidates", [])
                             if not candidates:
                                 return "", time.time() - t0, "No candidates returned by Gemini"
-                            reply = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                            reply = (
+                                candidates[0]
+                                .get("content", {})
+                                .get("parts", [{}])[0]
+                                .get("text", "")
+                            )
                             return reply.strip(), time.time() - t0, None
-                        elif resp.status_code in (503, 429):
+                        if resp.status_code in (503, 429):
                             last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
                             time.sleep(1.0)
                             continue
-                        else:
-                            last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
-                            break
+                        last_error = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                        break
                     except Exception as exc:
                         last_error = str(exc)
                         time.sleep(0.5)
