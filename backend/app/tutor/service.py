@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.errors import forbidden_scope
+from app.retrieval.physics9.base import Timings, page_url
 
 logger = logging.getLogger("edubridge.tutor.service")
 
@@ -175,6 +176,87 @@ def recent_history(
     return [
         {"role": _ROLE_FROM_DB[row["role"]], "content": row["content"]} for row in reversed(rows)
     ]
+
+
+def last_turn_pages(db: Session, session_id: UUID) -> list[dict[str, Any]]:
+    """The pages the previous answer cited, or `[]`.
+
+    What a follow-up reuses instead of retrieving again (`app.tutor.turns`). Reusing
+    them is not only cheaper - it is more correct. Re-retrieving on "explain that again"
+    can return a DIFFERENT page set, and the tutor then explains something adjacent to
+    what the student is actually looking at, appearing to contradict itself.
+
+    `url` is rebuilt rather than stored: a stored URL is a route shape frozen into the
+    database, and it would be wrong the day the route moves.
+    """
+    row = (
+        db.execute(
+            text(
+                "SELECT v.payload FROM visual_aid v "
+                "JOIN message m ON m.id = v.message_id "
+                "WHERE m.session_id = :sid AND m.role = 'assistant' AND v.kind = 'figure' "
+                "ORDER BY m.created_at DESC, m.id DESC LIMIT 1"
+            ),
+            {"sid": session_id},
+        )
+        .scalars()
+        .one_or_none()
+    )
+    if not row:
+        return []
+    return [
+        {
+            "page": page["page"],
+            "chapter": page.get("chapter"),
+            "score": page.get("score"),
+            "url": page_url(page["page"]),
+        }
+        for page in (row or {}).get("pages", [])
+    ]
+
+
+def retrieve_for_turn(
+    db: Session,
+    session_id: UUID,
+    question: str,
+    *,
+    anchor: int | None = None,
+    top_k: int = 3,
+    has_prior_turn: bool = False,
+) -> tuple[list[dict[str, Any]], Timings, str, str]:
+    """Route the turn, then retrieve. Returns `(hits, timings, tier, intent)`.
+
+    One place, used by both the streaming and non-streaming handlers, so the two cannot
+    drift in how they classify a turn - which would show up as the same question being
+    answered from different pages depending on which route the client happened to call.
+
+    ⚠️ `tier` and `intent` are reported SEPARATELY and both reach the client. A
+    reference lookup legitimately answers from the keyword index, and without the intent
+    a client cannot tell that apart from the retrieval service being down. One is
+    correct behaviour; the other is a degraded answer.
+    """
+    from app.retrieval.physics9.service import search as neural_search
+    from app.retrieval.physics9.service import search_index
+    from app.tutor.turns import classify
+
+    intent = classify(question, has_prior_turn=has_prior_turn)
+
+    if intent == "followup":
+        reused = last_turn_pages(db, session_id)
+        if reused:
+            # No retrieval at all: the student is still looking at these pages.
+            return reused, Timings(), "reused", intent
+        # Classified as a follow-up but there is nothing stored to follow up on - a
+        # session whose first answer produced no citations. Retrieve rather than answer
+        # from nothing.
+        intent = "retrieve"
+
+    if intent == "reference":
+        hits, timings = search_index(question, top_k=top_k, chapter=anchor)
+        return hits, timings, "heuristic", intent
+
+    hits, timings, tier = neural_search(question, top_k=top_k, chapter=anchor)
+    return hits, timings, tier, intent
 
 
 def list_sessions(db: Session, limit: int = 20) -> list[dict[str, Any]]:

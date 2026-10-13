@@ -126,6 +126,20 @@ def search(question: str, top_k: int = 3, chapter: int | None = None):
     return hits, timings, fallback.name
 
 
+def search_index(question: str, top_k: int = 3, chapter: int | None = None):
+    """Keyword index only, bypassing the configured tier. Returns `(hits, timings)`.
+
+    For an explicit reference - "chp 4 ex 4.5 q 3", "numerical 7.3". MaxSim over a
+    150 DPI page scan is particularly bad at these: "7.3" is a handful of dark pixels
+    on a page full of them, while the syllabus index maps the reference directly.
+
+    ⚠️ This returns the heuristic tier by DESIGN, not by degradation. The caller must
+    pass the intent through to the client, or a correct reference lookup is
+    indistinguishable from the retrieval service being down.
+    """
+    return _get_fallback().search(question, top_k=top_k, chapter=chapter)
+
+
 def answer_physics_query(
     question: str,
     lang: str = "en",

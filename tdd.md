@@ -256,17 +256,29 @@ Response: `text/event-stream`. Four event types, in this order:
 
 | Event | Payload | Note |
 |---|---|---|
-| `pages` | `{pages:[{page,chapter,score,url}], timings:{encode,search}, retriever:"remote"\|"local"\|"heuristic"}` | **Emitted before generation starts**, so citations render while text streams. `retriever` names the path that answered — a degraded answer must be visibly degraded. |
+| `pages` | `{pages:[{page,chapter,score,url}], timings:{encode,search}, retriever:"remote"\|"local"\|"heuristic"\|"reused", intent:"retrieve"\|"reference"\|"followup"}` | **Emitted before generation starts**, so citations render while text streams. ⚠️ `retriever` and `intent` are **separate and both required**: `heuristic`+`reference` is a correct exercise lookup, while `heuristic`+`retrieve` is a degraded answer because the retrieval service was unreachable. With only one field a client must either alarm on both or neither. `reused` means no retrieval ran at all. |
 | `token` | `{text: str}` | Incremental generated text. |
 | `figure` | `{visual_aid_id, page, caption}` | Optional, at most one per turn (§3.2a). |
-| `done` | `{message_id, timings:{encode,search,generate}}` | The assistant turn is persisted **before** this fires. |
+| `done` | `{session_id, message_id, timings, error}` | The turn is persisted **before** this fires. `error` is null on success, or a §7.3 code when generation failed **after** the first byte — see below. `message_id` is null when nothing was produced and therefore nothing was stored. |
 
-Transport errors use the §7.3 envelope and the codes already catalogued there —
-`503 MODEL_UNAVAILABLE`, `422 NOT_GROUNDED`, `429 RATE_LIMITED`. An `error` event is **not**
-an event type: a failure before the first byte is an ordinary HTTP error response, and a
-failure mid-stream closes the stream after a `done` carrying what was produced. ⚠️ A 200
-response carrying a nullable `gen_error` string is **not** an acceptable failure shape — it
-defeats the rule at §7.3 that clients branch on `code`.
+**Failures split on one line: has a byte been sent yet?**
+
+| When | Shape |
+|---|---|
+| **Before** the first byte | An ordinary HTTP response with the §7.3 envelope — `503 MODEL_UNAVAILABLE`, `422 NOT_GROUNDED`, `429 RATE_LIMITED`. Everything that can fail outright is therefore checked up front: the session, retrieval, and the generator's readiness. |
+| **After** the first byte | The status line is already committed and cannot be changed. The stream closes after a `done` whose `error` carries the §7.3 code, and the client keeps the citations and partial text it has already rendered. |
+
+⚠️ There is **no `error` event type.** A separate event would imply a failure mode the
+client must handle in two places; `done` always fires exactly once and always says whether
+the answer is complete.
+
+⚠️ A 200 response carrying a nullable `gen_error` string is **not** an acceptable failure
+shape — it defeats the §7.3 rule that clients branch on `code`. (`/class9/physics/chat`
+still does this; it is superseded, not fixed.)
+
+⚠️ **Nothing is ever fabricated to fill a gap.** A student who cannot be answered is told
+so. The streaming path deliberately does not reach the non-streaming path's from-memory
+fallback, which is recorded as defect **P2** in §14.2.
 
 **History window:** the last **4 turns** (2 exchanges) of the session are replayed to the
 generator. Older turns are persisted but not resent. ⚠️ The replayed turns carry **no
@@ -343,6 +355,29 @@ the path that answered.
 it answers while a cold or stopped retrieval host starts, and it is the correct mechanism for
 **explicit references** — "Example 7.1", "numerical 7.3" are an index lookup, not a
 similarity search.
+
+**Turn routing (`app/tutor/turns.py`).** Every turn is classified before retrieval runs,
+because **most turns in a tutoring conversation are not retrieval turns**:
+
+| Intent | Trigger | Effect |
+|---|---|---|
+| `reference` | a kind word followed by a number — `prd.md` FR-1's `chp 4 ex 4.5 q 3`, or `numerical 7.3` | the syllabus index, not the neural tier. MaxSim over a 150 DPI scan is particularly bad here: "7.3" is a few dark pixels on a page full of them |
+| `followup` | a short, topicless turn with a follow-up marker — "explain that again", "phir se samjhao", "why?" | **no retrieval at all**; the previous turn's pages are reused |
+| `retrieve` | everything else, and anything uncertain | normal retrieval |
+
+⚠️ **The bias is deliberately asymmetric, and this is the part to preserve.** A missed
+follow-up costs a few seconds of retrieval nobody needed. A **false** follow-up answers a
+new question from the previous question's pages — a confidently wrong answer. So three
+guards all fall back to `retrieve`: a turn naming any term the syllabus index recognises,
+a turn over eight words, and a turn with no recognised marker. Reusing pages is also
+*more correct* than re-retrieving on a follow-up: re-retrieval can return a different page
+set, and the tutor then explains something adjacent to what the student is looking at and
+appears to contradict itself.
+
+The follow-up guard tests against the index's **own vocabulary** rather than a hand-written
+stopword list, so the two cannot drift. ⚠️ Plurals are matched in both directions — the
+index holds "thermocouple" and students type "thermocouples", and an exact word-set
+intersection missed it, failing in the dangerous direction.
 
 **Single instance.** One process, one model, **one uvicorn worker** — each worker loads its
 own ~5 GB copy. The forward pass is lock-serialised, so requests queue; the wait is bounded

@@ -21,7 +21,7 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **26** | `grep -c '^@router\.' backend/app/auth/routes.py backend/app/tutor/routes.py` → 21 auth + 5 tutor |
+| Implemented routes | **27** | `grep -c '^@router\.' backend/app/auth/routes.py backend/app/tutor/routes.py` → 21 auth + 6 tutor |
 | Routers in the backend | **2** | `auth_router` (`app/auth/routes.py`) and `tutor_router` (`app/tutor/routes.py`) |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:173-195` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 26 | §7.2 consolidates §3.1 plus Tutor (§3.2, `tdd.md:239-241`), Quiz/Practice (§3.5, `tdd.md:299-304`), Spaces/Reports (§3.6, `tdd.md:321-326`) and its own 10 rows at `tdd.md:1032-1041` — where `GET /api/admin/rate-limits / PUT` (`tdd.md:1038`) is **two** endpoints |
@@ -311,6 +311,7 @@ on 2026-10-13.
 | `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` (all in `dependencies=[…]`) | **none** | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
 | `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
 | `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
+| `POST /api/tutor/ask` | `ask` | `retrieval_search` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | none | §3.2 |
 | `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | none | §3.2 |
 | `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | none | §3.2 |
 
@@ -333,9 +334,35 @@ Three properties worth knowing before changing any of it:
    resumed session would let a caller put words in the assistant's mouth and have the
    model treat them as its own prior answer.
 
-⚠️ These two routes and the persistence writes **depend on migration
+⚠️ These routes and the persistence writes **depend on migration
 `20261013120000_tutor_session_anchor.sql`, which is not applied.** Until the owner
-applies it, `POST .../chat` fails on the `subject`/`class_level`/`chapter` insert.
+applies it, `POST .../ask` and `POST .../chat` fail on the
+`subject`/`class_level`/`chapter` insert.
+
+### `POST /api/tutor/ask` — the first streaming endpoint in this backend
+
+`text/event-stream`, four frame types in order: `pages` → `token`* → `done`. No new
+dependency; the frames are hand-rolled in `app/tutor/streaming.py` (`CLAUDE.md` §3.2).
+Three things about it are load-bearing:
+
+1. **`pages` fires before the first `token`.** Retrieval takes milliseconds and generation
+   takes seconds, so the student sees which textbook pages were found long before the
+   prose. That ordering is the whole user-visible benefit here, and a test asserts it.
+2. **Both turns are persisted at the END of the stream, in one transaction.** A client
+   that disconnects mid-answer therefore leaves **neither** turn, never a question paired
+   with a truncated reply attributed to the tutor. Writing the question up front is the
+   obvious alternative and it leaves an orphan — a transcript showing the student asking
+   and the tutor silent, which reads as a refusal rather than a fault.
+3. ⚠️ **This relies on FastAPI finalising dependencies-with-yield AFTER the response body
+   is streamed**, so `ctx.session` is still open inside the generator. Measured true on
+   `fastapi 0.141.1` / `starlette 1.3.1`. **That ordering changed once already, in
+   fastapi 0.106**, and if it changes back every transcript silently stops being saved —
+   no error, no failing request, just an empty history. `test_dependency_outlives_the_stream`
+   asserts the framework behaviour directly for exactly that reason.
+
+`X-Accel-Buffering: no` is set deliberately: a buffering reverse proxy holds the whole
+body and turns a streamed answer back into one slow response, which looks exactly like
+the model being slow and is diagnosed by nobody.
 
 `/info` returns `{subject, class_level, board, book_pages, retriever, checkpoint}`.
 **`retriever`** is `remote` · `local` · `heuristic` — it replaced a `has_real_embeddings`

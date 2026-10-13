@@ -851,6 +851,31 @@ SUBTOPIC_INDEX: list[dict[str, Any]] = [
 ]
 
 
+def _topic_terms() -> frozenset[str]:
+    """Every word the syllabus index recognises as naming a topic.
+
+    Used by `app.tutor.turns` to tell a follow-up from a new question: "explain that
+    again" names no topic, while "explain thermocouples again" does. Built from the same
+    tables the retriever matches against, so the two can never disagree about what
+    counts as a topic - a separate hand-written stopword list would drift from this one
+    and the drift would show up as follow-ups being misread.
+
+    Words of three characters or fewer are dropped: they are overwhelmingly function
+    words ("of", "the", "is") and a single one appearing in a question would veto the
+    follow-up reading for no reason.
+    """
+    terms: set[str] = set()
+    for phrase in EVALSET_ANCHORS:
+        terms.update(word for word in phrase.split() if len(word) > 3)
+    for sub in SUBTOPIC_INDEX:
+        for keyword in sub["keywords"]:
+            terms.update(word for word in keyword.split() if len(word) > 3)
+    return frozenset(terms)
+
+
+TOPIC_TERMS: frozenset[str] = _topic_terms()
+
+
 class HeuristicRetriever:
     """`RETRIEVAL_MODE=heuristic`, and the fallback for the other two tiers.
 

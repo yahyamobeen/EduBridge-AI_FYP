@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -26,11 +26,16 @@ from app.auth.dependencies import (
     require_guardian_verified,
     require_role,
 )
-from app.core.errors import forbidden_scope
+from app.core.errors import forbidden_scope, model_unavailable, not_grounded
 from app.models.enums import UserRole
 from app.retrieval.physics9.base import BOOK_PAGES
-from app.retrieval.physics9.service import answer_physics_query, get_physics_retriever
+from app.retrieval.physics9.service import (
+    answer_physics_query,
+    get_physics_generator,
+    get_physics_retriever,
+)
 from app.tutor import service as tutor_service
+from app.tutor.streaming import SSE_HEADERS, event_stream
 
 logger = logging.getLogger("edubridge.tutor.routes")
 
@@ -188,6 +193,94 @@ def chat_class9_physics(
         session_id=session_id,
         message_id=message_id,
         gen_error=result["gen_error"],
+    )
+
+
+class AskRequest(BaseModel):
+    """`POST /api/tutor/ask` (tdd.md §3.2).
+
+    No `history` field, unlike the older `/chat`: a streamed session always reads its
+    transcript from the database, so there is nothing for a client to supply and
+    nothing for a client to forge.
+    """
+
+    message: str = Field(min_length=1, max_length=2000)
+    lang: Literal["en", "ur", "ur-Latn"] = "en"
+    session_id: UUID | None = None
+    chapter: int | None = Field(default=None, ge=1, le=9)
+
+
+@router.post(
+    "/ask",
+    dependencies=[
+        Depends(require_guardian_verified),
+        Depends(require_class_9_student),
+    ],
+)
+def ask(
+    payload: AskRequest,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> StreamingResponse:
+    """A streamed, grounded answer (`tdd.md` §3.2, specified as SSE since v0.1).
+
+    Everything that can fail outright happens HERE, before the response starts, so it
+    can still be a §7.3 envelope with a real status code. Once the first byte is on the
+    wire that is impossible - which is why retrieval and the generator's readiness are
+    both checked up front and only token production happens inside the stream.
+    """
+    session_id, anchor = tutor_service.open_or_resume_session(
+        ctx.session,
+        ctx.user_id,
+        payload.session_id,
+        subject="physics",
+        class_level=9,
+        chapter=payload.chapter,
+    )
+
+    history = (
+        tutor_service.recent_history(ctx.session, session_id)
+        if payload.session_id is not None
+        else []
+    )
+
+    hits, timings, tier, intent = tutor_service.retrieve_for_turn(
+        ctx.session,
+        session_id,
+        payload.message,
+        anchor=anchor,
+        top_k=3,
+        has_prior_turn=bool(history),
+    )
+    if not hits:
+        # ⚠️ This is the DEFENSIVE case only. A real grounding gate compares the top
+        # score gap against `SIM_THRESHOLD`, which is still [PROPOSED] (tdd.md §8.2)
+        # because only 5 of 53 labelled questions have been scored. Inventing a number
+        # here would read as a measured threshold and be neither. Until the eval set
+        # runs, retrieval always returns pages and this branch does not fire.
+        raise not_grounded()
+
+    generator = get_physics_generator()
+    if not generator.api_key:
+        # Before the first byte, so this is an honest 503 rather than citations with
+        # silence after them. ⚠️ It deliberately does NOT reach the old path's
+        # from-memory fallback (defect P2) - a student who cannot be answered is told.
+        raise model_unavailable()
+
+    return StreamingResponse(
+        event_stream(
+            db=ctx.session,
+            session_id=session_id,
+            question=payload.message,
+            hits=hits,
+            retriever=tier,
+            intent=intent,
+            timings={"encode": round(timings.encode, 3), "search": round(timings.search, 4)},
+            token_source=generator.stream_tokens(payload.message, hits, history),
+        ),
+        # charset is explicit: an Urdu answer is utf-8 and a client that guesses
+        # latin-1 renders it as mojibake.
+        media_type="text/event-stream; charset=utf-8",
+        headers=SSE_HEADERS,
     )
 
 

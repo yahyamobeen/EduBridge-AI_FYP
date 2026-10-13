@@ -8,13 +8,17 @@ Enforces Punjab Board (PCTB) curriculum alignment, multilingual handling
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 logger = logging.getLogger("edubridge.retrieval.physics9.generator")
 
@@ -92,26 +96,38 @@ class PhysicsGenerator:
                 f"{type(exc).__name__}: {exc}",
             )
 
-    def _generate_with_gemini(
+    def build_payload(
         self,
         question: str,
         hits: list[dict[str, Any]],
         history: list[dict[str, str]] | None = None,
-    ) -> tuple[str, float, str | None]:
-        t0 = time.time()
+    ) -> dict[str, Any]:
+        """The Gemini request body: system prompt, prior turns, page images, question.
 
-        # Build parts for Gemini API (multimodal: system instruction + page images + user prompt)
+        Extracted so the streaming and non-streaming paths send IDENTICAL content - two
+        copies would drift, and the drift would show up as the streamed answer being
+        grounded differently from the one the tests exercise.
+
+        ⚠️ WHAT THIS DELIBERATELY DOES NOT CARRY: no user id, no session id, no name, no
+        email - in the current turn or in any replayed one. Only the question text and
+        the page images leave the platform. That is the mitigation deviation V3 rests on
+        (tdd.md §14.2): an anonymous physics question is a materially weaker claim on
+        "data about minors" than an identified one. `test_no_identity_reaches_gemini`
+        asserts it so it cannot regress.
+        """
         contents: list[dict[str, Any]] = []
 
-        # Add recent conversation history if provided
+        # Prior turns, oldest first. Bounded at 4 (tdd.md §4.1): an unbounded window
+        # grows the prompt without limit and, with a hosted generator, the exposure too.
         if history:
-            for turn in history[-4:]:  # last 2 exchanges
+            for turn in history[-4:]:
                 role = "user" if turn.get("role") == "user" else "model"
                 contents.append({"role": role, "parts": [{"text": turn.get("content", "")}]})
 
         current_user_parts: list[dict[str, Any]] = []
 
-        # Attach available page images
+        # The page scans themselves. Reading the page IS the retrieval result here -
+        # there is no extracted text to send, which is the point of visual retrieval.
         if self.pages_dir and self.pages_dir.exists():
             for h in hits:
                 page_num = h.get("page")
@@ -137,7 +153,7 @@ class PhysicsGenerator:
         current_user_parts.append({"text": f"Student question: {question}"})
         contents.append({"role": "user", "parts": current_user_parts})
 
-        payload = {
+        return {
             "contents": contents,
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "generation_config": {
@@ -145,6 +161,72 @@ class PhysicsGenerator:
                 "max_output_tokens": 1024,
             },
         }
+
+    def stream_tokens(
+        self,
+        question: str,
+        hits: list[dict[str, Any]],
+        history: list[dict[str, str]] | None = None,
+    ) -> Iterator[str]:
+        """Yield generated text as it arrives. Raises on any failure.
+
+        ⚠️ THIS PATH NEVER FALLS BACK TO `_fallback_grounded_answer`, AND THAT IS THE
+        POINT. That fallback writes physics from the model's own memory and cites a page
+        for it - which the system prompt in this same file explicitly forbids, and which
+        is recorded as defect P2 (tdd.md §14.2). The defect stays on the old `/chat`
+        path because the owner chose to defer it, but new code must not reproduce it: a
+        student who cannot be answered is told so.
+
+        ⚠️ NO MODEL FAILOVER CHAIN EITHER. The non-streaming path walks
+        3.6 -> 3.7 -> 3.8, guessing at versions that may not exist for this key and
+        paying a retry per guess while holding a threadpool worker. One model, and a
+        clean failure.
+        """
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+
+        payload = self.build_payload(question, hits, history)
+        url = f"{_API_BASE}/{self.model_name}:streamGenerateContent"
+
+        # One `with`: the context managers bind left to right, so `client` exists by the
+        # time `client.stream(...)` is evaluated.
+        with (
+            httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client,
+            client.stream(
+                "POST", url, params={"key": self.api_key, "alt": "sse"}, json=payload
+            ) as response,
+        ):
+            if response.status_code != 200:
+                # In streaming mode the body is not loaded until read(); without this
+                # the error message would be empty.
+                response.read()
+                raise RuntimeError(f"Gemini HTTP {response.status_code}: {response.text[:200]}")
+
+            for line in response.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                blob = line[len("data:") :].strip()
+                if not blob or blob == "[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(blob)
+                except ValueError:
+                    # A truncated frame is not worth failing the whole answer over.
+                    logger.debug("unparseable SSE frame from Gemini, skipped")
+                    continue
+                for candidate in chunk.get("candidates", []):
+                    for part in candidate.get("content", {}).get("parts", []):
+                        if text := part.get("text"):
+                            yield text
+
+    def _generate_with_gemini(
+        self,
+        question: str,
+        hits: list[dict[str, Any]],
+        history: list[dict[str, str]] | None = None,
+    ) -> tuple[str, float, str | None]:
+        t0 = time.time()
+        payload = self.build_payload(question, hits, history)
 
         models_to_try = [self.model_name]
         for fallback_m in ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"]:
