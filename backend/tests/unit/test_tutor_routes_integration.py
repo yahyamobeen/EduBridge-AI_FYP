@@ -233,3 +233,37 @@ def test_page_scan_bounds_rejection(app_with_overrides):
 
     resp_high = client.get("/api/tutor/class9/physics/pages/201")
     assert resp_high.status_code == 404
+
+
+def test_page_scan_served_on_the_deployed_tier(app_with_overrides, monkeypatch):
+    """An in-bounds page scan returns the image on EVERY tier, `heuristic` included.
+
+    ⚠️ REGRESSION. This 500'd in production on every citation preview. The route read
+    `retriever.pages_dir`, an attribute only `LocalRetriever` has, while the deployed
+    tier is `heuristic` - so the handler raised AttributeError. `test_page_scan_bounds_
+    rejection` above could not catch it: 0 and 201 return at the bounds check, two lines
+    before the attribute was read, so the only covered paths were the ones that never
+    touched it.
+
+    Pinned to `heuristic` deliberately. That is what `/info` reports in production, and a
+    test that ran against `local` would pass while the deployment stayed broken.
+    """
+    from app.core.config import get_settings
+    from app.retrieval.physics9 import service
+
+    monkeypatch.setenv("RETRIEVAL_MODE", "heuristic")
+    get_settings.cache_clear()
+    service.reset_for_tests()
+    try:
+        assert service.get_physics_retriever().name == "heuristic"
+        # The precondition that made the old code wrong, asserted rather than assumed.
+        assert not hasattr(service.get_physics_retriever(), "pages_dir")
+
+        resp = TestClient(app_with_overrides).get("/api/tutor/class9/physics/pages/10")
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/jpeg"
+        assert resp.content[:2] == b"\xff\xd8"  # a JPEG, not an error page
+    finally:
+        get_settings.cache_clear()
+        service.reset_for_tests()

@@ -203,6 +203,17 @@ class Settings(BaseSettings):
     # Class 9 Physics Visual Retrieval Tutor (PCTB) — tdd.md §3.2a
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.6-flash", validation_alias="GEMINI_MODEL")
+    # Alternate models tried when `gemini_model` answers 429 or 503, in order. A JSON
+    # array, like `cors_origins` above - pydantic-settings parses a list field as JSON,
+    # so a comma-separated value is refused at boot rather than read as one long name.
+    #
+    # ⚠️ EMPTY BY DEFAULT, and that is the safe setting. Every name here must be one the
+    # deployment's key can actually call: `ListModels` is the only way to know, and a
+    # name guessed from a version number costs a real round trip and a `time.sleep` per
+    # attempt before failing anyway.
+    gemini_fallback_models: list[str] = Field(
+        default_factory=list, validation_alias="GEMINI_FALLBACK_MODELS"
+    )
     physics_embeddings_path: str = Field(default="", validation_alias="PHYSICS_EMBEDDINGS_PATH")
     physics_pages_dir: str = Field(default="", validation_alias="PHYSICS_PAGES_DIR")
 

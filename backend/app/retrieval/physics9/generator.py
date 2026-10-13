@@ -20,6 +20,19 @@ import httpx
 
 _API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# Retried only on the two codes that mean "ask again later", never on a 4xx that means
+# the request itself is wrong - a bad key would otherwise walk the whole attempt list
+# holding a threadpool worker, which is defect 6 on `tdd.md` §14.2's list.
+#
+# ⚠️ And only BEFORE the first chunk is yielded. Retrying after that would replay the
+# answer from the start and the client, which appends tokens as they arrive, would
+# render the opening twice.
+_RETRYABLE = frozenset({429, 503})
+# Linearly backed off by attempt number. A blocking sleep in a sync handler is
+# acceptable here only because it is bounded by the attempt list and runs in the
+# threadpool, not on the event loop.
+_RETRY_PAUSE_S = 1.0
+
 logger = logging.getLogger("edubridge.retrieval.physics9.generator")
 
 SYSTEM_PROMPT = """You are a physics tutor for a Pakistani student in Class 9,
@@ -70,10 +83,14 @@ class PhysicsGenerator:
         api_key: str = "",
         model_name: str = "gemini-3.6-flash",
         pages_dir: Path | None = None,
+        fallback_models: list[str] | None = None,
     ):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "").strip()
         self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
         self.pages_dir = pages_dir
+        # Explicit configuration, never guessed. Empty by default, in which case a
+        # 503 just retries the configured model.
+        self.fallback_models = fallback_models or []
 
     def generate(
         self,
@@ -190,47 +207,90 @@ class PhysicsGenerator:
         path because the owner chose to defer it, but new code must not reproduce it: a
         student who cannot be answered is told so.
 
-        ⚠️ NO MODEL FAILOVER CHAIN EITHER. The non-streaming path walks
-        3.6 -> 3.7 -> 3.8, guessing at versions that may not exist for this key and
-        paying a retry per guess while holding a threadpool worker. One model, and a
-        clean failure.
+        ⚠️ RETRIES ONLY BEFORE THE FIRST CHUNK, AND ONLY ON 503/429. Once a token has
+        reached the student, retrying would restart the answer mid-sentence and duplicate
+        what is already on screen, so the loop is abandoned the moment anything is
+        yielded.
+
+        ⚠️ An earlier revision had NO retry, reasoning that the non-streaming path's
+        3.6 -> 3.7 -> 3.8 chain "guesses at versions that may not exist for this key".
+        That was wrong on the facts - `ListModels` for this key returns all three - and a
+        503 "this model is currently experiencing high demand" is exactly the transient
+        the chain absorbed. It was observed in production: the student got citations and
+        no answer.
         """
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
 
         payload = self.build_payload(question, hits, history)
-        url = f"{_API_BASE}/{self.model_name}:streamGenerateContent"
+        yielded = False
+        last_error = ""
 
-        # One `with`: the context managers bind left to right, so `client` exists by the
-        # time `client.stream(...)` is evaluated.
-        with (
-            httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client,
-            client.stream(
-                "POST", url, params={"key": self.api_key, "alt": "sse"}, json=payload
-            ) as response,
-        ):
-            if response.status_code != 200:
-                # In streaming mode the body is not loaded until read(); without this
-                # the error message would be empty.
-                response.read()
-                raise RuntimeError(f"Gemini HTTP {response.status_code}: {response.text[:200]}")
+        for attempt, model in enumerate(self._models_to_try()):
+            try:
+                # One `with`: the context managers bind left to right, so `client`
+                # exists by the time `client.stream(...)` is evaluated.
+                with (
+                    httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client,
+                    client.stream(
+                        "POST",
+                        f"{_API_BASE}/{model}:streamGenerateContent",
+                        params={"key": self.api_key, "alt": "sse"},
+                        json=payload,
+                    ) as response,
+                ):
+                    if response.status_code != 200:
+                        # In streaming mode the body is not loaded until read();
+                        # without this the message would be empty.
+                        response.read()
+                        last_error = f"HTTP {response.status_code}: {response.text[:160]}"
+                        if response.status_code in _RETRYABLE:
+                            logger.info("gemini %s: %s; retrying", model, last_error)
+                            time.sleep(_RETRY_PAUSE_S * (attempt + 1))
+                            continue
+                        raise RuntimeError(f"Gemini {last_error}")
 
-            for line in response.iter_lines():
-                if not line.startswith("data:"):
-                    continue
-                blob = line[len("data:") :].strip()
-                if not blob or blob == "[DONE]":
-                    continue
-                try:
-                    chunk = json.loads(blob)
-                except ValueError:
-                    # A truncated frame is not worth failing the whole answer over.
-                    logger.debug("unparseable SSE frame from Gemini, skipped")
-                    continue
-                for candidate in chunk.get("candidates", []):
-                    for part in candidate.get("content", {}).get("parts", []):
-                        if text := part.get("text"):
-                            yield text
+                    for line in response.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        blob = line[len("data:") :].strip()
+                        if not blob or blob == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(blob)
+                        except ValueError:
+                            # A truncated frame is not worth failing an answer over.
+                            logger.debug("unparseable SSE frame from Gemini, skipped")
+                            continue
+                        for candidate in chunk.get("candidates", []):
+                            for part in candidate.get("content", {}).get("parts", []):
+                                if text := part.get("text"):
+                                    yielded = True
+                                    yield text
+                    return
+            except httpx.HTTPError as exc:
+                if yielded:
+                    raise
+                last_error = f"{type(exc).__name__}: {exc}"
+                logger.info("gemini transport error: %s; retrying", last_error)
+                time.sleep(_RETRY_PAUSE_S * (attempt + 1))
+
+        raise RuntimeError("Gemini generation failed: " + (last_error or "no attempts"))
+
+    def _models_to_try(self) -> list[str]:
+        """The configured model, any configured alternates, then the model once more.
+
+        ⚠️ The alternates are CONFIGURATION, never a guess. `GEMINI_FALLBACK_MODELS`
+        defaults to empty, so a deployment that has chosen none simply retries its own
+        model - which is the right response to a 503 that says demand spikes are
+        usually temporary.
+        """
+        models = [self.model_name]
+        for name in self.fallback_models:
+            if name and name not in models:
+                models.append(name)
+        models.append(self.model_name)
+        return models
 
     def _generate_with_gemini(
         self,
