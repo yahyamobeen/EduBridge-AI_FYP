@@ -604,6 +604,11 @@
       "chip4": "Inertia aur Newton ka pehla qanoon",
       "errorFallback": "Tutor service se rabta nahi ho saka. Barah-e-karam apna internet check karein aur dobara koshish karein.",
       "retry": "Dobara koshish karein",
+      "degradedNotice": "Yeh jawab keyword match se aya hai, normal textbook search se nahi — search service available nahi thi. Cited pages zaroor check karein.",
+      "history": "Purani guftagu",
+      "historyEmpty": "Abhi koi purani guftagu nahi hai.",
+      "historyError": "Purani guftagu load nahi ho saki.",
+      "newChat": "Nai guftagu",
       "disclaimer": "Official Punjab Textbook Board (PCTB) Class 9 Physics kitab par mabni."
     }
   },

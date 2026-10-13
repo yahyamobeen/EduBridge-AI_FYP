@@ -604,6 +604,11 @@
       "chip4": "Define inertia and Newton's first law",
       "errorFallback": "Could not connect to the tutor service. Please check your connection and try again.",
       "retry": "Retry",
+      "degradedNotice": "This answer came from a keyword match, not the usual textbook search — the search service was unavailable. Check the cited pages.",
+      "history": "Past conversations",
+      "historyEmpty": "No past conversations yet.",
+      "historyError": "Could not load your past conversations.",
+      "newChat": "New conversation",
       "disclaimer": "Grounded in official Punjab Textbook Board (PCTB) Class 9 Physics textbook."
     }
   },

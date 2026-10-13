@@ -5,11 +5,26 @@ import en from '@/messages/en.json'
 import { SubjectModal } from './SubjectModal'
 
 vi.mock('@/lib/api/endpoints', () => ({
-  chatClass9Physics: vi.fn(),
+  askTutor: vi.fn(),
   getPhysicsTutorInfo: vi.fn(),
 }))
 
-import { chatClass9Physics } from '@/lib/api/endpoints'
+import { askTutor } from '@/lib/api/endpoints'
+
+/** The frame sequence PhysicsChatView consumes: pages, tokens, done. */
+function streamOf(reply: string, pages: unknown[] = []) {
+  return (async function* () {
+    yield {
+      event: 'pages',
+      data: { pages, retriever: 'remote', intent: 'retrieve', timings: { search: 0.01 } },
+    }
+    yield { event: 'token', data: { text: reply } }
+    yield {
+      event: 'done',
+      data: { session_id: 'sess-1', message_id: 'm1', timings: {}, error: null },
+    }
+  })()
+}
 
 function renderModal({
   isOpen = true,
@@ -88,19 +103,14 @@ describe('SubjectModal', () => {
   })
 
   it('sends a message and renders response with page citations in physics chat', async () => {
-    vi.mocked(chatClass9Physics).mockResolvedValueOnce({
-      reply: "Newton's first law states that an object remains at rest unless acted upon.",
-      pages: [
+    vi.mocked(askTutor).mockReturnValueOnce(streamOf("Newton's first law states that an object remains at rest unless acted upon.", [
         {
           page: 58,
           chapter: 3,
           score: 0.92,
           url: '/api/tutor/class9/physics/pages/58',
         },
-      ],
-      timings: { search: 12 },
-      gen_error: null,
-    })
+      ]))
 
     renderModal({ isOpen: true })
 
@@ -115,12 +125,13 @@ describe('SubjectModal', () => {
     const sendBtn = screen.getByLabelText(en.tutor.chat.send)
     fireEvent.click(sendBtn)
 
-    // Verify chatClass9Physics was called
+    // Verify askTutor was called
     await waitFor(() => {
-      expect(chatClass9Physics).toHaveBeenCalledWith({
+      // No `history`: the server reads the transcript it stored (tdd.md §3.2).
+      expect(askTutor).toHaveBeenCalledWith({
         message: "State Newton's first law",
         lang: 'en',
-        history: [{ role: 'user', content: "State Newton's first law" }],
+        session_id: null,
       })
     })
 

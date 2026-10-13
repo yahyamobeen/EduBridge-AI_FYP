@@ -7,11 +7,21 @@ import {
   AtomIcon,
   BookIcon,
   CloseIcon,
+  HistoryIcon,
   SendIcon,
   SparkIcon,
 } from '@/components/ui/Icon'
-import { chatClass9Physics } from '@/lib/api/endpoints'
-import type { PageCitation, PhysicsChatMessage } from '@/lib/api/types'
+import { askTutor, getTutorSession, listTutorSessions } from '@/lib/api/endpoints'
+import type {
+  PageCitation,
+  PhysicsChatMessage,
+  RetrieverTier,
+  TurnIntent,
+  TutorDoneEvent,
+  TutorPagesEvent,
+  TutorSessionSummary,
+  TutorTokenEvent,
+} from '@/lib/api/types'
 
 type Props = {
   onBack: () => void
@@ -21,6 +31,24 @@ type Props = {
 type MessageWithCitations = PhysicsChatMessage & {
   pages?: PageCitation[]
   error?: boolean
+  /** Which tier produced the citations, and why. Read together, never alone. */
+  retriever?: RetrieverTier
+  intent?: TurnIntent
+  /** True while tokens are still arriving, so the caret can show. */
+  streaming?: boolean
+}
+
+/**
+ * Should the answer be marked as degraded?
+ *
+ * ⚠️ `retriever === 'heuristic'` ALONE IS NOT THE TEST, and getting this wrong
+ * in either direction is bad. A reference lookup ("numerical 7.3") answers from
+ * the keyword index BY DESIGN and is perfectly good; the same tier reached for a
+ * normal question means the retrieval service was unreachable and the student is
+ * reading a keyword match. Only the second deserves a warning.
+ */
+function isDegraded(msg: MessageWithCitations): boolean {
+  return msg.retriever === 'heuristic' && msg.intent !== 'reference'
 }
 
 export function PhysicsChatView({ onBack, onClose }: Props) {
@@ -31,6 +59,15 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
   const [messages, setMessages] = useState<MessageWithCitations[]>([])
   const [previewPage, setPreviewPage] = useState<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  /**
+   * The server-assigned session. Held in a ref rather than state because it is
+   * read inside the streaming loop and never rendered - as state, the loop
+   * would close over a stale value on the turn that creates it.
+   */
+  const sessionIdRef = useRef<string | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
+  const [sessions, setSessions] = useState<TutorSessionSummary[] | null>(null)
+  const [historyError, setHistoryError] = useState(false)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' })
@@ -52,34 +89,131 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
     setMessages(updatedMessages)
     setLoading(true)
 
+    // No `history` is sent. The server reads the transcript it stored, and
+    // trusting a client-supplied one would let this component put words in the
+    // assistant's mouth and have the model treat them as its own prior answer.
     try {
-      const historyPayload = updatedMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }))
+      let started = false
 
-      const response = await chatClass9Physics({
+      for await (const { event, data } of askTutor({
         message: query,
         lang,
-        history: historyPayload,
-      })
+        session_id: sessionIdRef.current,
+      })) {
+        if (event === 'pages') {
+          // Citations arrive BEFORE the first token. Appending the assistant
+          // bubble here is what makes the wait legible: the student can see
+          // which pages were found while the prose is still being written.
+          const frame = data as TutorPagesEvent
+          started = true
+          setLoading(false)
+          setMessages([
+            ...updatedMessages,
+            {
+              role: 'assistant',
+              content: '',
+              pages: frame.pages,
+              retriever: frame.retriever,
+              intent: frame.intent,
+              streaming: true,
+            },
+          ])
+        } else if (event === 'token') {
+          const { text } = data as TutorTokenEvent
+          // Append to the LAST message only, rebuilding from `updatedMessages`
+          // each time, so a re-render mid-stream cannot duplicate the turn.
+          setMessages((current) => {
+            const next = [...current]
+            const last = next[next.length - 1]
+            if (last && last.role === 'assistant') {
+              next[next.length - 1] = { ...last, content: last.content + text }
+            }
+            return next
+          })
+        } else if (event === 'done') {
+          const frame = data as TutorDoneEvent
+          sessionIdRef.current = frame.session_id
+          setMessages((current) => {
+            const next = [...current]
+            const last = next[next.length - 1]
+            if (last && last.role === 'assistant') {
+              next[next.length - 1] = {
+                ...last,
+                streaming: false,
+                // A failure AFTER the first byte cannot change the HTTP status,
+                // so it arrives here. The citations and partial text stay on
+                // screen - they are real - and the turn is marked so the
+                // student is not left thinking the answer finished.
+                ...(frame.error ? { error: true } : {}),
+              }
+            }
+            return next
+          })
+        }
+      }
 
-      const botMsg: MessageWithCitations = {
-        role: 'assistant',
-        content: response.reply,
-        pages: response.pages,
+      if (!started) {
+        // The stream opened and closed without a `pages` frame. Nothing to show.
+        setMessages([
+          ...updatedMessages,
+          { role: 'assistant', content: t('errorFallback'), error: true },
+        ])
       }
-      setMessages([...updatedMessages, botMsg])
     } catch {
-      const errorMsg: MessageWithCitations = {
-        role: 'assistant',
-        content: t('errorFallback'),
-        error: true,
-      }
-      setMessages([...updatedMessages, errorMsg])
+      // A failure BEFORE the first byte: an ordinary error response, so the
+      // whole turn failed and nothing partial is on screen.
+      setMessages([
+        ...updatedMessages,
+        { role: 'assistant', content: t('errorFallback'), error: true },
+      ])
+    } finally {
+      // `finally`, not `catch`: this screen stays mounted after a send, so
+      // re-enabling the control is correct here (frontend/CLAUDE.md §3).
+      setLoading(false)
+    }
+  }
+
+  async function openHistory() {
+    setShowHistory(true)
+    setHistoryError(false)
+    try {
+      setSessions(await listTutorSessions(20))
+    } catch {
+      setHistoryError(true)
+    }
+  }
+
+  async function loadSession(id: string) {
+    setShowHistory(false)
+    setLoading(true)
+    try {
+      const detail = await getTutorSession(id)
+      sessionIdRef.current = detail.id
+      setMessages(
+        detail.messages
+          // `system` turns are not part of the conversation a student had.
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            pages: m.pages,
+          })),
+      )
+    } catch {
+      // ⚠️ A 403 here means "not available", NOT "signed out": a session that is
+      // not yours and one that does not exist answer identically, so that an id
+      // cannot be probed for existence.
+      setHistoryError(true)
+      setShowHistory(true)
     } finally {
       setLoading(false)
     }
+  }
+
+  function startNewChat() {
+    sessionIdRef.current = null
+    setMessages([])
+    setShowHistory(false)
   }
 
   function onSubmit(e: FormEvent) {
@@ -121,6 +255,16 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={showHistory ? () => setShowHistory(false) : openHistory}
+            aria-label={t('history')}
+            aria-expanded={showHistory}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-variant"
+          >
+            <HistoryIcon className="h-5 w-5" />
+          </button>
+
           {/* Language selector */}
           <div className="flex rounded-lg border border-outline-variant/40 bg-surface p-0.5 text-body-sm font-semibold">
             <button
@@ -195,6 +339,53 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
           </div>
         </div>
 
+        {/* Past conversations */}
+        {showHistory && (
+          <section
+            aria-label={t('history')}
+            className="rounded-xl border border-outline-variant/40 bg-surface-container p-3"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-body-sm font-semibold text-on-surface">{t('history')}</p>
+              <button
+                type="button"
+                onClick={startNewChat}
+                className="text-xs font-semibold text-primary underline hover:opacity-80"
+              >
+                {t('newChat')}
+              </button>
+            </div>
+
+            {historyError ? (
+              <p className="mt-2 text-body-sm text-on-surface-variant">{t('historyError')}</p>
+            ) : sessions === null ? (
+              <p className="mt-2 text-body-sm text-on-surface-variant">{t('thinking')}</p>
+            ) : sessions.length === 0 ? (
+              <p className="mt-2 text-body-sm text-on-surface-variant">{t('historyEmpty')}</p>
+            ) : (
+              <ul className="mt-2 flex flex-col gap-1">
+                {sessions.map((session) => (
+                  <li key={session.id}>
+                    <button
+                      type="button"
+                      onClick={() => loadSession(session.id)}
+                      className="flex w-full flex-col items-start rounded-lg px-2 py-1.5 text-start transition-colors hover:bg-surface-variant"
+                    >
+                      <span className="line-clamp-1 text-body-sm text-on-surface">
+                        {session.opening_question ?? t('history')}
+                      </span>
+                      <span className="text-xs text-on-surface-variant">
+                        {session.chapter !== null && `${t('chapter')} ${session.chapter} · `}
+                        {new Date(session.started_at).toLocaleDateString()}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         {/* Message bubbles */}
         {messages.map((msg, index) => (
           <div
@@ -210,7 +401,29 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
                     : 'rounded-ts-sm border border-outline-variant/30 bg-surface-container-high text-on-surface'
               }`}
             >
-              <div className="whitespace-pre-wrap">{msg.content}</div>
+              <div className="whitespace-pre-wrap">
+                {msg.content}
+                {msg.streaming && (
+                  <span
+                    aria-hidden="true"
+                    className="ms-0.5 inline-block w-[2px] animate-pulse bg-current align-middle"
+                    style={{ height: '1em' }}
+                  />
+                )}
+              </div>
+
+              {/*
+                A keyword match presented as a textbook answer is the failure
+                this notice exists to prevent. Shown only when the tier is
+                `heuristic` for a reason OTHER than a reference lookup - see
+                `isDegraded`.
+              */}
+              {isDegraded(msg) && (
+                <p className="mt-2 flex items-start gap-1.5 rounded-md bg-surface-container px-2 py-1.5 text-xs text-on-surface-variant">
+                  <SparkIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{t('degradedNotice')}</span>
+                </p>
+              )}
 
               {msg.error && (
                 <div className="mt-2 flex items-center">

@@ -330,6 +330,12 @@ export type PhysicsChatResponse = {
     search?: number
     generate?: number
   }
+  /** Which retrieval tier answered. See `RetrieverTier`. */
+  retriever: RetrieverTier
+  /** Why those pages were chosen. See `TurnIntent`. */
+  intent?: TurnIntent
+  session_id: string
+  message_id: string
   gen_error?: string | null
 }
 
@@ -338,6 +344,90 @@ export type PhysicsTutorInfoResponse = {
   class_level: number
   board: string
   book_pages: number
-  has_real_embeddings: boolean
+  /** `remote` | `local` | `heuristic` — replaced a `has_real_embeddings` boolean. */
+  retriever: RetrieverTier
   checkpoint: string
+}
+
+/**
+ * Which tier produced the citations.
+ *
+ * `reused` means no retrieval ran at all — a follow-up on the pages already on
+ * screen.
+ */
+export type RetrieverTier = 'remote' | 'local' | 'heuristic' | 'reused'
+
+/**
+ * Why those pages were chosen.
+ *
+ * ⚠️ READ THIS TOGETHER WITH `retriever`, NEVER ALONE. `heuristic` + `reference`
+ * is a correct exercise lookup; `heuristic` + `retrieve` is a degraded answer
+ * because the retrieval service was unreachable. One field cannot tell them
+ * apart, so a client with only `retriever` must either warn about both or
+ * neither.
+ */
+export type TurnIntent = 'retrieve' | 'reference' | 'followup'
+
+/** `POST /api/tutor/ask` — streamed. */
+export type TutorAskRequest = {
+  message: string
+  lang?: 'en' | 'ur' | 'ur-Latn'
+  /** Null opens a session; `chapter` then sets its anchor, on that turn only. */
+  session_id?: string | null
+  chapter?: number | null
+}
+
+/** The `pages` frame: retrieval is done, generation has not started. */
+export type TutorPagesEvent = {
+  pages: PageCitation[]
+  retriever: RetrieverTier
+  intent: TurnIntent
+  timings: { encode?: number; search?: number }
+}
+
+/** The `token` frame: one chunk of generated text. */
+export type TutorTokenEvent = { text: string }
+
+/**
+ * The `done` frame: the turn is persisted and the stream is closing.
+ *
+ * `error` is null on success, or a §7.3 code when generation failed AFTER the
+ * first byte — at which point the HTTP status was already committed and could
+ * not carry it. `message_id` is null when nothing was produced and therefore
+ * nothing was stored.
+ */
+export type TutorDoneEvent = {
+  session_id: string
+  message_id: string | null
+  timings: { encode?: number; search?: number }
+  error: string | null
+}
+
+export type TutorSessionSummary = {
+  id: string
+  subject: string | null
+  class_level: number | null
+  chapter: number | null
+  started_at: string
+  message_count: number
+  last_message_at: string | null
+  opening_question: string | null
+}
+
+export type TutorTranscriptMessage = {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  created_at: string
+  pages: PageCitation[]
+}
+
+export type TutorSessionDetail = {
+  id: string
+  subject: string | null
+  class_level: number | null
+  chapter: number | null
+  started_at: string
+  ended_at: string | null
+  messages: TutorTranscriptMessage[]
 }
