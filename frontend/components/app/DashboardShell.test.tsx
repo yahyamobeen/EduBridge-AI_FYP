@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
@@ -20,12 +20,14 @@ import { DashboardShell } from './DashboardShell'
 
 const replace = vi.fn()
 const logout = vi.fn()
+let pathname = '/dashboard'
 
 vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ replace, push: vi.fn() }),
-  usePathname: () => '/dashboard',
-  Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  usePathname: () => pathname,
+  // Passes every prop through: `aria-current` is what the sidebar tests read.
+  Link: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a {...props}>{children}</a>
   ),
 }))
 vi.mock('@/lib/api/endpoints', () => ({ logout: () => logout() }))
@@ -43,14 +45,18 @@ const me: MeResponse = {
   guardian: { required: false, status: null },
 }
 
-function renderShell() {
-  return render(
+function shell(user: MeResponse = me) {
+  return (
     <NextIntlClientProvider locale="en" messages={en}>
-      <DashboardShell me={me} subtitle="Student Dashboard">
+      <DashboardShell me={user} subtitle="Student Dashboard">
         <p>dashboard content</p>
       </DashboardShell>
-    </NextIntlClientProvider>,
+    </NextIntlClientProvider>
   )
+}
+
+function renderShell(user: MeResponse = me) {
+  return render(shell(user))
 }
 
 function clickSignOut() {
@@ -62,6 +68,7 @@ function clickSignOut() {
 beforeEach(() => {
   replace.mockReset()
   logout.mockReset()
+  pathname = '/dashboard'
 })
 
 describe('signing out', () => {
@@ -103,5 +110,60 @@ describe('the sidebar', () => {
     // NAV_BY_ROLE precisely so that cannot recur.
     expect(screen.getAllByText(en.nav.items.myClasses).length).toBeGreaterThan(0)
     expect(screen.queryByText(en.nav.items.myChild)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The item for the page you are on is the one marked current. It used to be
+ * the FIRST item on every page — so a student inside a classroom saw
+ * "Dashboard" highlighted (owner report, 2026-10-05). The longest matching
+ * prefix wins, so a teacher's classroom is not their dashboard at /teacher.
+ */
+describe('the current page', () => {
+  function current() {
+    const nav = screen.getByRole('navigation', { name: en.dashboard.primaryNav })
+    return within(nav)
+      .queryAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page')
+      .map((a) => a.textContent)
+  }
+
+  it.each([
+    ['/dashboard', en.nav.items.dashboard],
+    ['/classroom', en.nav.items.myClasses],
+    ['/classroom/11111111-1111-4111-8111-111111111111', en.nav.items.myClasses],
+    ['/classroom/calendar', en.nav.items.myClasses],
+    ['/settings', en.nav.items.settings],
+  ])('on %s it is %s, and only that', (path, label) => {
+    pathname = path
+    renderShell()
+    expect(current()).toEqual([label])
+  })
+
+  it("a teacher's classroom is not their dashboard, though /teacher is its prefix", () => {
+    pathname = '/teacher/classroom/calendar'
+    renderShell({ ...me, role: 'teacher' })
+    expect(current()).toEqual([en.nav.items.mySpaces])
+  })
+
+  it('marks nothing on a path no item owns, rather than guessing', () => {
+    pathname = '/somewhere-else'
+    renderShell()
+    expect(current()).toEqual([])
+  })
+})
+
+/**
+ * Since Phase 6c the shell lives in the (app) layout and a navigation no longer
+ * remounts it — which used to be the only thing that closed the phone menu.
+ */
+describe('the phone menu', () => {
+  it('closes when the page changes', () => {
+    const view = renderShell()
+    fireEvent.click(screen.getByRole('button', { name: en.dashboard.openMenu }))
+    expect(document.getElementById('mobile-nav')).not.toBeNull()
+    pathname = '/classroom'
+    view.rerender(shell())
+    expect(document.getElementById('mobile-nav')).toBeNull()
   })
 })

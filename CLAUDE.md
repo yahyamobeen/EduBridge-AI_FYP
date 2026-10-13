@@ -24,7 +24,10 @@ Rs. 999/month after a 14-day trial. Students in Classes 9 and 10 are minors and 
 lesson until a parent confirms a guardian link**; Classes 11 and 12 may link optionally.
 
 Authoritative product and design documents: [`prd.md`](prd.md), [`tdd.md`](tdd.md). The feature
-inventory is [`user-stories.md`](user-stories.md) — 8 epics, 38 cards.
+inventory is `user-stories.md` — 8 epics, 38 cards. It, the sprint plan (`sprint-plan.md`,
+`sprints.tex`) and their LaTeX generators (`tools/`) live **outside the repository**, in
+`C:\Users\DELL\Desktop\EduBridge-AI_FYP-planning\` (moved there 2026-10-04; they were never
+committed). Citations such as `user-stories.md:172` refer to that copy.
 
 ## 2. Repo map
 
@@ -39,9 +42,8 @@ EduBridge-AI_FYP/
 │   └── Architecture/      ← architecture, database, api-endpoints
 ├── frontend/              ← Next.js App Router + React + TypeScript. See frontend/CLAUDE.md
 │   └── Architecture/      ← architecture
-├── supabase/migrations/   ← 11 applied SQL migrations. Never edit an applied one.
-├── tools/                 ← the user-stories LaTeX generator and its checks
-├── prd.md · tdd.md · user-stories.md · sprint-plan.md
+├── supabase/migrations/   ← 34 SQL migrations (`ls supabase/migrations/*.sql | wc -l`). Never edit an applied one.
+├── prd.md · tdd.md        ← the contract (user stories and sprint plan live outside the repo — §1)
 ├── ml/serving/            ← the ColQwen2 retrieval service. A SEPARATE deployable with
 │                            its own deps, Dockerfile and lint config — the backend
 │                            reaches it over HTTP and never imports it
@@ -109,8 +111,9 @@ State a brief plan up front, then verify each step:
 2. [Step] → verify: [check]
 ```
 
-**Verification here IS tests — this repository has them.** 25 backend test files (10 in
-`backend/tests/unit`, 15 in `backend/tests/integration`) and 22 frontend test files. Report the
+**Verification here IS tests — this repository has them.** 53 backend test files (22 in
+`backend/tests/unit`, 31 in `backend/tests/integration` — `ls backend/tests/*/test_*.py`, 2026-10-05)
+and 45 frontend test files. Report the
 real result before saying done; never "should pass".
 
 | Change touches | Verify with |
@@ -152,10 +155,10 @@ surface the conflict and ask — never resolve it quietly.
 
 | | |
 |---|---|
-| Backend | **18 routes, all authentication or reference.** One router (`app/auth/routes.py`). `tdd.md` specifies **49 endpoints — 31 do not exist.** Phase 1b added `POST /auth/admin/login` to both sides of that ledger at once. |
-| Frontend | 20 pages, 3 route groups, 3 locales. Auth and onboarding journeys complete. |
-| Database | 11 applied migrations, 33 `app.*` functions, 73 Row-Level Security policies. |
-| `ml/serving/` | **The ColQwen2 retrieval service** (`tdd.md` §3.2a) — FastAPI, the 200-page embedding index, MaxSim, a query-embedding cache, and a 39-check self-test that needs no model. A separate deployable: its own `requirements.txt`, `Dockerfile` and ruff config, and `backend/requirements.txt` must never grow a torch dependency. ⚠️ Its `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone alone. |
+| Backend | **71 routes** (`grep -c '^@router\.' backend/app/{auth,classroom,tutor}/routes.py`) in **three routers**: 21 authentication or reference in `app/auth/routes.py`, 43 classroom in `app/classroom/routes.py` (classroom Phases 2–8), 7 tutor in `app/tutor/routes.py` (Class 9 Physics pilot, `tdd.md` §3.2a). `tdd.md` specifies **87 endpoints — 23 do not exist**; 1 of those is the rest of the classroom surface (the weak-area report, later), on branch `add-classroom`. Classroom files live in a private Supabase Storage bucket reached only by the backend (`STORAGE_PROVIDER=s3`, storage-only keys). |
+| Frontend | 30 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales, 820 message keys per locale. Auth and onboarding journeys complete; classroom list, detail, people, stream, classwork with submissions and grading, a calendar, and file attachments — added while creating an assignment, several links per student's work, and PDFs and images viewable in a new tab — and a class-public chat with teacher moderation, built for students and teachers; the parent's read-only overview of a child's classrooms; and the Class 9 Physics tutor, whose answer streams over Server-Sent Events with past conversations resumable. |
+| Database | **34 migration files, 33 of them applied.** The classroom files went in on 2026-10-04 and 2026-10-05 via `supabase db push`. ⚠️ **`20261013120000_tutor_session_anchor.sql` is NOT applied** — produced and statically checked only, never executed against any database, so the tutor's session anchor does not exist yet and `POST /api/tutor/ask` fails on its insert. 72 `app.*` functions and 98 Row-Level Security policies, measured on a shadow database built from the 33 applied files and matched on the live database (`backend/Architecture/database.md`, "At a glance") — neither figure has been re-measured since. |
+| `ml/serving/` | **The ColQwen2 retrieval service** (`tdd.md` §3.2a) — FastAPI, the 200-page embedding index, MaxSim, a query-embedding cache, and a 39-check self-test that needs no model. A separate deployable: its own `requirements.txt`, `Dockerfile` and ruff config, and `backend/requirements.txt` must never grow a torch dependency. ⚠️ Its `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone alone, and **nothing in it has yet run against the real model**. |
 | `ml/eval/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 
 Against the 38 user-story cards: **Epic 1 (identity, authentication, consent) is roughly 80%
@@ -166,7 +169,8 @@ layer the proposal calls the distinctive contribution.
 today.** The most important structural one: `user-stories.md` card 1.5 promises every request is
 checked by the application **and again by the database**, and the Row-Level Security audit shows
 the database would **not** catch a missed check on most tables. The application layer is currently
-holding alone. The full register and its remediation plan live outside this repository; the
+holding alone. *(2026-10-04: the classroom findings B9–B11 are closed at the database layer —
+migrations applied to the live database and re-verified there.)* The full register and its remediation plan live outside this repository; the
 database-layer findings are recorded in
 [`backend/Architecture/database.md`](backend/Architecture/database.md).
 

@@ -13,7 +13,10 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 
 ## Migrations
 
-**19 applied.** `ls supabase/migrations/*.sql | wc -l`
+**33 applied** (`ls supabase/migrations/*.sql | wc -l`, 2026-10-05). The eight classroom files from
+`20261004120000` on were dry-run on a shadow database first, then applied by the owner with
+`supabase db push` — four on 2026-10-04, `20261004150000`, `20261005120000`, `20261005130000` and
+`20261005140000` on 2026-10-05 — and re-verified on the live database.
 
 | # | File | Contents |
 |---|---|---|
@@ -36,6 +39,20 @@ Implements [`../tdd.md`](../tdd.md) §5 and [`../prd.md`](../prd.md) §9.
 | 17 | `20260816170000_split_read_from_write_on_owner_tables.sql` | **Phase 2** (B5, B6, B7). Seven `FOR ALL` policies split. Subscription activation is no longer self-grantable, revocation becomes a **one-way door** (`WITH CHECK (revoked = true)`), and the five progress tables are read-only |
 | 18 | `20260816180000_scope_guardian_functions_to_caller.sql` | **Phase 2** (C2). Both guardian functions check their caller. ⚠️ They have **different** callers — the parent confirms, the **student** invites |
 | 19 | `20260816190000_revoke_public_execute_on_helpers.sql` | **Phase 2** (C5). Seven helper functions stop being executable by `PUBLIC` (the register said five). `app_backend` is granted explicitly: `is_admin()` is in 35 policies and `current_user_id()` in 41, and without EXECUTE they **error rather than deny** |
+| 20 | `20260816200000_language_pref_on_app_user.sql` | **Phase 3** (FR-A8). `language_pref` moves to `app_user`, so every role — not only students — can receive Urdu email; backfill gated on the column not already existing |
+| 21 | `20260816210000_change_password_function.sql` | **Phase 3** (FR-A8). `app.change_password` — takes no user identifier; the subject is `app.current_user_id()` |
+| 22 | `20260817120000_session_policy_columns.sql` | **Phase 4**. `sessions_invalidated_at`, `family_started_at`, `revoked_at`, `revoked_reason`; `auth_token` UPDATE narrowed to `revoked` |
+| 23 | `20260817130000_session_policy_functions.sql` | **Phase 4** (E2, E3, D2). `app.invalidate_sessions`, `app.insert_refresh_token`, `app.rotate_refresh_token` — rotation is one locked statement |
+| 24 | `20260817140000_purge_expired_auth_tokens.sql` | **Phase 4**. `app.purge_expired_auth_tokens` with a 30-day grace; scheduled only if `pg_cron` is installed |
+| 25 | `20260817150000_missing_updated_at_triggers.sql` | **Phase 5** (D14). The four missing `updated_at` triggers |
+| 26 | `20261004120000_classroom_membership_boundary.sql` | **Classroom Phase 1** (B9, B10, B11). All direct writes to `enrollment` and `join_code`, and INSERT/DELETE on `classroom_space`, revoked; `owns_space` gains the subject-scope check; revocable self-declared `teacher_subject_scope`; join-code format and one-live-code index; set-returning RLS helpers. **Reverses the `join_code_owner` decision** (`database.md`). *Applied 2026-10-04* |
+| 27 | `20261004120100_classroom_space_functions.sql` | **Classroom Phase 1**. The eight functions that are now the only classroom writers: create, rotate/disable code, join (board/class/group match, guardian gate, 300-member cap, removed ≠ rejoinable), leave, remove, people, my spaces. *Applied 2026-10-04* |
+| 28 | `20261004130000_announcement_ownership_and_scheduling.sql` | **Classroom Phase 3** (B27). Announcement insert/update/delete require `author_id` = caller **and** an active owned classroom; `UPDATE` narrowed to `(body, publish_at)`; `publish_at` schedules a post, hidden from members by the read policy until then (no job); `updated_at` trigger, body check, feed and author indexes. *Applied 2026-10-04* |
+| 29 | `20261004140000_assignments_and_grading.sql` | **Classroom Phase 4**. `assignment` (owner content, scheduled by `publish_at`, chapter tag held to the subject by a composite foreign key), `assignment_submission` and `submission_grade` — the grade is its own table because all users share one database role. No write grant on either: five functions (draft, turn in, unsubmit, grade, delete) are the only writers, under one advisory lock per (assignment, student). Teachers see turned-in work of active members only; students see a grade once returned; any grade locks the work. *Applied 2026-10-04* |
+| 30 | `20261004150000_classroom_files.sql` | **Classroom Phase 6**. `material_attachment` (a teacher's file on one announcement or assignment) and `submission_file` (a student's file on their submission) — metadata only; the bytes live in the private `classroom-files` bucket, which this file also creates (skipped on a plain PostgreSQL shadow; a **WARNING**, not an error, if the role lacks the privilege — then create it by hand: private, 9 MB, PDF/PNG/JPEG/DOCX/PPTX). CHECK constraints hold every object key to its owner's prefix. Five policies: a member sees an attachment once its post is live; a teacher sees a student's file once turned in and while the student is a member. Three writing functions with quotas (5 files and 20 MiB per submission, 10 per post, 2 GiB per classroom) under one advisory lock per classroom; `app.delete_assignment` now returns every stored key. *Applied 2026-10-05; the migration created the bucket* |
+| 31 | `20261005120000_submission_links.sql` | **Classroom Phase 6b**. `submission_link`: up to five https links on a student's work, each its own row, readable exactly like a submission file (the student always; the teacher once turned in and while the student is a member). Written only by `app.add_submission_link` (the file's gate and lock; a repeated link is the same row) and `app.remove_submission_link`. The old single `assignment_submission.link_url` is copied in and cleared; the column stays, unread. *Applied 2026-10-05; the live database held no old link to move* |
+| 32 | `20261005130000_classroom_chat.sql` | **Classroom Phase 7**. The class chat: `space_message` (class-public, never the tutor `message` table) and `classroom_space.chat_locked`. A member posts with a column-limited `INSERT (space_id, author_id, body)` held by `space_message_insert` to the caller and to `app.can_post_message` — an active, unmuted member of an unlocked, active classroom who passes the guardian gate, or its teacher (who may post while locked). Members read what is not deleted; the teacher (and an administrator) also reads what was. `app.delete_space_message` (soft, retained), `app.set_student_muted` (writes `enrollment.muted_at`) and `app.space_message_tombstones` (deleted ids for the poll). `author_id` is `ON DELETE RESTRICT`: deleting an account keeps its messages. *Applied 2026-10-05; re-verified on the live database* |
+| 33 | `20261005140000_guardian_classroom_overview.sql` | **Classroom Phase 8**. `app.guardian_classroom_overview()`, the parent's whole view of a child's classrooms (`GET /api/parent/classrooms`): no parameters, so it is anchored on the caller; verified links only; the child's current classrooms (archived ones labelled), teachers, published assignments due in the last 120 days or undated, and a grade once returned — never feedback, work, files, links, the chat or classmates. A function, not parent read policies, because a policy releases whole rows. No table, policy or grant changes. *Applied 2026-10-05; re-verified on the live database* |
 
 Migrations run in **filename order**. That ordering is a dependency declaration, not decoration:
 migration 5 forces Row-Level Security on tables migration 4 creates.
@@ -150,8 +167,9 @@ Verbatim at `backend/app/core/db.py:33-59`. Two things there are load-bearing:
 If the variable is never set, `app.current_user_id()` returns `NULL` and owner-scoped policies deny
 — fail-closed by design. Endpoints that run *before* a session exists (login, refresh, email
 verification, password reset, two-factor, the guardian flow) therefore cannot use a plain query;
-they call one of the narrow `SECURITY DEFINER` functions instead. All 33 are catalogued, with their
-call sites, in
+they call one of the narrow `SECURITY DEFINER` functions instead. All 72 `app.*` functions
+(measured 2026-10-05 on a shadow database built from all 33 files, and on the live database) are catalogued, with their call
+sites, in
 [`../backend/Architecture/database.md`](../backend/Architecture/database.md#the-app-privileged-functions).
 
 Background jobs that legitimately need unrestricted access (the analytics extract-transform-load

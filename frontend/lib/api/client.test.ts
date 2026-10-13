@@ -140,3 +140,74 @@ describe('refresh on expiry', () => {
 //    That is the more dangerous kind, because a green suite is exactly what
 //    stops anyone from checking. `SessionGuard` re-evaluates `onboarding_state`
 //    on every mount and is what actually moves a gated or lapsed user.
+
+describe('files (classroom Phase 6)', () => {
+  type Sent = { path: string; init: RequestInit }
+
+  function capture(respondWith: (path: string, n: number) => Response) {
+    const sent: Sent[] = []
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      const path = url.replace(/^.*?(?=\/)/, '')
+      sent.push({ path, init })
+      return respondWith(path, sent.length)
+    })
+    return sent
+  }
+
+  function blobResponse(status: number, blob: Blob, errorBody: unknown = null): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      blob: async () => blob,
+      json: async () => errorBody,
+    } as Response
+  }
+
+  it('sends a raw body as it is, with the caller-supplied type and no JSON type', async () => {
+    rememberSession('token', 900)
+    const file = new Blob(['%PDF-1.7'], { type: 'application/pdf' })
+    const sent = capture(() => respond(201, { id: 'f-1' }))
+    await apiFetch('/assignments/a/submission/files', {
+      method: 'POST',
+      rawBody: file,
+      headers: { 'Content-Type': 'application/pdf', 'X-Upload-Filename': 'lab.pdf' },
+    })
+    const headers = sent[0]!.init.headers as Record<string, string>
+    expect(sent[0]!.init.body).toBe(file)
+    expect(headers['Content-Type']).toBe('application/pdf')
+    expect(headers.Authorization).toBe('Bearer token')
+  })
+
+  it('returns a successful download as a Blob', async () => {
+    const file = new Blob(['bytes'])
+    capture(() => blobResponse(200, file))
+    await expect(apiFetch('/attachments/x/content', { responseType: 'blob' })).resolves.toBe(
+      file,
+    )
+  })
+
+  it('still turns a refused download into an ApiError', async () => {
+    capture(() => blobResponse(403, new Blob(), envelope('FORBIDDEN_SCOPE')))
+    const caught = await apiFetch('/attachments/x/content', { responseType: 'blob' }).catch(
+      (e: unknown) => e,
+    )
+    expect(caught).toBeInstanceOf(ApiError)
+    expect((caught as ApiError).code).toBe('FORBIDDEN_SCOPE')
+  })
+
+  it('re-sends the same file after refreshing an expired session', async () => {
+    rememberSession('stale', 900)
+    const file = new Blob(['%PDF-1.7'])
+    const sent = capture((path, n) =>
+      path === '/auth/refresh'
+        ? respond(200, { access_token: 'fresh', expires_in: 900 })
+        : n === 1
+          ? respond(401, envelope('UNAUTHENTICATED'))
+          : respond(201, { id: 'f-1' }),
+    )
+    await apiFetch('/assignments/a/submission/files', { method: 'POST', rawBody: file })
+    const uploads = sent.filter((s) => s.path !== '/auth/refresh')
+    expect(uploads).toHaveLength(2)
+    expect(uploads[1]!.init.body).toBe(file)
+  })
+})

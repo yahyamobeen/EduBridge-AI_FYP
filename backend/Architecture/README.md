@@ -20,8 +20,8 @@ is specified but missing, and the defects found in review — all three, kept di
 | Document | What it covers |
 |---|---|
 | **[`architecture.md`](architecture.md)** · [HTML](architecture.html) | The layers and the request lifecycle; the two-layer authorization model **and its current failure**; the privileged-function escape hatch and the rule for extending it; the seven token kinds; the onboarding state machine and why it is not monotonic; the guardian gate; configuration and deployment. |
-| **[`database.md`](database.md)** · [HTML](database.html) | **The highest-value page here.** Every table by domain with `file:line`; the **complete Row-Level Security policy catalogue** — all 73 policies with verb, role, `USING` and `WITH CHECK` — which exists nowhere else and cannot be reconstructed quickly from eleven migrations; the 33 `app.*` privileged functions with signature, volatility, return, grant and calling endpoint; the invariants with the reason for each; findings B1–B19; and the migration rules. |
-| **[`api-endpoints.md`](api-endpoints.md)** | Every implemented route with `file:line`, request and response shape and error codes — **and the 31 specified-but-missing ones**, which makes it the honest build-state record as well as the interface reference. |
+| **[`database.md`](database.md)** · [HTML](database.html) | **The highest-value page here.** Every table by domain with `file:line`; the **complete Row-Level Security policy catalogue** — all 98 policies with verb, role, `USING` and `WITH CHECK` — which exists nowhere else and cannot be reconstructed quickly from 33 migrations; the 72 `app.*` privileged functions with signature, volatility, return, grant and calling endpoint; the invariants with the reason for each; findings B1–B27; and the migration rules. |
+| **[`api-endpoints.md`](api-endpoints.md)** | Every implemented route with `file:line`, request and response shape and error codes — **and the 23 specified-but-missing ones**, which makes it the honest build-state record as well as the interface reference. |
 
 The `.md` and `.html` files are **parallel documents, not generated from each other**. The Markdown
 reads anywhere — a terminal, a diff, a code review. The HTML carries the clustered
@@ -41,16 +41,19 @@ documents that are wrong.
 
 | Measure | Value | Command |
 |---|---|---|
-| HTTP endpoints implemented | **17 of 48 specified** | `grep -cE '^@router\.' backend/app/auth/routes.py` (plus `/health` in `backend/app/main.py`) |
-| Applied database migrations | **11** | `ls supabase/migrations/*.sql \| wc -l` |
-| Live Row-Level Security policies | **73** | see [the reconciliation in `database.md`](database.md#why-73-73-and-72-are-all-correct) |
-| Live `app.*` privileged functions | **33** | 34 defined, one dropped — `grep -nE 'DROP FUNCTION' supabase/migrations/*.sql` |
-| …of which `SECURITY DEFINER` | **35 of 37 definitions** | `grep -hE '^[^-]*SECURITY DEFINER' supabase/migrations/*.sql \| wc -l` |
-| Base tables | **46** (+2 default partitions, +1 view) | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` minus the 2 `PARTITION OF` rows |
+| HTTP endpoints implemented | **64 of 87 specified** | `grep -cE '^@router\.' backend/app/auth/routes.py backend/app/classroom/routes.py` (plus `/health` in `backend/app/main.py`) |
+| Applied database migrations | **33** | `ls supabase/migrations/*.sql \| wc -l` |
+| Row-Level Security policies | **98** | `pg_policies` on a shadow database built from all 33 files, and on the live database — see [`database.md`, At a glance](database.md#at-a-glance--every-count-with-the-command-that-produced-it) |
+| Live `app.*` privileged functions | **72** | 73 names defined, one dropped — `pg_proc` on the same shadow database, and on the live database |
+| …of which `SECURITY DEFINER` | **70 of 72** | `pg_proc.prosecdef` on the shadow; the two exceptions are `app.current_user_id()` and the trigger function `app.set_updated_at()` |
+| Base tables | **53** (+2 default partitions, +1 view) | `grep -hE '^CREATE TABLE' supabase/migrations/*.sql \| wc -l` minus the 2 `PARTITION OF` rows |
 | Enumerated types | **22** | `grep -hE '^CREATE TYPE' supabase/migrations/*.sql \| wc -l` |
-| Backend test files | **25** (pytest — `tests/unit`, `tests/integration`) | `find backend/tests -name 'test_*.py' \| wc -l` |
-| Frontend test files | **22** (Vitest) | `find frontend -path frontend/node_modules -prune -o -name '*.test.ts' -print -o -name '*.test.tsx' -print \| wc -l` |
+| Backend test files | **53** (pytest — 22 `tests/unit`, 31 `tests/integration`) | `find backend/tests -name 'test_*.py' \| wc -l` |
+| Frontend test files | **45** (Vitest) | `find frontend -path frontend/node_modules -prune -o -name '*.test.ts' -print -o -name '*.test.tsx' -print \| wc -l` |
 | Findings from the Epic 1 review | **35**, all recorded, none hidden | 10 live through the API, 19 database defence-in-depth, 5 latent, 17 correctness, 6 gaps |
+
+*Every row but the last re-measured 2026-10-05 on branch `add-classroom` (classroom Phase 8); the
+findings row is the August review's own count.*
 
 **Scaffolded, not empty.** `ml/`, `mcp-servers/`, `infra/` and `backend/app/workers/` contain
 **`.gitkeep` files only** (`mcp-servers/` and `infra/` additionally carry a `.env.example`). No code
@@ -60,12 +63,20 @@ lives in them yet — `find ml mcp-servers infra backend/app/workers -type f`.
 
 | Path | What it is |
 |---|---|
-| `backend/` | FastAPI application — `app/auth/` (routes, service, tokens, gate, onboarding), `app/core/` (config, database, errors, rate limiting), `app/models/` |
+| `backend/` | FastAPI application — `app/auth/` (routes, service, tokens, gate, onboarding), `app/classroom/` (the classroom router, service, stream, assignments, calendar, file storage and links), `app/core/` (config, database, errors, rate limiting), `app/models/` |
 | `frontend/` | Next.js App Router application |
-| `supabase/migrations/` | The 11 versioned SQL migrations — the schema's source of truth |
-| `tools/` | Build scripts for the User Stories deliverable |
+| `supabase/migrations/` | The 31 versioned SQL migrations (`ls supabase/migrations/*.sql \| wc -l`) — the schema's source of truth |
 | `docs/` | Five point-in-time plan files; **not** a description of the system as it stands — that is what these pages are for |
 | `prd.md`, `tdd.md` | The contract. Work requiring something not in them updates both in the same change |
+
+**Dependencies.** `backend/pyproject.toml` is the list, locked in `uv.lock`; `requirements.txt`
+(`uv export --format requirements-txt --no-hashes --no-emit-project --extra email`, what Render
+installs) and `requirements-dev.txt` (a hand-written header over the same export with `--extra dev`)
+are regenerated together whenever the lock changes. The newest runtime dependency is **`boto3`**
+(classroom Phase 6): classroom files are stored in a private Supabase Storage bucket over the S3
+protocol, and it is imported only when `STORAGE_PROVIDER=s3`. ⚠️ Locally, `uv sync --extra dev`
+alone removes the `email` extra from the environment; sync with `--extra dev --extra email` when
+the backend sends real mail.
 
 ---
 
@@ -95,10 +106,13 @@ The full catalogue is [`database.md` § Known gaps](database.md#known-gaps). Fix
 If a reader cannot answer these from the documents alone, the documents have failed.
 
 **1. Which endpoints exist?**
-Seventeen, all in `backend/app/auth/routes.py`, plus `/health`. Registration, login, refresh,
-logout, `/auth/me`, `/reference/enums`, four two-factor routes, two email routes, two password
-routes, and three guardian routes. The full list with `file:line`, and the 31 that are specified but
-not built, is in [`api-endpoints.md`](api-endpoints.md).
+Sixty-four, plus `/health`. Twenty-one in `backend/app/auth/routes.py` — registration, login,
+refresh, logout, account management, reference data, two-factor, email, password and guardian
+routes — and forty-three in `backend/app/classroom/routes.py`: classrooms, join codes, membership,
+people, the announcement stream, assignments with submissions and grading, the calendar, file
+uploads, downloads and viewing, links on a student's work, the class chat with its moderation, and the parent's read-only overview. The full list with `file:line`, and the 23 that are specified but not built,
+is in
+[`api-endpoints.md`](api-endpoints.md).
 
 **2. What happens on a wrong two-factor code?**
 `_record_2fa_failure` (`backend/app/auth/service.py:657`) calls

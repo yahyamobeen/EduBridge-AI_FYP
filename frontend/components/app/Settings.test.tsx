@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AppFrame } from '@/components/app/AppFrame'
 import { Settings } from '@/components/app/Settings'
 import en from '@/messages/en.json'
 import type { MeResponse } from '@/lib/api/types'
@@ -63,7 +64,10 @@ function baseMe(overrides: Partial<MeResponse> = {}): MeResponse {
 function renderSettings() {
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
-      <Settings />
+      {/* The (app) layout's frame: the identity check and the sidebar (Phase 6c). */}
+      <AppFrame>
+        <Settings />
+      </AppFrame>
     </NextIntlClientProvider>,
   )
 }

@@ -28,17 +28,18 @@ const SLUGS = [
   // rather than nowhere.
   'practice',
   'quizzes',
-  'my-classes',
+  // `my-classes` was here until classroom Phase 2 built `/classroom`; removed
+  // for the same reason `settings` was, below.
   'planner',
   // `settings` was here until Phase 7 built the real screen at `/settings`.
   // Removed rather than left behind: a prerendered placeholder nothing links to
   // is a page users can still reach by typing the URL, and it would say the
   // feature is coming while it is live one path away.
-  'spaces',
+  // `spaces`, `roster` and `announcements` were here until classroom Phase 2:
+  // `spaces` became `/teacher/classroom`, and the other two now live inside a
+  // classroom rather than as top-level destinations.
   'reports',
-  'roster',
   'slo',
-  'announcements',
   'my-child',
   'how-to-help',
   // The administrator surface (prd.md FR-K1). `curriculum` and `security` are

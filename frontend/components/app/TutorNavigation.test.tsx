@@ -3,7 +3,8 @@ import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
 import type { MeResponse } from '@/lib/api/types'
-import { StudentDashboardContent } from './Dashboards'
+import { StudentDashboard } from './Dashboards'
+import { DashboardShell } from './DashboardShell'
 
 vi.mock('@/i18n/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
@@ -17,8 +18,29 @@ vi.mock('@/i18n/navigation', () => ({
 
 vi.mock('@/lib/api/endpoints', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
-  chatClass9Physics: vi.fn(),
+  askTutor: vi.fn(),
   getPhysicsTutorInfo: vi.fn(),
+  listTutorSessions: vi.fn(),
+  getTutorSession: vi.fn(),
+}))
+
+// `RequireRole` resolves `me` itself since classroom Phase 6c, so the dashboard no
+// longer takes it as a prop. Stubbed to hand the render prop a fixed student: this
+// file tests the tutor entry point, and RequireRole's own behaviour is covered by
+// SessionGuard.test.tsx.
+// `RequireRole` resolves `me` itself since classroom Phase 6c, so the page no longer
+// takes it as a prop. Stubbed to hand the render prop the student under test; its own
+// behaviour is covered by SessionGuard.test.tsx, and what this file tests is the tutor
+// entry point.
+let currentStudent: MeResponse
+
+vi.mock('./SessionGuard', () => ({
+  RequireRole: ({ children }: { children: (me: MeResponse) => React.ReactNode }) =>
+    children(currentStudent),
+}))
+
+vi.mock('@/components/app/ClassroomsCard', () => ({
+  ClassroomsCard: () => null,
 }))
 
 const baseStudent: MeResponse = {
@@ -51,10 +73,16 @@ describe('AI Tutor Grade Guardrail and Navigation', () => {
       profile: { ...baseStudent.profile!, class_level: 9 },
     }
 
+    beforeEach(() => {
+      currentStudent = class9Student
+    })
+
     it('sidebar AI Tutor button opens the Subject Selection Modal', () => {
       render(
         <NextIntlClientProvider locale="en" messages={en}>
-          <StudentDashboardContent me={class9Student} />
+          <DashboardShell me={class9Student} subtitle="">
+            <StudentDashboard />
+          </DashboardShell>
         </NextIntlClientProvider>,
       )
 
@@ -78,7 +106,9 @@ describe('AI Tutor Grade Guardrail and Navigation', () => {
     it('dashboard AI Tutor card opens the Subject Selection Modal on click', () => {
       render(
         <NextIntlClientProvider locale="en" messages={en}>
-          <StudentDashboardContent me={class9Student} />
+          <DashboardShell me={class9Student} subtitle="">
+            <StudentDashboard />
+          </DashboardShell>
         </NextIntlClientProvider>,
       )
 
@@ -105,10 +135,16 @@ describe('AI Tutor Grade Guardrail and Navigation', () => {
       profile: { ...baseStudent.profile!, class_level: 10 },
     }
 
+    beforeEach(() => {
+      currentStudent = class10Student
+    })
+
     it('sidebar AI Tutor links to /coming-soon/tutor instead of opening modal', () => {
       render(
         <NextIntlClientProvider locale="en" messages={en}>
-          <StudentDashboardContent me={class10Student} />
+          <DashboardShell me={class10Student} subtitle="">
+            <StudentDashboard />
+          </DashboardShell>
         </NextIntlClientProvider>,
       )
 
@@ -124,7 +160,9 @@ describe('AI Tutor Grade Guardrail and Navigation', () => {
     it('dashboard AI Tutor card links to /coming-soon/tutor instead of opening modal', () => {
       render(
         <NextIntlClientProvider locale="en" messages={en}>
-          <StudentDashboardContent me={class10Student} />
+          <DashboardShell me={class10Student} subtitle="">
+            <StudentDashboard />
+          </DashboardShell>
         </NextIntlClientProvider>,
       )
 
