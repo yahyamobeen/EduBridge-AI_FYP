@@ -34,6 +34,7 @@ from app.retrieval.physics9.service import (
     answer_physics_query,
     get_physics_generator,
     get_physics_retriever,
+    pages_directory,
 )
 from app.tutor import service as tutor_service
 from app.tutor.figures import crop_page, parse_box
@@ -369,11 +370,11 @@ def get_tutor_figure(
     # A row written by an older revision, or by anything other than this code path, is
     # still untrusted input by the time it reaches `Image.crop`.
     box = parse_box(stored, book_pages=BOOK_PAGES)
-    retriever = get_physics_retriever()
-    if box is None or not retriever.pages_dir:
+    pages_dir = pages_directory()
+    if box is None or pages_dir is None:
         raise forbidden_scope("That figure is not available.")
 
-    image = crop_page(retriever.pages_dir, box)
+    image = crop_page(pages_dir, box)
     if image is None:
         raise forbidden_scope("That figure is not available.")
 
@@ -394,11 +395,11 @@ def get_physics_page_image(page_num: int):
             status_code=404, detail=f"Page {page_num} out of book range (1-{BOOK_PAGES})"
         )
 
-    retriever = get_physics_retriever()
-    if not retriever.pages_dir or not retriever.pages_dir.exists():
+    pages_dir = pages_directory()
+    if pages_dir is None or not pages_dir.exists():
         raise HTTPException(status_code=404, detail="Textbook page scans directory not configured")
 
-    img_path = retriever.pages_dir / f"p{page_num:03}.jpeg"
+    img_path = pages_dir / f"p{page_num:03}.jpeg"
     if not img_path.exists():
         raise HTTPException(status_code=404, detail=f"Page scan p{page_num:03}.jpeg not found")
 

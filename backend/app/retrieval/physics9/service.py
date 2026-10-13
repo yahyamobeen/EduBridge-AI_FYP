@@ -9,6 +9,7 @@ neural retrieval. Every answer therefore carries the name of the tier that produ
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
@@ -86,17 +87,23 @@ def get_physics_generator() -> PhysicsGenerator:
         _generator = PhysicsGenerator(
             api_key=settings.gemini_api_key,
             model_name=settings.gemini_model,
-            pages_dir=_pages_dir(),
+            fallback_models=settings.gemini_fallback_models,
+            pages_dir=pages_directory(),
         )
     return _generator
 
 
-def _pages_dir():
+def pages_directory() -> Path | None:
     """Where the page scans live.
 
     Asked of the retriever when it knows (the local tier resolves it while loading), and
     resolved independently otherwise - the remote and heuristic tiers have no reason to
     know about image files, but generation still needs them.
+
+    ⚠️ PUBLIC BECAUSE THE ROUTES NEED IT TOO. `app/tutor/routes.py` serves page scans and
+    figure crops, and reading `retriever.pages_dir` there answered 500 on every citation
+    preview in production: only `LocalRetriever` carries that attribute, and the deployed
+    tier is `heuristic`. Call this instead - it is the only path that holds for all three.
     """
     from app.retrieval.physics9.local import _resolve_pages_dir
 
@@ -182,6 +189,7 @@ __all__ = [
     "answer_physics_query",
     "get_physics_generator",
     "get_physics_retriever",
+    "pages_directory",
     "reset_for_tests",
     "search",
 ]
