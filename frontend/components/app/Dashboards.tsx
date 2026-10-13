@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { ClassroomsCard } from '@/components/app/ClassroomsCard'
-import { PlaceholderCard } from '@/components/app/DashboardShell'
+import { PlaceholderCard, useTutor } from '@/components/app/DashboardShell'
 import { RequireRole } from '@/components/app/SessionGuard'
 import { firstName } from '@/lib/auth/displayName'
 
@@ -24,6 +24,7 @@ import { firstName } from '@/lib/auth/displayName'
 export function StudentDashboard() {
   const t = useTranslations('dashboard.student')
   const tc = useTranslations('dashboard.cards')
+  const { openTutor } = useTutor()
 
   return (
     <RequireRole allow={['student']}>
@@ -47,7 +48,8 @@ export function StudentDashboard() {
               span={4}
               title={tc('tutorTitle')}
               body={tc('tutorBody')}
-              href="/coming-soon/tutor"
+              href={me.profile?.class_level === 9 ? undefined : '/coming-soon/tutor'}
+              onClick={me.profile?.class_level === 9 ? openTutor : undefined}
             />
             <PlaceholderCard span={4} title={tc('quizzesTitle')} body={tc('quizzesBody')} />
             {/*

@@ -59,3 +59,23 @@ _TEST_ENV = {
 
 for key, value in _TEST_ENV.items():
     os.environ.setdefault(key, value)
+
+# ⚠️ FORCED, NOT `setdefault` — AND THAT DIFFERENCE IS THE WHOLE POINT.
+#
+# `setdefault` cannot stop a value that is ALREADY in the environment, and these two
+# reach a paid third-party API and a live retrieval host respectively. A developer who
+# has run `setx GEMINI_API_KEY ...` (which this project's own runbook tells them to do)
+# was therefore running the unit suite against real Gemini: every test that exercises
+# the chat route generated a real answer, billed to a real key.
+#
+# It was not obvious, because it did not fail — it just got slower. The suite went from
+# ~37s to over five minutes once the key was present and Gemini started rate-limiting,
+# and the non-streaming path's failover chain slept through four model names per call.
+# A unit test that silently costs money and silently takes minutes is worse than one
+# that fails.
+#
+# `tests/unit` must run "on a fork, in a fresh clone, and in CI without secrets" — this
+# file's own words. Reaching the network at all breaks that promise, so the override is
+# unconditional. A test that wants to exercise the Gemini path stubs the generator.
+os.environ["GEMINI_API_KEY"] = ""
+os.environ["RETRIEVAL_ENDPOINT"] = ""

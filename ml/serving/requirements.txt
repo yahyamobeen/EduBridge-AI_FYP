@@ -1,0 +1,17 @@
+# Retrieval service dependencies (tdd.md §3.2a).
+#
+# ⚠️ torch is NOT listed here. It is installed in its own Dockerfile layer from the
+# CPU-only index, because a plain `pip install torch` pulls ~2.5 GB of nvidia-* CUDA
+# wheels that this service never uses and that will exhaust the disk on a small
+# instance. Keeping it out of this file makes that impossible to do by accident.
+#
+# ⚠️ These are floors, not pins. Freeze them after the FIRST successful build on the
+# deployment target and commit the result, so the image is reproducible:
+#     pip freeze > requirements.lock.txt
+# Floors are used here rather than invented exact versions: a pin that does not resolve
+# fails the build, and nobody has built this image yet.
+
+colpali-engine>=0.3.18
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0

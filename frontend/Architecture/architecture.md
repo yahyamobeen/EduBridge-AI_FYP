@@ -451,6 +451,58 @@ become a silent 404).
 
 `lib/api/client.ts` is the single entry point for every call. `lib/api/endpoints.ts` wraps it in typed functions so no screen hand-writes a path or a shape. `lib/api/types.ts` is transcribed from the contract, so a response shape that drifts from it is a type error rather than an integration surprise.
 
+### `apiStream` — Server-Sent Events, for the tutor
+
+`POST /api/tutor/ask` streams, so it has a second transport beside `apiFetch`:
+`apiStream` yields `{ event, data }` frames. Same proactive refresh, same
+one-retry-on-a-refreshable-401 contract — a failure **before** the stream starts is an
+ordinary error response carrying the §7.3 envelope and is thrown as an `ApiError` like
+any other call.
+
+⚠️ **`EventSource` cannot be used here, and that is not a style preference.** It sends no
+`Authorization` header and offers no way to add one, so the only way to authenticate it is
+a token in the query string — which lands in server logs, proxy logs and browser history.
+The access token deliberately lives in a module variable and nowhere persistent; putting
+it in a URL would undo that for one screen. `EventSource` also only does GET, and it
+**auto-reconnects** — which for a tutor answer would silently re-ask the question and
+re-bill the generation.
+
+⚠️ **`readFrames` buffers across chunk boundaries, and that is the load-bearing part.** A
+chunk boundary falls wherever the network puts it, not on a frame boundary, so one
+`data: {...}` can arrive split across two reads. A parser that handles each chunk
+independently works perfectly against a fast local server and drops tokens in production.
+Frames are emitted only once a blank line has actually been seen. `\r\n` is normalised
+because the SSE specification permits it even though this backend emits `\n`, and a proxy
+in between is entitled to rewrite line endings.
+
+A malformed frame, or a `:` comment (which is what a keep-alive is), yields nothing rather
+than ending the stream — one bad frame must not truncate an answer that is otherwise
+arriving fine.
+
+### The tutor chat view
+
+`components/tutor/PhysicsChatView.tsx` consumes that stream. Three things about it are
+deliberate:
+
+1. **The assistant bubble appears on the `pages` frame, before any text.** Retrieval takes
+   milliseconds and generation takes seconds, so the citations render while the prose is
+   still being written. That ordering is the whole user-visible benefit of streaming here.
+2. **No `history` is sent.** The server reads the transcript it stored. Sending a
+   client-supplied one would let this component put words in the assistant's mouth and
+   have the model treat them as its own prior answer.
+3. ⚠️ **`isDegraded` reads `retriever` and `intent` TOGETHER, never `retriever` alone.**
+   `heuristic` + `reference` is a correct exercise lookup and must not be flagged;
+   `heuristic` + `retrieve` means the retrieval service was unreachable and the student is
+   reading a keyword match, which must be. Warning on both would train students to
+   distrust correct answers.
+
+The session id lives in a **ref**, not state: it is read inside the streaming loop and
+never rendered, and as state the loop would close over a stale value on the turn that
+creates it. "Past conversations" lists `GET /tutor/sessions` and loads one through
+`GET /tutor/sessions/{id}`. ⚠️ A 403 there means *not available*, not *signed out* — a
+session that is not yours and one that does not exist answer identically, so an id cannot
+be probed for existence.
+
 ### Live data always — the mock layer was deleted
 
 `lib/api/client.ts` used to select a hand-rolled in-memory backend from `NEXT_PUBLIC_API_MODE`.
@@ -691,7 +743,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **785 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-05) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785).
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **820 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-13, after the classroom/tutor merge — both sides of that merge carried stale counts: 785 and 506) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785); the tutor added `degradedNotice` and the four `history*`/`newChat` keys.
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 
@@ -832,7 +884,11 @@ Locally the rewrite exists in a dev build too, and is harmless either way: with 
 
 ## Testing
 
-41 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check.
+48 test files, run with `npm test` (Vitest). `npm run build` includes the TypeScript check —
+⚠️ but **do not run a build while a dev server is up**: it replaces `.next` under the running
+server and every page 404s until the dev server is restarted. `npx tsc --noEmit` gives the same
+type check safely. ⚠️ A stale `.next` also reports errors for pages that do not exist on the
+current branch, so filter `^\.next/` out of `tsc` output before believing it.
 
 The classroom tests that wait on `SessionGuard` (`ClassroomView.test.tsx`, `Classrooms.test.tsx`)
 give their **first** wait an explicit 5 s timeout (`LOADED`): Testing Library's 1 s default measured

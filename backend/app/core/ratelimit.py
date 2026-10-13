@@ -117,6 +117,30 @@ FILE_DOWNLOAD_LIMIT = Limit(max_requests=60, window_seconds=60)
 CHAT_POLL_LIMIT = Limit(max_requests=60, window_seconds=60)
 CHAT_POST_LIMIT = Limit(max_requests=10, window_seconds=60)
 
+# THE TUTOR. Unlike every bucket above, this one is not primarily an abuse control —
+# it is a CORRECTNESS control, and that is why it exists at this number.
+#
+# One ColQwen2 instance answers one query at a time (tdd.md §3.2a, "Single instance"):
+# the forward pass is lock-serialised, so requests queue. Without a ceiling, one student
+# holding a key down is not merely wasteful, it is a denial of service against every
+# other student in the class — and the retrieval service's own bounded wait would start
+# returning 503s that look like an outage.
+#
+# Each request also ships three page scans to a metered third-party API, so the same
+# ceiling bounds the bill.
+#
+# 20/min is far above what a person can type and think about, and far below what a loop
+# can do. Shared by BOTH `/tutor/ask` and the superseded `/tutor/class9/physics/chat`,
+# deliberately: separate buckets would let a client double its budget by alternating the
+# two routes, which is exactly the mistake the admin-login bucket comment above warns
+# about in the other direction.
+TUTOR_ASK_LIMIT = Limit(max_requests=20, window_seconds=60)
+
+# Reading back one's own transcripts costs a query and reveals nothing the caller does
+# not already have, so this is a runaway-client ceiling rather than an attack bound —
+# the same reasoning as ME_UPDATE_LIMIT above.
+TUTOR_SESSIONS_LIMIT = Limit(max_requests=60, window_seconds=60)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 

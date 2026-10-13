@@ -255,3 +255,29 @@ export function TeachIcon({ className }: IconProps) {
     </Svg>
   )
 }
+
+export function CloseIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m5 5 10 10M15 5 5 15" />
+    </Svg>
+  )
+}
+
+export function SendIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="m3.5 10 13-6.5-6.5 13-1.5-5z" />
+    </Svg>
+  )
+}
+
+export function AtomIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <circle cx="10" cy="10" r="2" />
+      <ellipse cx="10" cy="10" rx="7.5" ry="3.2" transform="rotate(30 10 10)" />
+      <ellipse cx="10" cy="10" rx="7.5" ry="3.2" transform="rotate(-30 10 10)" />
+    </Svg>
+  )
+}

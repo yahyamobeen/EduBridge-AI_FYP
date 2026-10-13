@@ -250,6 +250,145 @@ async function rawRequest<T>(path: string, init: ApiRequestInit): Promise<T> {
   return payload as T
 }
 
+// ---------------------------------------------------------------------------
+// Server-Sent Events
+// ---------------------------------------------------------------------------
+
+export type SseEvent = { event: string; data: unknown }
+
+/**
+ * ⚠️ `EventSource` CANNOT BE USED HERE, AND THAT IS NOT A STYLE CHOICE.
+ *
+ * It sends no `Authorization` header and offers no way to add one, so the only
+ * way to authenticate it is a token in the query string — which lands in
+ * server logs, proxy logs and browser history. The access token deliberately
+ * lives in a module variable and nowhere persistent (frontend/CLAUDE.md §3);
+ * putting it in a URL would undo that for one screen.
+ *
+ * `EventSource` also only does GET, and it auto-reconnects — which for a tutor
+ * answer would silently re-ask the question and re-bill the generation.
+ *
+ * So: `fetch` with a streamed body, parsed by hand below.
+ */
+async function rawStream(path: string, init: ApiRequestInit): Promise<Response> {
+  const token = init.bearer ?? getAccessToken()
+  return fetch(resolve(path), {
+    method: init.method ?? 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...init.headers,
+    },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    ...(init.signal ? { signal: init.signal } : {}),
+  })
+}
+
+/**
+ * One SSE frame into an event.
+ *
+ * Returns null for a frame with no `data:` line — a `:` comment, which is what
+ * a keep-alive is — and for data that will not parse, because one malformed
+ * frame must not end an answer that is otherwise arriving fine.
+ */
+function parseFrame(raw: string): SseEvent | null {
+  let event = 'message'
+  const data: string[] = []
+  for (const line of raw.split('\n')) {
+    if (line.startsWith(':')) continue
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
+  }
+  if (data.length === 0) return null
+  try {
+    return { event, data: JSON.parse(data.join('\n')) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Frames out of a byte stream.
+ *
+ * ⚠️ THE BUFFER IS THE WHOLE POINT. A chunk boundary falls wherever the network
+ * puts it, not on a frame boundary, so a single `data: {...}` can arrive split
+ * across two reads — and a parser that handles each chunk independently works
+ * perfectly in testing against a fast local server and drops tokens in
+ * production. Frames are emitted only once a blank line has actually been seen.
+ *
+ * `\r\n` is normalised because the SSE specification allows it even though this
+ * backend emits `\n`; a proxy in between is entitled to rewrite line endings.
+ */
+async function* readFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseEvent> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary !== -1) {
+        const frame = parseFrame(buffer.slice(0, boundary))
+        buffer = buffer.slice(boundary + 2)
+        if (frame) yield frame
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+    // A final frame with no trailing blank line, which a stream cut short can
+    // leave behind. Emitted rather than discarded: it may be the `done`.
+    const tail = parseFrame(buffer)
+    if (tail) yield tail
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+/**
+ * A streaming call, with the same refresh-and-retry contract as `apiFetch`.
+ *
+ * A failure BEFORE the stream starts is an ordinary error response carrying the
+ * §7.3 envelope, so it is thrown as an `ApiError` exactly like any other call —
+ * which is why the backend checks everything it can up front. A failure after
+ * the first byte cannot change the status, and arrives as an event instead.
+ */
+export async function* apiStream(
+  path: string,
+  init: ApiRequestInit = {},
+): AsyncGenerator<SseEvent> {
+  if (init.bearer === undefined && getAccessToken() !== null) {
+    if (isExpired() || shouldRefreshAhead(lastLifetimeSeconds)) {
+      await refreshOnce()
+    }
+  }
+
+  let response = await rawStream(path, init)
+
+  if (!response.ok) {
+    // The error body is JSON, not a stream.
+    const payload = await response.json().catch(() => null)
+    const error = toApiError(response.status, payload)
+    if (init.bearer === undefined && !init.noRetry && isRefreshableAuthError(error)) {
+      if (await refreshOnce()) {
+        response = await rawStream(path, init)
+        if (!response.ok) {
+          throw toApiError(response.status, await response.json().catch(() => null))
+        }
+      } else {
+        throw error
+      }
+    } else {
+      throw error
+    }
+  }
+
+  if (!response.body) throw new Error('The tutor response carried no body.')
+  yield* readFrames(response.body)
+}
+
 /**
  * The single entry point for every call. Handles proactive refresh, one
  * retry after a genuine session expiry, and the onboarding redirects.

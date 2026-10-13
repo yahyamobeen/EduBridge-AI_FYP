@@ -200,6 +200,26 @@ class Settings(BaseSettings):
     # credential. Set the real origins explicitly.
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Class 9 Physics Visual Retrieval Tutor (PCTB) — tdd.md §3.2a
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-3.6-flash", validation_alias="GEMINI_MODEL")
+    physics_embeddings_path: str = Field(default="", validation_alias="PHYSICS_EMBEDDINGS_PATH")
+    physics_pages_dir: str = Field(default="", validation_alias="PHYSICS_PAGES_DIR")
+
+    # Which retrieval tier serves a question. `remote` keeps this process free of torch
+    # and of the model's ~5 GB — the reason it is the default on a 512 MB instance.
+    # `local` needs the `[retrieval]` extra. `heuristic` needs nothing and is also the
+    # fallback for the other two, so a cold or unreachable service degrades the answer
+    # rather than failing the request.
+    #
+    # A `Literal`, so a typo is refused at boot rather than silently selecting a tier
+    # nobody chose — the same reasoning as `email_provider` (finding A3).
+    retrieval_mode: Literal["remote", "local", "heuristic"] = Field(
+        default="remote", validation_alias="RETRIEVAL_MODE"
+    )
+    retrieval_endpoint: str = Field(default="", validation_alias="RETRIEVAL_ENDPOINT")
+    retrieval_shared_secret: str = Field(default="", validation_alias="RETRIEVAL_SHARED_SECRET")
+
     argon2_time_cost: int = 3
     argon2_memory_cost: int = 65536
     argon2_parallelism: int = 4

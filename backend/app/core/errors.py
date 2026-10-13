@@ -106,6 +106,30 @@ def token_expired(message: str = "This link has expired.") -> AppError:
     return AppError(code="TOKEN_EXPIRED", message=message, status_code=410)
 
 
+def not_grounded(
+    message: str = "No confident answer was found in your textbook for that.",
+) -> AppError:
+    # 422 NOT_GROUNDED (tdd.md §7.3) — catalogued since v0.1 and without a factory
+    # until now. The tutor says it has nothing rather than generating an answer the
+    # curriculum does not support (prd.md AI-M2, §20). A degrade, not a failure: the
+    # client should show the pages it did find, not an error screen.
+    return AppError(code="NOT_GROUNDED", message=message, status_code=422)
+
+
+def model_unavailable(
+    message: str = "The tutor is busy right now. Please try again in a moment.",
+) -> AppError:
+    # 503 MODEL_UNAVAILABLE (tdd.md §7.3) — the catalogued code for "the fallback path
+    # engaged". Covers a generator that is down, rate-limited upstream, or a retrieval
+    # service whose queue is full.
+    #
+    # ⚠️ This is NOT the code for a cold retrieval host. That degrades to the keyword
+    # tier and answers 200 with `retriever: "heuristic"`, because the student gets a
+    # usable answer and an error would be a lie. Only an exhausted fallback chain
+    # reaches here.
+    return AppError(code="MODEL_UNAVAILABLE", message=message, status_code=503)
+
+
 def error_envelope(
     *, code: str, message: str, details: dict[str, Any] | None = None
 ) -> dict[str, Any]:

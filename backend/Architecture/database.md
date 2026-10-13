@@ -3,11 +3,22 @@
 > The EduBridge AI schema as it is actually applied — tables, the complete Row-Level Security
 > (RLS) policy catalogue, the `app.*` privileged functions, the invariants, and the known gaps.
 >
-> **Snapshot: 2026-08-15 · commit `eea0e74` · 11 applied migrations.** Counts and the classroom
-> sections re-measured **2026-10-05 on branch `add-classroom`** (33 migration files, all applied with `supabase db push` and re-verified on the live database —
-> the four earlier `20261004…` files on 2026-10-04; `20261004150000` (classroom files),
-> `20261005120000` (submission links), `20261005130000` (class chat) and `20261005140000`
-> (parent overview) on 2026-10-05).
+> **Snapshot: 2026-10-13 · 34 migration files** (`ls supabase/migrations/*.sql | wc -l`),
+> **33 of them applied.** The classroom files went in with `supabase db push` and were
+> re-verified on the live database — the four earlier `20261004…` files on 2026-10-04;
+> `20261004150000` (classroom files), `20261005120000` (submission links),
+> `20261005130000` (class chat) and `20261005140000` (parent overview) on 2026-10-05.
+>
+> ⚠️ **`20261013120000_tutor_session_anchor.sql` is NOT applied.** It is produced and
+> statically checked, but has never been executed against any database, so the columns
+> it describes do not exist yet and `POST /api/tutor/ask` fails on its insert. The
+> repository owner applies it.
+>
+> ⚠️ The `app.*` function and policy counts below were measured on 2026-10-05 against the
+> 33 applied files and have **not** been re-measured since. Before this snapshot the
+> header read "2026-08-15 · 11 applied migrations", which was stale by twenty-two files —
+> this count is the thing in this document most likely to rot, because it changes on every
+> migration while the prose around it does not.
 > Source of truth: `supabase/migrations/*.sql`. The applied database, not this file, is
 > authoritative for what is live — read `pg_policies` when they disagree, and see
 > [Migration rules](#migration-rules) for why they can.
@@ -300,9 +311,9 @@ own and a matching `teacher_subject_scope` row.
 
 | Table | Defined at | Notes |
 |---|---|---|
-| `chat_session` | `20260801120000_initial_schema.sql:549` | Owner is `student_id`. |
-| `message` | `:557` | `role message_role`, `slo_refs uuid[]` for grounding citations. |
-| `visual_aid` | `:568` | `payload jsonb` is a typed spec only, rendered sandboxed. |
+| `chat_session` | `20260801120000_initial_schema.sql:549` | Owner is `student_id`. **`subject`, `class_level`, `chapter` added by `20261013120000`** — all nullable, the session's anchor. ⚠️ The anchor is a retrieval **prior, not a filter**, which is why `chapter` is nullable and carries **no FK** to the curriculum taxonomy: hard-scoping a session to its chapter makes a prerequisite question fail silently. Two CHECKs: `class_level BETWEEN 9 AND 12`, `chapter > 0` (not `1..9` — nine is one book's chapter count, and a shared table must not encode it). |
+| `message` | `:557` | `role message_role`, `slo_refs uuid[]` for grounding citations. ⚠️ `message_role` is `('student','assistant','system')` — the first label is **`student`, not `user`**; the API speaks `user` and maps at the boundary. ⚠️ `slo_refs` is **unused and NULL** — it references `slo` rows and the knowledge-base layer is deferred. |
+| `visual_aid` | `:568` | `payload jsonb` is a typed spec only, rendered sandboxed. **The tutor pilot's page citations live here**, with `kind='figure'` (a label the enum already carried), which is why citing a page needed no schema change. |
 
 **Owner-only, with no teacher, parent or admin read path anywhere** — a minor's chat is private
 (product requirements §4.2, §21 TEL-3). This invariant was re-verified in the Epic 1 review and

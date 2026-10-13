@@ -172,6 +172,25 @@ services:
       - key: STORAGE_S3_SECRET_ACCESS_KEY
         sync: false
 
+      # ───────────── Class 9 Physics Visual Tutor ─────────────
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-3.6-flash"
+      - key: PHYSICS_PAGES_DIR
+        value: "app/retrieval/physics9/pages"
+
+      # The model does NOT run here. ColQwen2 needs ~5 GB resident at bfloat16 and this
+      # is a 512 MB instance, so `requirements.txt` carries no torch and retrieval is an
+      # HTTP call to a host that does. Until RETRIEVAL_ENDPOINT is set, the backend
+      # degrades to the keyword tier and says so on /info — it does not fail.
+      - key: RETRIEVAL_MODE
+        value: "remote"
+      - key: RETRIEVAL_ENDPOINT
+        sync: false
+      - key: RETRIEVAL_SHARED_SECRET
+        sync: false
+
   # ───────────────────────── Next.js ─────────────────────────
   - type: web
     name: edubridge-frontend

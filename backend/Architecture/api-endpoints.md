@@ -21,19 +21,26 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **64** (21 auth + 43 classroom) | `grep -c "^@router\." backend/app/auth/routes.py backend/app/classroom/routes.py` |
-| Routers in the backend | **2** | `grep -rn "APIRouter(" backend/app --include=*.py \| wc -l` — `app/auth/routes.py:90`, `app/classroom/routes.py:85` |
+| Implemented routes | **71** (21 auth + 43 classroom + 7 tutor) | `grep -c "^@router\." backend/app/{auth,classroom,tutor}/routes.py` |
+| Routers in the backend | **3** | `auth_router`, `classroom_router`, `tutor_router` — all mounted at `settings.api_base_path` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:176-198` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 64 | §7.2 consolidates §3.1 plus Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Classroom (§3.6, `tdd.md:325-357` — **44 endpoints**: 40 since v0.4.0, plus the four Phase 6b added on 2026-10-05, counting each method/path pair in a combined row) and its own rows — where `GET /api/admin/rate-limits / PUT` is **two** endpoints |
 | **Total specified** | **87** | 23 + 3 + 6 + 44 + 11 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40; 83 until Phase 6b added 4 on 2026-10-05) |
 | **Specified but missing** | **23** | 87 − 64 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40, Phase 3 built 4, Phase 4 built 12, Phase 5 built 1, Phase 6 built 7, Phase 6b specified and built 4, Phase 7 built 4 and Phase 8 built 1** (§2.8) |
 
-**Two routers.** `backend/app/auth/routes.py` (21 routes) and, since classroom Phase 2,
-`backend/app/classroom/routes.py` (43 routes, §2.8). `GET /health` (`backend/app/main.py:126`) is
+⚠️ **The "specified but missing" figure is unchanged by the tutor work, and that is not an
+oversight.** §3.2's three generic tutor rows were already counted as specified, and
+`/api/tutor/ask` implements one of them. The pilot's other six routes are documented in
+§3.2a as additions rather than added to the §7.2 ledger, because they are one subject's
+pilot surface and not part of the specified endpoint catalogue.
+
+**Three routers.** `backend/app/auth/routes.py` (21 routes); since classroom Phase 2,
+`backend/app/classroom/routes.py` (43 routes, §2.8); and `backend/app/tutor/routes.py`
+(7 routes, §2.7 — the Class 9 Physics pilot). `GET /health` (`backend/app/main.py`) is
 defined on the application object rather than a router, sits outside `/api`, and is not one of the
 87 — `tdd.md` does not specify it.
 
-Both routers are mounted under `settings.api_base_path`, default `/api` (`app/main.py:123-124`).
+All three routers are mounted under `settings.api_base_path`, default `/api` (`app/main.py:123-124`).
 
 ---
 
@@ -300,7 +307,117 @@ cannot see the first's enrolment, that a refusal writes nothing and ends no sess
 teacher's chosen language reaches `app.lookup_user_for_email_flow` — asserted through the function
 production actually calls, not through the ORM.
 
-### 2.6 Outside the router
+### 2.7 Class 9 Physics Visual Retrieval Tutor (PCTB)
+
+**This table describes the code as it is, not as intended.** The previous revision asserted a
+`tutor_chat` rate limit, `require_role('student')` on the page-scan route, and "full ColQwen2
+MaxSim" — **none of which exist.** Every handler name and line below was re-read from source
+on 2026-10-13.
+
+| Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
+|---|---|---|---|---|---|---|
+| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** — the SAME bucket as `/ask` | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
+| `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
+| `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
+| `POST /api/tutor/ask` | `ask` | `retrieve_for_turn` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** | §3.2 |
+| `GET /api/tutor/figures/{message_id}` | `get_tutor_figure` | `tutor/service.py` `message_figure` + `tutor/figures.py` `crop_page` | → `image/jpeg` | `require_role('student')`, `require_guardian_verified` | none | §3.2a |
+| `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
+| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | `tutor_sessions` (60/min per user) | §3.2 |
+
+**Persistence.** `POST .../chat` now writes the turn: a `chat_session` row (carrying the
+anchor), a `message` row per side of the exchange, and one `visual_aid` row holding the
+cited pages. Its response gained `session_id`, `message_id` and `retriever`.
+
+Three properties worth knowing before changing any of it:
+
+1. **Ownership is enforced by Row-Level Security, not by a predicate.** No query in
+   `tutor/service.py` carries `WHERE student_id = :me`; `ctx.session` is already bound to
+   the acting user and `chat_session_owner` does the rest. So there is no filter to
+   forget — and nothing here opens a teacher, parent or admin read path, which chat
+   content must never have (`prd.md` §4.2, TEL-3).
+2. **A session that is not yours and a session that does not exist both answer
+   `403 FORBIDDEN_SCOPE`.** Answering differently would confirm that an id exists, and
+   §7.3 catalogues no 404.
+3. ⚠️ **`history` in the request is ignored when `session_id` is given.** The stored
+   transcript is the source of truth; honouring a client-supplied transcript on a
+   resumed session would let a caller put words in the assistant's mouth and have the
+   model treat them as its own prior answer.
+
+⚠️ These routes and the persistence writes **depend on migration
+`20261013120000_tutor_session_anchor.sql`, which is not applied.** Until the owner
+applies it, `POST .../ask` and `POST .../chat` fail on the
+`subject`/`class_level`/`chapter` insert.
+
+### `POST /api/tutor/ask` — the first streaming endpoint in this backend
+
+`text/event-stream`, four frame types in order: `pages` → `token`* → `done`. No new
+dependency; the frames are hand-rolled in `app/tutor/streaming.py` (`CLAUDE.md` §3.2).
+Three things about it are load-bearing:
+
+1. **`pages` fires before the first `token`.** Retrieval takes milliseconds and generation
+   takes seconds, so the student sees which textbook pages were found long before the
+   prose. That ordering is the whole user-visible benefit here, and a test asserts it.
+2. **Both turns are persisted at the END of the stream, in one transaction.** A client
+   that disconnects mid-answer therefore leaves **neither** turn, never a question paired
+   with a truncated reply attributed to the tutor. Writing the question up front is the
+   obvious alternative and it leaves an orphan — a transcript showing the student asking
+   and the tutor silent, which reads as a refusal rather than a fault.
+3. ⚠️ **This relies on FastAPI finalising dependencies-with-yield AFTER the response body
+   is streamed**, so `ctx.session` is still open inside the generator. Measured true on
+   `fastapi 0.141.1` / `starlette 1.3.1`. **That ordering changed once already, in
+   fastapi 0.106**, and if it changes back every transcript silently stops being saved —
+   no error, no failing request, just an empty history. `test_dependency_outlives_the_stream`
+   asserts the framework behaviour directly for exactly that reason.
+
+`X-Accel-Buffering: no` is set deliberately: a buffering reverse proxy holds the whole
+body and turns a streamed answer back into one slow response, which looks exactly like
+the model being slow and is diagnosed by nobody.
+
+`/info` returns `{subject, class_level, board, book_pages, retriever, checkpoint}`.
+**`retriever`** is `remote` · `local` · `heuristic` — it replaced a `has_real_embeddings`
+boolean that could not tell "the retrieval service is cold" apart from "this host has no
+model at all", which is the one thing the endpoint exists to report. `checkpoint` is empty
+unless the local tier actually loaded a file, so it never implies a resident model.
+
+**Three gaps this table used to hide:**
+
+1. ⚠️ **The page-scan route has no authentication** — no `dependencies=`, no `ctx` parameter.
+   The frontend's `/api/:path*` rewrite makes it same-origin, so every one of the 200 PCTB
+   scans is reachable without an account. Recorded as defect **P1** in `tdd.md` §14.2.
+2. ✅ **Fixed.** There was no rate limit: `tutor_chat` was never a bucket in
+   `app/core/ratelimit.py` — the string appeared only in this document and in four test
+   *names*. The handler also could not call `enforce(...)`, because its guards lived in
+   `dependencies=[…]` and it therefore had no `AuthContext` and no `Request` in scope.
+   The bucket is now **`tutor_ask` (20/min per user)**, shared by `/ask` and `/chat`, and
+   both handlers take `ctx` and `request` as parameters.
+
+   ⚠️ **This bucket is a correctness control, not an abuse control**, which is why the
+   number is what it is. One ColQwen2 instance answers one query at a time with the
+   forward pass lock-serialised, so an unbounded caller is a denial of service against
+   every other student in the class — and the retrieval service's own bounded wait starts
+   returning `503`s that read as an outage. Each request also ships three page scans to a
+   metered third-party API, so the same ceiling bounds the bill.
+
+   The two routes **share** the bucket deliberately: separate ones would let a client
+   double its budget by alternating them. Keyed per **user**, never per address — a whole
+   school shares one NAT'd IP (`tdd.md` §6.3), so an address key would let one student
+   throttle an entire computer lab.
+3. ⚠️ **ColQwen2 does not run.** `service.py:28` hard-codes `load_model=False`, and `torch`
+   and `colpali-engine` are in neither `requirements.txt` (what Render installs) nor
+   `pyproject.toml`. What answers is the keyword index in `retrieval/physics9/retriever.py`
+   (`_heuristic_match`, 63 sub-topics plus 33 anchors) feeding the top-3 page scans to
+   Gemini's vision model. The `.pt` embedding file is gitignored, and on the one path where
+   it *is* found it is stacked to float32 and then never read.
+
+Also note: `generator.py:54` pins **`gemini-3.6-flash`**, not the "Gemini 2.5 Flash" an
+earlier revision of this page and `HISTORY.md` both claimed.
+
+Upstream failures do **not** use the §7.3 envelope today — they return `200` with a nullable
+`gen_error` string (`PhysicsChatResponse.gen_error`, `tutor/routes.py:77`), which defeats the
+rule that clients branch on `code`. `tdd.md` §3.2a specifies `503 MODEL_UNAVAILABLE` /
+`422 NOT_GROUNDED` instead; neither has a factory in `app/core/errors.py` yet.
+
+### 2.8 Outside the router
 
 | Route | Defined at | Auth | Limit | Specified? |
 |---|---|---|---|---|
@@ -590,7 +707,7 @@ a view link.
 
 ---
 
-## 3. Dependencies that exist but protect nothing yet
+## 3. Dependencies and access control
 
 Two RBAC (Role-Based Access Control) dependencies were written ahead of their routes. **One is now
 wired**; the other still protects nothing:
@@ -598,7 +715,8 @@ wired**; the other still protects nothing:
 | Dependency | file:line | Status |
 |---|---|---|
 | `require_subject_scope` | `app/auth/dependencies.py:206` (since 2026-10-04 it also requires `revoked_at IS NULL`, `:236-242`) | **Still wired to no route.** The classroom routes do not need it — they take a `space_id`, not a `subject_id`, and the space's own scope is checked inside `app.owns_space`. Waits on the subject-report and quiz endpoints (§3.5, §3.6) |
-| `require_guardian_verified` | `app/auth/dependencies.py:248` | **Wired since classroom Phase 2**, through `participant` and `gated_student` (`app/classroom/dependencies.py:22`, `:35`) on every student classroom route except leaving (§2.8). Still waits on `/api/tutor/*`, `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
+| `require_guardian_verified` | `app/auth/dependencies.py:248` | **Wired since classroom Phase 2**, through `participant` and `gated_student` (`app/classroom/dependencies.py:22`, `:35`) on every student classroom route except leaving (§2.8). **Also wired on every tutor route** since the Class 9 Physics pilot (§2.7). Still waits on `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
+| `require_class_9_student` | `app/tutor/routes.py` | **Wired** on `/api/tutor/ask`, `/api/tutor/class9/physics/chat` and `/api/tutor/figures/{message_id}`. Local to the tutor router: it checks the student role and `class_level == 9` |
 
 `tdd.md:202` specifies that the gate dependency blocks **every** student learning and assessment
 endpoint, and that an authorization-matrix test asserts it on each such route. That test exists

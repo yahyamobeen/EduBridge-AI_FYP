@@ -1,4 +1,4 @@
-import { apiFetch, endSession, rememberSession } from './client'
+import { apiFetch, apiStream, endSession, rememberSession } from './client'
 import type {
   Announcement,
   AnnouncementCreateRequest,
@@ -37,6 +37,9 @@ import type {
   PasswordForgotRequest,
   PasswordResetRequest,
   PeopleResponse,
+  PhysicsChatRequest,
+  PhysicsChatResponse,
+  PhysicsTutorInfoResponse,
   RegisterRequest,
   RegisterResponse,
   SpaceCreateRequest,
@@ -47,6 +50,9 @@ import type {
   SubjectsResponse,
   SubmissionDraftRequest,
   SubmissionsResponse,
+  TutorAskRequest,
+  TutorSessionDetail,
+  TutorSessionSummary,
   TwoFactorConfirmRequest,
   TwoFactorConfirmResponse,
   TwoFactorEnrollRequest,
@@ -303,6 +309,72 @@ export async function logout(): Promise<void> {
   }
 }
 
+/**
+ * Class 9 Physics AI Tutor chat endpoint.
+ */
+export function chatClass9Physics(
+  body: PhysicsChatRequest,
+  signal?: AbortSignal,
+): Promise<PhysicsChatResponse> {
+  return apiFetch<PhysicsChatResponse>('/tutor/class9/physics/chat', {
+    method: 'POST',
+    body,
+    signal,
+  })
+}
+
+export function getPhysicsTutorInfo(signal?: AbortSignal): Promise<PhysicsTutorInfoResponse> {
+  return apiFetch<PhysicsTutorInfoResponse>(
+    '/tutor/class9/physics/info',
+    signal ? { signal } : {},
+  )
+}
+
+/**
+ * `POST /api/tutor/ask` — a streamed, grounded answer.
+ *
+ * Yields `{ event, data }` in order: one `pages`, then a `token` per chunk,
+ * then one `done`. ⚠️ `pages` arrives BEFORE the first `token`, deliberately —
+ * retrieval takes milliseconds and generation takes seconds, so the citations
+ * render while the prose is still being written.
+ *
+ * A failure before the first byte throws an `ApiError` like any other call. A
+ * failure after it arrives as `error` on `done`, because by then the HTTP
+ * status is already committed.
+ */
+export function askTutor(body: TutorAskRequest, signal?: AbortSignal) {
+  return apiStream('/tutor/ask', {
+    method: 'POST',
+    body,
+    ...(signal ? { signal } : {}),
+  })
+}
+
+/** The caller's own tutor sessions, newest first. */
+export function listTutorSessions(
+  limit?: number,
+  signal?: AbortSignal,
+): Promise<TutorSessionSummary[]> {
+  const query = limit === undefined ? '' : `?limit=${limit}`
+  return apiFetch<TutorSessionSummary[]>(`/tutor/sessions${query}`, signal ? { signal } : {})
+}
+
+/**
+ * One session with its transcript.
+ *
+ * ⚠️ A session that is not yours and a session that does not exist both answer
+ * `403 FORBIDDEN_SCOPE` — answering differently would confirm an id exists.
+ * So treat a 403 here as "not available", not as "you are signed out".
+ */
+export function getTutorSession(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<TutorSessionDetail> {
+  return apiFetch<TutorSessionDetail>(
+    `/tutor/sessions/${encodeURIComponent(sessionId)}`,
+    signal ? { signal } : {},
+  )
+}
 // ---------------------------------------------------------------------------
 // Classroom (tdd.md §3.6). All authenticated, so all client-only (see the note
 // at the top of this file). Ids are encoded because they arrive from the URL.
