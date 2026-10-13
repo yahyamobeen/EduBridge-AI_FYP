@@ -308,12 +308,12 @@ on 2026-10-13.
 
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` (all in `dependencies=[…]`) | **none** | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
+| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** — the SAME bucket as `/ask` | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
 | `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
 | `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
-| `POST /api/tutor/ask` | `ask` | `retrieval_search` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | none | §3.2 |
-| `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | none | §3.2 |
-| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | none | §3.2 |
+| `POST /api/tutor/ask` | `ask` | `retrieve_for_turn` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** | §3.2 |
+| `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
+| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | `tutor_sessions` (60/min per user) | §3.2 |
 
 **Persistence.** `POST .../chat` now writes the turn: a `chat_session` row (carrying the
 anchor), a `message` row per side of the exchange, and one `visual_aid` row holding the
@@ -375,11 +375,24 @@ unless the local tier actually loaded a file, so it never implies a resident mod
 1. ⚠️ **The page-scan route has no authentication** — no `dependencies=`, no `ctx` parameter.
    The frontend's `/api/:path*` rewrite makes it same-origin, so every one of the 200 PCTB
    scans is reachable without an account. Recorded as defect **P1** in `tdd.md` §14.2.
-2. ⚠️ **There is no rate limit.** `tutor_chat` is not a bucket in `app/core/ratelimit.py`;
-   the string appears only in this document and in four test *names*. The handler also
-   cannot call `enforce(...)`: its guards live in `dependencies=[…]`, so it has no
-   `AuthContext` and no `Request` in scope. Adding a limit requires taking `ctx` as a
-   parameter.
+2. ✅ **Fixed.** There was no rate limit: `tutor_chat` was never a bucket in
+   `app/core/ratelimit.py` — the string appeared only in this document and in four test
+   *names*. The handler also could not call `enforce(...)`, because its guards lived in
+   `dependencies=[…]` and it therefore had no `AuthContext` and no `Request` in scope.
+   The bucket is now **`tutor_ask` (20/min per user)**, shared by `/ask` and `/chat`, and
+   both handlers take `ctx` and `request` as parameters.
+
+   ⚠️ **This bucket is a correctness control, not an abuse control**, which is why the
+   number is what it is. One ColQwen2 instance answers one query at a time with the
+   forward pass lock-serialised, so an unbounded caller is a denial of service against
+   every other student in the class — and the retrieval service's own bounded wait starts
+   returning `503`s that read as an outage. Each request also ships three page scans to a
+   metered third-party API, so the same ceiling bounds the bill.
+
+   The two routes **share** the bucket deliberately: separate ones would let a client
+   double its budget by alternating them. Keyed per **user**, never per address — a whole
+   school shares one NAT'd IP (`tdd.md` §6.3), so an address key would let one student
+   throttle an entire computer lab.
 3. ⚠️ **ColQwen2 does not run.** `service.py:28` hard-codes `load_model=False`, and `torch`
    and `colpali-engine` are in neither `requirements.txt` (what Render installs) nor
    `pyproject.toml`. What answers is the keyword index in `retrieval/physics9/retriever.py`

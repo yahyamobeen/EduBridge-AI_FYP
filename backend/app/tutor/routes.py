@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -27,6 +27,7 @@ from app.auth.dependencies import (
     require_role,
 )
 from app.core.errors import forbidden_scope, model_unavailable, not_grounded
+from app.core.ratelimit import TUTOR_ASK_LIMIT, TUTOR_SESSIONS_LIMIT, enforce
 from app.models.enums import UserRole
 from app.retrieval.physics9.base import BOOK_PAGES
 from app.retrieval.physics9.service import (
@@ -137,6 +138,7 @@ class SessionDetail(BaseModel):
     ],
 )
 def chat_class9_physics(
+    request: Request,
     payload: PhysicsChatRequest,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> PhysicsChatResponse:
@@ -146,6 +148,10 @@ def chat_class9_physics(
     bound session to persist the turn. The guards that only need to refuse stay in
     `dependencies=[...]`.
     """
+    # Shares the `tutor_ask` bucket with /tutor/ask on purpose: separate buckets would
+    # let a client double its budget by alternating the two routes.
+    enforce(request, bucket="tutor_ask", limit=TUTOR_ASK_LIMIT, subject=str(ctx.user_id))
+
     session_id, anchor = tutor_service.open_or_resume_session(
         ctx.session,
         ctx.user_id,
@@ -218,6 +224,7 @@ class AskRequest(BaseModel):
     ],
 )
 def ask(
+    request: Request,
     payload: AskRequest,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> StreamingResponse:
@@ -228,6 +235,11 @@ def ask(
     wire that is impossible - which is why retrieval and the generator's readiness are
     both checked up front and only token production happens inside the stream.
     """
+    # First statement, before any work: one serialised model answers one query at a
+    # time, so an unbounded caller is a denial of service against the rest of the class,
+    # not merely a waste (see TUTOR_ASK_LIMIT).
+    enforce(request, bucket="tutor_ask", limit=TUTOR_ASK_LIMIT, subject=str(ctx.user_id))
+
     session_id, anchor = tutor_service.open_or_resume_session(
         ctx.session,
         ctx.user_id,
@@ -290,6 +302,7 @@ def ask(
     dependencies=[Depends(require_guardian_verified)],
 )
 def list_tutor_sessions(
+    request: Request,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[SessionSummary]:
@@ -298,6 +311,12 @@ def list_tutor_sessions(
     Ownership is enforced by Row-Level Security, not by a predicate in the query - so
     there is no `student_id` filter here to forget.
     """
+    enforce(
+        request,
+        bucket="tutor_sessions",
+        limit=TUTOR_SESSIONS_LIMIT,
+        subject=str(ctx.user_id),
+    )
     return [SessionSummary(**row) for row in tutor_service.list_sessions(ctx.session, limit)]
 
 
@@ -307,6 +326,7 @@ def list_tutor_sessions(
     dependencies=[Depends(require_guardian_verified)],
 )
 def get_tutor_session(
+    request: Request,
     session_id: UUID,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> SessionDetail:
@@ -316,6 +336,12 @@ def get_tutor_session(
     `403 FORBIDDEN_SCOPE`, deliberately: answering differently would confirm that a given
     id exists, and §7.3 catalogues no 404 to reach for.
     """
+    enforce(
+        request,
+        bucket="tutor_sessions",
+        limit=TUTOR_SESSIONS_LIMIT,
+        subject=str(ctx.user_id),
+    )
     return SessionDetail(**tutor_service.get_session(ctx.session, session_id))
 
 
