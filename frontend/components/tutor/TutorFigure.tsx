@@ -41,11 +41,14 @@ export function TutorFigure({
   // prepends the API base itself and produced `/api/api/tutor/figures/{id}` → 404.
   // Every other call in `endpoints.ts` passes a base-relative path; this matches.
   const path = `/tutor/figures/${messageId}`
-  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  // Keyed by the path it was fetched for, so a render can tell whether the bytes in
+  // hand belong to the figure currently being asked for. Clearing state at the top of
+  // the effect would do the same job, but setState in an effect body triggers
+  // cascading renders and `react-hooks/set-state-in-effect` rejects it.
+  const [loaded, setLoaded] = useState<{ path: string; url: string } | null>(null)
 
   useEffect(() => {
     let active = true
-    setDataUrl(null)
 
     apiFetch<Blob>(path, { responseType: 'blob' })
       .then(
@@ -60,10 +63,10 @@ export function TutorFigure({
       .then((url) => {
         // The message list re-renders on every streamed frame, so a resolved fetch can
         // land after this component is gone.
-        if (active) setDataUrl(url)
+        if (active) setLoaded({ path, url })
       })
       .catch(() => {
-        if (active) setDataUrl(null)
+        if (active) setLoaded(null)
       })
 
     return () => {
@@ -71,13 +74,14 @@ export function TutorFigure({
     }
   }, [path])
 
-  if (!dataUrl) return null
+  // Nothing yet, or bytes belonging to a figure we are no longer showing.
+  if (!loaded || loaded.path !== path) return null
 
   return (
     <figure className="mt-3">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={dataUrl}
+        src={loaded.url}
         alt={alt}
         className="max-h-64 w-auto rounded-lg border border-outline-variant/40 bg-surface"
       />
