@@ -12,6 +12,8 @@ import {
   SparkIcon,
 } from '@/components/ui/Icon'
 import { askTutor, getTutorSession, listTutorSessions } from '@/lib/api/endpoints'
+import { TutorFigure } from './TutorFigure'
+import { TutorMarkdown } from './TutorMarkdown'
 import type {
   PageCitation,
   PhysicsChatMessage,
@@ -38,7 +40,7 @@ type MessageWithCitations = PhysicsChatMessage & {
   /** True while tokens are still arriving, so the caret can show. */
   streaming?: boolean
   /** The cropped figure, when the generator pointed at one. */
-  figure?: { url: string; caption: string; page: number }
+  figure?: { messageId: string; caption: string; page: number }
 }
 
 /**
@@ -141,7 +143,11 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
             if (last && last.role === 'assistant') {
               next[next.length - 1] = {
                 ...last,
-                figure: { url: frame.url, caption: frame.caption, page: frame.page },
+                figure: {
+                  messageId: frame.message_id,
+                  caption: frame.caption,
+                  page: frame.page,
+                },
               }
             }
             return next
@@ -417,8 +423,19 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
                     : 'rounded-ts-sm border border-outline-variant/30 bg-surface-container-high text-on-surface'
               }`}
             >
-              <div className="whitespace-pre-wrap">
-                {msg.content}
+              <div
+                className={msg.role === 'assistant' && !msg.error ? '' : 'whitespace-pre-wrap'}
+              >
+                {/*
+                  Markdown and LaTeX for the tutor's own answers only. A student's
+                  message is their typed input and stays plain text — see
+                  TutorMarkdown's header for why that boundary is deliberate.
+                */}
+                {msg.role === 'assistant' && !msg.error ? (
+                  <TutorMarkdown content={msg.content} />
+                ) : (
+                  msg.content
+                )}
                 {msg.streaming && (
                   <span
                     aria-hidden="true"
@@ -461,19 +478,11 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
                 `img-src 'self' data:`, so an external URL here is blocked.
               */}
               {msg.figure && (
-                <figure className="mt-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={msg.figure.url}
-                    alt={msg.figure.caption || `${t('page')} ${msg.figure.page}`}
-                    className="max-h-64 w-auto rounded-lg border border-outline-variant/40 bg-surface"
-                  />
-                  {msg.figure.caption && (
-                    <figcaption className="mt-1 text-xs text-on-surface-variant">
-                      {msg.figure.caption}
-                    </figcaption>
-                  )}
-                </figure>
+                <TutorFigure
+                  messageId={msg.figure.messageId}
+                  alt={msg.figure.caption || `${t('page')} ${msg.figure.page}`}
+                  caption={msg.figure.caption}
+                />
               )}
 
               {/* Citations Preview Chips */}

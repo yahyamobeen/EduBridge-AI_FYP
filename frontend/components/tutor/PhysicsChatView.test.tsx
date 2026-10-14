@@ -10,7 +10,16 @@ vi.mock('@/lib/api/endpoints', () => ({
   getTutorSession: vi.fn(),
 }))
 
+// TutorFigure fetches the crop through the authenticated client, because the figure
+// route is owner-scoped and an `<img>` cannot send a bearer token. Only `apiFetch` is
+// stubbed; the rest of the client stays real.
+vi.mock('@/lib/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api/client')>()),
+  apiFetch: vi.fn(),
+}))
+
 import { askTutor, getTutorSession, listTutorSessions } from '@/lib/api/endpoints'
+import { apiFetch } from '@/lib/api/client'
 import type { PageCitation, RetrieverTier, TurnIntent } from '@/lib/api/types'
 
 /**
@@ -498,14 +507,21 @@ describe('PhysicsChatView figures', () => {
       })(),
     )
 
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Blob(['jpegbytes'], { type: 'image/jpeg' }))
+
     renderChat()
     fireEvent.click(screen.getByText(en.tutor.chat.chip1))
 
     await waitFor(() => {
       const image = screen.getByAltText('Fig. 7.8 Thermocouple')
-      // ⚠️ Same-origin, as given by the server. The CSP is `img-src 'self' data:`,
-      // so an absolute external URL here would be blocked by the browser.
-      expect(image).toHaveAttribute('src', '/api/tutor/figures/m1')
+      // ⚠️ A `data:` URI, NOT the raw route. This assertion used to read
+      // `toHaveAttribute('src', '/api/tutor/figures/m1')`, which passed while the
+      // image was broken for every real student: the route is authenticated and an
+      // `<img>` sends no bearer token, so the browser got a 401. Asserting the URL
+      // was well-formed could never catch that; asserting bytes arrived does.
+      // `blob:` is absent from the CSP's `img-src 'self' data:`, hence data:.
+      expect(image.getAttribute('src')).toMatch(/^data:image\/jpeg/)
+      expect(apiFetch).toHaveBeenCalledWith('/tutor/figures/m1', { responseType: 'blob' })
       expect(screen.getByText('Fig. 7.8 Thermocouple')).toBeInTheDocument()
     })
   })

@@ -1,5 +1,6 @@
 """Unit tests for the Class 9 Physics AI Tutor module."""
 
+import json
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -143,3 +144,160 @@ def test_page_image_bounds_check():
     with pytest.raises(HTTPException) as exc2:
         get_physics_page_image(201)
     assert exc2.value.status_code == 404
+
+
+def test_quota_429_is_not_retried_against_the_same_model(monkeypatch):
+    """A per-day quota 429 must drop the model, not re-ask it.
+
+    ⚠️ The free tier is 20 requests per day per model, and a quota 429 advertises a
+    `retryDelay` of hours. Every retry spends another of the 20, so retrying here
+    burns the day's budget on a refusal already received - while the student waits
+    through a `time.sleep` for each one.
+    """
+    import httpx
+
+    from app.retrieval.physics9 import generator as gen_mod
+
+    quota_body = json.dumps(
+        {
+            "error": {
+                "code": 429,
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [
+                            {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                        ],
+                    },
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "29673s"},
+                ],
+            }
+        }
+    )
+
+    attempted: list[str] = []
+    slept: list[float] = []
+    monkeypatch.setattr(gen_mod.time, "sleep", lambda s: slept.append(s))
+
+    class _Resp:
+        status_code = 429
+        text = quota_body
+
+        def read(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def stream(self, _method, url, **_kw):
+            attempted.append(url.rsplit("/", 1)[-1].split(":")[0])
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+
+    g = gen_mod.PhysicsGenerator(
+        api_key="k", model_name="gemini-3.6-flash", fallback_models=["gemini-3.5-flash"]
+    )
+    with pytest.raises(RuntimeError):
+        list(g.stream_tokens(question="q", hits=[], history=None))
+
+    # Each model asked exactly once; the primary's duplicate pass is skipped.
+    assert attempted == ["gemini-3.6-flash", "gemini-3.5-flash"]
+    assert len(attempted) == len(set(attempted)), "a model was asked twice after a quota refusal"
+    # And no blocking sleep, because waiting out hours cannot help.
+    assert slept == []
+
+
+def test_api_key_never_appears_in_the_request_url(monkeypatch):
+    """The key travels as a header, never as `?key=` in the URL.
+
+    ⚠️ REGRESSION. httpx logs the full request URL at INFO, so a key in the query
+    string was written verbatim into the application log on every call - the live key
+    appeared in plaintext in production output beside a `200 OK`. The URL is also what
+    reverse proxies, access logs and error trackers record, so no amount of log-level
+    tuning in this application would have contained it. `backend/CLAUDE.md` §6 says
+    secrets are never logged; only a header keeps that promise.
+    """
+    import httpx
+
+    from app.retrieval.physics9 import generator as gen_mod
+
+    secret = "AQ.test-key-must-not-be-logged"  # noqa: S105 -- a fixture, not a credential
+    seen: dict[str, object] = {}
+
+    class _Resp:
+        status_code = 500
+        text = "{}"
+
+        def read(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def stream(self, _method, url, **kw):
+            seen["url"] = url
+            seen["params"] = kw.get("params") or {}
+            seen["headers"] = kw.get("headers") or {}
+            return _Resp()
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+    monkeypatch.setattr(gen_mod.time, "sleep", lambda _s: None)
+
+    g = gen_mod.PhysicsGenerator(api_key=secret, model_name="gemini-3.6-flash")
+    with pytest.raises(RuntimeError):
+        list(g.stream_tokens(question="q", hits=[], history=None))
+
+    assert secret not in str(seen["url"])
+    # `params` is what httpx appends to the logged URL, so the key must not be there.
+    assert secret not in str(seen["params"])
+    assert "key" not in seen["params"]
+    assert seen["headers"]["x-goog-api-key"] == secret
+
+
+def test_payload_disables_thinking_and_leaves_room_for_the_answer():
+    """Reasoning tokens come out of `max_output_tokens`, so they can eat the answer.
+
+    ⚠️ REGRESSION. Gemini 3.x flash models think before answering, and the budget is
+    shared. Measured on a real tutor prompt: 854 thinking tokens against 180 of answer
+    and `finishReason: MAX_TOKENS` - the student saw a reply that stopped mid-sentence
+    while the log showed `200 OK` and no error of any kind. Nothing downstream can
+    detect that; it has to be prevented in the request.
+    """
+    from app.retrieval.physics9.generator import PhysicsGenerator
+
+    g = PhysicsGenerator(api_key="k", model_name="gemini-3-flash-preview")
+    cfg = g.build_payload(question="what is a vernier calliper", hits=[], history=None)[
+        "generation_config"
+    ]
+
+    assert cfg["thinking_config"]["thinking_budget"] == 0
+    # Headroom over the ~400 answer tokens a full reply measured at.
+    assert cfg["max_output_tokens"] >= 2048

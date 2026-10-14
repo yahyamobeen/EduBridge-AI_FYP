@@ -10,7 +10,7 @@ Snapshot: **2026-08-15**.
 ## 1. What this is
 
 Next.js App Router, React, TypeScript, Tailwind. **30 pages** across three route groups —
-`(site)`, `(auth)`, `(app)` — and **48 test files** (Vitest). Three locales: `en`, `ur`,
+`(site)`, `(auth)`, `(app)` — and **50 test files** (Vitest). Three locales: `en`, `ur`,
 `ur-Latn`, each exactly 820 leaf keys, in identical order (re-measured 2026-10-13, after
 the classroom/tutor merge — both sides of that merge carried stale counts).
 
