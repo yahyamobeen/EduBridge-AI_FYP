@@ -17,11 +17,16 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
+    "katex": "^0.19.0",
     "next": "^16.2.12",
     "next-intl": "^4.13.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.84.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zod": "^4.4.3"
   },
   "//overrides": "Next 16.2.12 pins postcss to exactly 8.4.31 and sharp to ^0.34.5, both of which carry high-severity advisories. npm audit fix --force 'resolves' this by installing next@9, which is not a fix. These overrides lift both to patched lines instead. Remove them once Next ships a release that pins patched versions.",

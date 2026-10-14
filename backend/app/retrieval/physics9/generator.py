@@ -32,6 +32,53 @@ _RETRYABLE = frozenset({429, 503})
 # acceptable here only because it is bounded by the attempt list and runs in the
 # threadpool, not on the event loop.
 _RETRY_PAUSE_S = 1.0
+# Longest advertised wait worth honouring. Gemini returns 429 for two unrelated things:
+# a per-MINUTE rate limit, which clears in seconds and is worth retrying, and a per-DAY
+# free-tier quota, which does not.
+#
+# ⚠️ THE FREE TIER IS 20 REQUESTS PER DAY PER MODEL
+# (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`), and a quota 429 advertises a
+# `retryDelay` of several HOURS - 29673s measured. Retrying that is worse than useless:
+# every attempt consumes another of the 20, so a handful of failures can spend a day's
+# budget on nothing while the student waits. Past this threshold the model is dropped
+# for the rest of the call and the next one is tried instead.
+_MAX_RETRY_WAIT_S = 5.0
+
+
+def _auth_headers(api_key: str) -> dict[str, str]:
+    """The key as a HEADER, never as `?key=` in the URL.
+
+    ⚠️ THIS IS NOT A STYLE PREFERENCE. httpx logs the full request URL at INFO, so a
+    key in the query string is written verbatim into the application log on every
+    call - observed in production output, where the live key appeared in plaintext
+    beside a 200. `backend/CLAUDE.md` §6 says secrets are never logged, and a query
+    parameter cannot keep that promise: the URL is also what reverse proxies, access
+    logs and error trackers record. A header is not logged by any of them.
+
+    Gemini accepts `x-goog-api-key` as an equivalent to the `key` parameter.
+    """
+    return {"x-goog-api-key": api_key}
+
+
+def _advertised_retry_wait(body: str) -> float | None:
+    """Seconds Gemini asks us to wait, from `RetryInfo.retryDelay` ("29673s").
+
+    None when the body carries no advice, which is treated as "short" - the existing
+    backoff then applies, exactly as before this function existed.
+    """
+    try:
+        details = json.loads(body).get("error", {}).get("details", [])
+    except (ValueError, AttributeError):
+        return None
+    for d in details:
+        if d.get("@type", "").endswith("RetryInfo"):
+            delay = str(d.get("retryDelay", "")).rstrip("s")
+            try:
+                return float(delay)
+            except ValueError:
+                return None
+    return None
+
 
 logger = logging.getLogger("edubridge.retrieval.physics9.generator")
 
@@ -188,7 +235,27 @@ class PhysicsGenerator:
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "generation_config": {
                 "temperature": 0.2,
-                "max_output_tokens": 1024,
+                # Headroom. The cap covers reasoning AND answer together, so a model
+                # that thinks can exhaust it before writing anything - see below.
+                "max_output_tokens": 2048,
+                # ⚠️ THINKING OFF, DELIBERATELY. Gemini 3.x flash models reason before
+                # answering and those tokens come out of `max_output_tokens`. Measured
+                # on this exact prompt: 854 thinking tokens against 180 of answer, and
+                # `finishReason: MAX_TOKENS` - the student got a reply that stopped
+                # mid-sentence, with a 200 in the log and nothing resembling an error
+                # anywhere. Same prompt with the budget at 0: a COMPLETE answer, STOP,
+                # and 5s instead of 9s.
+                #
+                # Chain-of-thought earns little here and costs both. The task is to
+                # read three page scans and report what they say; the grounding comes
+                # from the images, not from deliberation, and the prompt already
+                # forbids reasoning past them. Raising the cap instead would keep the
+                # latency and still truncate a longer answer.
+                #
+                # Accepted by gemini-3-flash-preview, 3.1-flash-lite and 3.6-flash
+                # (verified); a model that rejects it would 400, so check before
+                # adding one to GEMINI_FALLBACK_MODELS.
+                "thinking_config": {"thinking_budget": 0},
             },
         }
 
@@ -226,7 +293,13 @@ class PhysicsGenerator:
         yielded = False
         last_error = ""
 
+        # Models whose daily quota is spent. `_models_to_try` lists the primary twice,
+        # and without this the second pass pays for a refusal already received.
+        exhausted: set[str] = set()
+
         for attempt, model in enumerate(self._models_to_try()):
+            if model in exhausted:
+                continue
             try:
                 # One `with`: the context managers bind left to right, so `client`
                 # exists by the time `client.stream(...)` is evaluated.
@@ -235,7 +308,8 @@ class PhysicsGenerator:
                     client.stream(
                         "POST",
                         f"{_API_BASE}/{model}:streamGenerateContent",
-                        params={"key": self.api_key, "alt": "sse"},
+                        params={"alt": "sse"},
+                        headers=_auth_headers(self.api_key),
                         json=payload,
                     ) as response,
                 ):
@@ -245,6 +319,18 @@ class PhysicsGenerator:
                         response.read()
                         last_error = f"HTTP {response.status_code}: {response.text[:160]}"
                         if response.status_code in _RETRYABLE:
+                            wait = _advertised_retry_wait(response.text)
+                            if wait is not None and wait > _MAX_RETRY_WAIT_S:
+                                # A day's quota, not a momentary spike. Waiting cannot
+                                # help and re-asking only spends what is left.
+                                exhausted.add(model)
+                                logger.warning(
+                                    "gemini %s quota exhausted (retry advised in %.0fs); "
+                                    "skipping this model",
+                                    model,
+                                    wait,
+                                )
+                                continue
                             logger.info("gemini %s: %s; retrying", model, last_error)
                             time.sleep(_RETRY_PAUSE_S * (attempt + 1))
                             continue
@@ -314,7 +400,7 @@ class PhysicsGenerator:
                     try:
                         resp = client.post(
                             url,
-                            params={"key": self.api_key},
+                            headers=_auth_headers(self.api_key),
                             json=payload,
                         )
                         if resp.status_code == 200:

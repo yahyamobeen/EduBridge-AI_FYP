@@ -66,3 +66,8 @@ supabase/.branches/
 
 # ---- Claude Code local settings ----
 .claude/settings.local.json
+
+# Local ColQwen2 launcher. Hardcodes one machine's paths to the gitignored
+# .pt index and the torch venv, both of which live outside this repo --
+# committing it would bake one developer's folder layout into the project.
+ml/serving/run-colqwen.bat
