@@ -447,6 +447,35 @@ load-bearing rather than incidental:
 the file must be supplied at build time. `ml/serving/DEPLOY.md` carries the runbook and
 `ml/serving/measure.py` produces the latency figures this section's claims rest on.
 
+**Building the index: `ml/indexing/`.** The page side of this contract is defined by
+`ml/indexing/encode_books.py`, which builds one index per book named
+`<Board>_<Class>_<Subject>` (72 books: Punjab and Sindh, Classes 9–12) on a GPU machine:
+
+- **Every page of every book is rendered to exactly 1049×1387.** A scan already at that size
+  is copied byte for byte when nothing is drawn over it (no visible text, drawings or
+  annotations; an invisible OCR layer is fine) and it is placed upright; a page within 1% of
+  that shape is scaled to it; anything else is fitted inside it with white margins. On the
+  served Physics 9 PDF this reproduces all 200 served scans byte for byte. One size
+  means 755 vectors per page everywhere, which `torch.stack` at load requires and which
+  keeps MaxSim from favouring larger pages.
+- **The model is pinned:** adapter `vidore/colqwen2-v1.0` at `2b6ac8fb…0117`, base
+  `vidore/colqwen2-base` at `9fe8a713…3101`, bfloat16, processor at checkpoint defaults.
+  ⚠️ The query side (`app.py`, `local.py`) still loads unpinned `main`, so pinning it to the
+  same two revisions is outstanding.
+- **The file** keeps the keys this section's loaders read (`checkpoint`, `pages` 1..N,
+  `embeddings` as N tensors of 755×128, `complete`, `dim`) and stores the tensors in
+  bfloat16, which is lossless because the model computes in bfloat16 and every reader
+  casts to float32. It adds provenance (book, source sha256, both revisions, library
+  versions) and loads with `torch.load(weights_only=True)`.
+- **Figure boxes** come from Docling's layout model only (`figures.py`): its raw output is
+  kept per book and turned into `figures.json` rows of `{page, box, caption,
+  figure_number}` in the same fraction-of-page box format as the `@@FIGURE` line above.
+  Nothing reads them yet; using them is step 1 of `prd.md` MM-1.
+
+⚠️ None of this changes what is served. The service and backend still hold one 200-page
+book (`BOOK_PAGES`, the Physics chapter table, `/tutor/class9/physics`); serving more books
+is a separate contract change to this section.
+
 ### 3.3 Skills & MCP Subsystem — `backend/app/skills/`, `backend/app/mcp/` **[P0 self-skills / P1 full MCP]**
 
 **Responsibilities:** implement self-created skills and integrate audited third-party skills/MCP servers behind a uniform **skill contract**; every call brokered by the Secure Skills & MCP Layer.

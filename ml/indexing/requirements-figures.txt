@@ -1,0 +1,4 @@
+# Figure-box detection (figures.py detect). Installed into the SAME .venv as the encoder,
+# under the encoder's pins as constraints, so it can never move colpali-engine's versions.
+# A release at least two weeks old at the time it was chosen (2026-11-15).
+docling==2.145.0

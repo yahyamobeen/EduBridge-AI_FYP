@@ -1,0 +1,30 @@
+# Lint configuration for the book-indexing tool.
+#
+# Like ml/serving, this is a separate deployable with its own dependencies (torch,
+# colpali-engine, PyMuPDF, Docling), outside the scope of backend/pyproject.toml's ruff
+# run. It gets its own config so `ruff check .` works from this directory.
+#
+#     ruff check . && ruff format --check .
+#
+# Settings mirror backend/pyproject.toml and ml/serving/pyproject.toml: one house style.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "RET", "SIM", "ARG", "S"]
+ignore = ["S101", "S311", "ARG001", "ARG002", "B008", "UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# HF_HUB_DOWNLOAD_TIMEOUT must be set before huggingface_hub is first imported, and
+# figures.py must put its own folder on sys.path before importing encode_books, so both
+# files have code above some imports on purpose.
+"encode_books.py" = ["E402"]
+"figures.py" = ["E402"]
+# The self-test writes throwaway files to a temporary folder and builds stores that are
+# deliberately malformed; it imports after a sys.path insert for the same reason.
+"selftest.py" = ["E402", "S108"]
+
+[tool.ruff.format]
+quote-style = "double"

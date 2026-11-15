@@ -47,6 +47,9 @@ EduBridge-AI_FYP/
 ├── ml/serving/            ← the ColQwen2 retrieval service. A SEPARATE deployable with
 │                            its own deps, Dockerfile and lint config — the backend
 │                            reaches it over HTTP and never imports it
+├── ml/indexing/           ← builds the page index for every Punjab and Sindh book on a
+│                            GPU machine: ColQwen2 at pinned revisions, plus Docling
+│                            layout output for figure boxes. Outputs are gitignored
 ├── ml/eval/ · mcp-servers/ · infra/    ← scaffolded, no implementation (.gitkeep only)
 └── render.yaml            ← Render blueprint for both services
 ```
@@ -159,6 +162,7 @@ surface the conflict and ask — never resolve it quietly.
 | Frontend | 30 pages (`find frontend/app -name page.tsx \| wc -l`), 3 route groups, 3 locales, 820 message keys per locale. Auth and onboarding journeys complete; classroom list, detail, people, stream, classwork with submissions and grading, a calendar, and file attachments — added while creating an assignment, several links per student's work, and PDFs and images viewable in a new tab — and a class-public chat with teacher moderation, built for students and teachers; the parent's read-only overview of a child's classrooms; and the Class 9 Physics tutor, whose answer streams over Server-Sent Events with past conversations resumable. |
 | Database | **34 migration files, 33 of them applied.** The classroom files went in on 2026-10-04 and 2026-10-05 via `supabase db push`. ⚠️ **`20261013120000_tutor_session_anchor.sql` is NOT applied** — produced and statically checked only, never executed against any database, so the tutor's session anchor does not exist yet and `POST /api/tutor/ask` fails on its insert. 72 `app.*` functions and 98 Row-Level Security policies, measured on a shadow database built from the 33 applied files and matched on the live database (`backend/Architecture/database.md`, "At a glance") — neither figure has been re-measured since. |
 | `ml/serving/` | **The ColQwen2 retrieval service** (`tdd.md` §3.2a) — FastAPI, the 200-page embedding index, MaxSim, a query-embedding cache, and a 39-check self-test that needs no model. A separate deployable: its own `requirements.txt`, `Dockerfile` and ruff config, and `backend/requirements.txt` must never grow a torch dependency. ⚠️ Its `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone alone, and **nothing in it has yet run against the real model**. |
+| `ml/indexing/` | **The offline index builder** (`tdd.md` §3.2a, "Building the index") — renders each book PDF to the 1049×1387 canvas, encodes it with ColQwen2 at **pinned** adapter and base revisions, writes `<book>.colqwen2.pt` in the format `ml/serving` already loads, and keeps Docling's raw layout output so figure boxes are built on a laptop. Its own `requirements.txt`, `constraints.txt`, ruff config and a 79-check self-test that needs no model. ⚠️ Run on a GPU machine; the indexes, page images and `reference/` are gitignored. The service and backend still serve **one** 200-page book, so nothing it produces is live yet. |
 | `ml/eval/`, `mcp-servers/`, `infra/`, `backend/app/workers/` | **Scaffolded, no implementation** — `.gitkeep` placeholders only. |
 
 Against the 38 user-story cards: **Epic 1 (identity, authentication, consent) is roughly 80%
