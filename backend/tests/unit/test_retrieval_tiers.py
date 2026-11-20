@@ -67,16 +67,19 @@ def test_remote_happy_path(monkeypatch):
     # The chapter is derived on this side, so a remote tier never has to agree with us
     # about the book's structure.
     assert [h["chapter"] for h in hits] == [7, 7, 7]
-    assert hits[0]["url"] == "/api/tutor/class9/physics/pages/155"
+    assert hits[0]["url"] == "/api/tutor/books/Punjab_9_Physics/pages/155"
     # Milliseconds on the wire, seconds in the application.
     assert timings.encode == pytest.approx(0.310)
     assert timings.search == pytest.approx(0.018)
 
     assert captured["url"] == "https://r.example.com/retrieve"
+    # The book travels by id and the chapter as its page range: the service holds no
+    # chapter tables (tdd.md §3.2a "Many books").
     assert captured["json"] == {
+        "book": "Punjab_9_Physics",
         "question": "how does a thermocouple work",
         "top_k": 3,
-        "chapter": 7,
+        "anchor": [148, 160],
     }
     assert captured["headers"]["X-Retrieval-Secret"] == "s3cret"
 

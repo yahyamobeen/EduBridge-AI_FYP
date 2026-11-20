@@ -20,6 +20,7 @@ from threading import Lock
 from app.retrieval.physics9.base import (
     BOOK_PAGES,
     CHAPTERS,
+    PHYSICS_BOOK,
     Hit,
     RetrievalUnavailableError,
     Timings,
@@ -80,10 +81,14 @@ class LocalRetriever:
         return "local"
 
     def search(
-        self, question: str, top_k: int = 3, chapter: int | None = None
+        self, question: str, top_k: int = 3, chapter: int | None = None, *, book=None
     ) -> tuple[list[Hit], Timings]:
         import torch
 
+        # This tier loads one file - the Physics 9 index. Other books are served by the
+        # retrieval service (`remote`), never by another book's embeddings.
+        if book is not None and book.book_id != PHYSICS_BOOK:
+            raise RetrievalUnavailableError(f"the local tier holds only {PHYSICS_BOOK}")
         started = time.monotonic()
         # One model, one lock. The forward pass is the hot path and holds ~5 GB; two
         # concurrent passes would double neither throughput nor memory headroom, so
@@ -111,7 +116,7 @@ class LocalRetriever:
             (self.pages[index], value)
             for value, index in zip(top.values.tolist(), top.indices.tolist(), strict=True)
         ]
-        return make_hits(scored), Timings(encode=encode_s, search=search_s)
+        return make_hits(scored, book), Timings(encode=encode_s, search=search_s)
 
 
 def _apply_anchor(scores, pages: list[int], chapter: int):

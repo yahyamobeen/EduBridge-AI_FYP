@@ -17,7 +17,19 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import AuthContext, authenticated, require_guardian_verified
 from app.core.ratelimit import TUTOR_ASK_LIMIT, reset_for_tests
 from app.main import create_app
-from app.tutor.routes import require_class_9_student
+from app.retrieval.physics9.base import BOOK_PAGES, CHAPTERS
+from app.retrieval.physics9.catalogue import Book
+from app.tutor.routes import BookContext, require_class_9_student
+
+# `/ask` resolves its book with `resolve_book` (tdd.md §3.2a "Many books"). These tests
+# are about streaming and rate limits, not ownership - that has its own tests - so the
+# book is pinned to Physics 9, the book every one of them was written against.
+PHYSICS_CONTEXT = BookContext(
+    book=Book("Punjab_9_Physics", "PCTB", (9,), "Physics", BOOK_PAGES, None, CHAPTERS),
+    board="PCTB",
+    class_level=9,
+    content_strategy="branch_a_english_source",
+)
 
 
 class _Result:
@@ -58,7 +70,7 @@ class _FakeSession:
 class _FakeGenerator:
     api_key = "test-key"
 
-    def stream_tokens(self, question, hits, history=None):
+    def stream_tokens(self, question, hits, history=None, **book_args):
         yield "answer"
 
 
@@ -77,6 +89,7 @@ def _client(monkeypatch, user_id=None):
     app.dependency_overrides[authenticated] = lambda: ctx
     app.dependency_overrides[require_guardian_verified] = lambda: ctx
     app.dependency_overrides[require_class_9_student] = lambda: ctx
+    monkeypatch.setattr("app.tutor.routes.resolve_book", lambda *_a, **_k: PHYSICS_CONTEXT)
     monkeypatch.setattr("app.tutor.routes.get_physics_generator", lambda: _FakeGenerator())
     return TestClient(app)
 

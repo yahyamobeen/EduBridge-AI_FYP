@@ -2,16 +2,38 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
+import type { TutorBooksResponse } from '@/lib/api/types'
 import { SubjectModal } from './SubjectModal'
 
 vi.mock('@/lib/api/endpoints', () => ({
   askTutor: vi.fn(),
-  getPhysicsTutorInfo: vi.fn(),
+  listTutorBooks: vi.fn(),
+  listTutorSessions: vi.fn(),
+  getTutorSession: vi.fn(),
+  tutorPagePath: (bookId: string, page: number) => `/tutor/books/${bookId}/pages/${page}`,
 }))
 
-import { askTutor } from '@/lib/api/endpoints'
+import { askTutor, listTutorBooks } from '@/lib/api/endpoints'
 
-/** The frame sequence PhysicsChatView consumes: pages, tokens, done. */
+/** A Sindh Class 10 science student: what GET /api/tutor/books returns for them. */
+const STBB_10: TutorBooksResponse = {
+  board: 'STBB',
+  class_level: 10,
+  books: [
+    { book_id: null, subject: 'Biology', available: false },
+    { book_id: 'Sindh_10_Chemistry', subject: 'Chemistry', available: true },
+    { book_id: 'Sindh_9_English', subject: 'English', available: true },
+    { book_id: null, subject: 'Quran Translation', available: false },
+  ],
+}
+
+const PCTB_9: TutorBooksResponse = {
+  board: 'PCTB',
+  class_level: 9,
+  books: [{ book_id: 'Punjab_9_Physics', subject: 'Physics', available: true }],
+}
+
+/** The frame sequence the chat view consumes: pages, tokens, done. */
 function streamOf(reply: string, pages: unknown[] = []) {
   return (async function* () {
     yield {
@@ -24,6 +46,13 @@ function streamOf(reply: string, pages: unknown[] = []) {
       data: { session_id: 'sess-1', message_id: 'm1', timings: {}, error: null },
     }
   })()
+}
+
+function fill(template: string, values: Record<string, string | number>) {
+  return Object.entries(values).reduce(
+    (s, [k, v]) => s.replaceAll(`{${k}}`, String(v)),
+    template,
+  )
 }
 
 function renderModal({
@@ -43,117 +72,138 @@ function renderModal({
 describe('SubjectModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(listTutorBooks).mockResolvedValue(STBB_10)
   })
 
-  it('renders nothing when isOpen is false', () => {
+  it('renders nothing when closed, and fetches nothing', () => {
     renderModal({ isOpen: false })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(listTutorBooks).not.toHaveBeenCalled()
   })
 
-  it('renders the subject picker with all 6 subjects when open', () => {
-    renderModal({ isOpen: true })
+  it("lists the student's own subjects, available first, with board and class", async () => {
+    renderModal()
 
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.modal.title)).toBeInTheDocument()
+    expect(
+      await screen.findByText(fill(en.tutor.modal.title, { class: 10 })),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(fill(en.tutor.modal.subtitle, { board: en.tutor.boards.STBB })),
+    ).toBeInTheDocument()
 
-    // All 6 subjects
-    expect(screen.getByText(en.tutor.subjects.physics)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.subjects.mathematics)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.subjects.chemistry)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.subjects.english)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.subjects.urdu)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.subjects.islamiyat)).toBeInTheDocument()
-
-    // Status badges
-    expect(screen.getByText(en.tutor.modal.availableBadge)).toBeInTheDocument()
-    expect(screen.getAllByText(en.tutor.modal.comingSoonBadge)).toHaveLength(5)
+    const tiles = screen.getAllByRole('button').filter((b) => b.textContent?.includes('STBB'))
+    expect(tiles.map((t) => t.querySelector('p')?.textContent)).toEqual([
+      en.tutor.subjects.chemistry,
+      en.tutor.subjects.english,
+      en.tutor.subjects.biology,
+      en.tutor.subjects.quranTranslation,
+    ])
+    expect(screen.getAllByText(en.tutor.modal.availableBadge)).toHaveLength(2)
+    expect(screen.getAllByText(en.tutor.modal.comingSoonBadge)).toHaveLength(2)
+    expect(
+      screen.getAllByText(fill(en.tutor.modal.subjectMeta, { board: 'STBB', class: 10 })),
+    ).toHaveLength(4)
   })
 
-  it('displays the coming soon dialogue when a non-physics subject is clicked', () => {
-    renderModal({ isOpen: true })
+  it('shows a loading state, then an error with a working retry', async () => {
+    vi.mocked(listTutorBooks).mockRejectedValueOnce(new Error('offline'))
+    renderModal()
 
-    const mathButton = screen.getByText(en.tutor.subjects.mathematics).closest('button')!
-    fireEvent.click(mathButton)
+    expect(screen.getByRole('status')).toHaveTextContent(en.tutor.modal.loading)
+    expect(await screen.findByText(en.tutor.modal.loadError)).toBeInTheDocument()
 
-    // Heading and coming soon notice should be displayed
+    fireEvent.click(screen.getByRole('button', { name: en.tutor.modal.retry }))
+    expect(await screen.findByText(en.tutor.subjects.chemistry)).toBeInTheDocument()
+    expect(listTutorBooks).toHaveBeenCalledTimes(2)
+  })
+
+  it('a subject without a book shows the coming-soon notice, and Back returns', async () => {
+    renderModal()
+    fireEvent.click((await screen.findByText(en.tutor.subjects.biology)).closest('button')!)
+
     expect(screen.getByText(en.tutor.modal.comingSoonTitle)).toBeInTheDocument()
     expect(
       screen.getByText(
-        en.tutor.modal.comingSoonNotice.replace('{subject}', en.tutor.subjects.mathematics),
+        fill(en.tutor.modal.comingSoonNotice, { subject: en.tutor.subjects.biology }),
       ),
     ).toBeInTheDocument()
 
-    // Clicking "Back" returns to the subject picker
-    const backBtn = screen.getByText(en.tutor.modal.back).closest('button')!
-    fireEvent.click(backBtn)
-
-    expect(screen.getByText(en.tutor.modal.title)).toBeInTheDocument()
+    fireEvent.click(screen.getByText(en.tutor.modal.back).closest('button')!)
+    expect(
+      await screen.findByText(fill(en.tutor.modal.title, { class: 10 })),
+    ).toBeInTheDocument()
   })
 
-  it('transitions to the Physics Chat View when Physics is clicked', async () => {
-    renderModal({ isOpen: true })
+  it('Tarjuma-tul-Quran is listed but not openable (prd.md FR-17)', async () => {
+    renderModal()
+    fireEvent.click(
+      (await screen.findByText(en.tutor.subjects.quranTranslation)).closest('button')!,
+    )
+    expect(screen.getByText(en.tutor.modal.comingSoonTitle)).toBeInTheDocument()
+  })
 
-    const physicsButton = screen.getByText(en.tutor.subjects.physics).closest('button')!
-    fireEvent.click(physicsButton)
+  it('an available subject opens the chat for that book, with no Physics chips', async () => {
+    renderModal()
+    fireEvent.click((await screen.findByText(en.tutor.subjects.chemistry)).closest('button')!)
 
-    // Chat view components should appear
-    expect(screen.getByText(en.tutor.chat.title)).toBeInTheDocument()
-    expect(screen.getByPlaceholderText(en.tutor.chat.inputPlaceholder)).toBeInTheDocument()
+    const subject = en.tutor.subjects.chemistry
+    expect(screen.getByText(fill(en.tutor.chat.title, { subject }))).toBeInTheDocument()
+    expect(
+      screen.getByText(fill(en.tutor.chat.subtitle, { board: 'STBB', class: 10, subject })),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText(fill(en.tutor.chat.inputPlaceholder, { subject })),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(en.tutor.chat.chip1)).not.toBeInTheDocument()
+  })
+
+  it('the Physics 9 book keeps its quick-prompt chips', async () => {
+    vi.mocked(listTutorBooks).mockResolvedValue(PCTB_9)
+    renderModal()
+    fireEvent.click((await screen.findByText(en.tutor.subjects.physics)).closest('button')!)
     expect(screen.getByText(en.tutor.chat.chip1)).toBeInTheDocument()
   })
 
-  it('sends a message and renders response with page citations in physics chat', async () => {
+  it('sends the book with every question and renders the citations', async () => {
     vi.mocked(askTutor).mockReturnValueOnce(
-      streamOf("Newton's first law states that an object remains at rest unless acted upon.", [
+      streamOf('A salt is an ionic compound.', [
         {
-          page: 58,
-          chapter: 3,
-          score: 0.92,
-          url: '/api/tutor/class9/physics/pages/58',
+          page: 26,
+          chapter: null,
+          score: 9.3,
+          url: '/api/tutor/books/Sindh_10_Chemistry/pages/26',
         },
       ]),
     )
+    renderModal()
+    fireEvent.click((await screen.findByText(en.tutor.subjects.chemistry)).closest('button')!)
 
-    renderModal({ isOpen: true })
+    const subject = en.tutor.subjects.chemistry
+    fireEvent.change(
+      screen.getByPlaceholderText(fill(en.tutor.chat.inputPlaceholder, { subject })),
+      {
+        target: { value: 'What is a salt?' },
+      },
+    )
+    fireEvent.click(screen.getByLabelText(en.tutor.chat.send))
 
-    // Open physics
-    const physicsButton = screen.getByText(en.tutor.subjects.physics).closest('button')!
-    fireEvent.click(physicsButton)
-
-    // Type query and send
-    const input = screen.getByPlaceholderText(en.tutor.chat.inputPlaceholder)
-    fireEvent.change(input, { target: { value: "State Newton's first law" } })
-
-    const sendBtn = screen.getByLabelText(en.tutor.chat.send)
-    fireEvent.click(sendBtn)
-
-    // Verify askTutor was called
     await waitFor(() => {
       // No `history`: the server reads the transcript it stored (tdd.md §3.2).
       expect(askTutor).toHaveBeenCalledWith({
-        message: "State Newton's first law",
+        message: 'What is a salt?',
         lang: 'en',
         session_id: null,
+        book_id: 'Sindh_10_Chemistry',
       })
     })
-
-    // Verify answer and citation chip rendered
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          "Newton's first law states that an object remains at rest unless acted upon.",
-        ),
-      ).toBeInTheDocument()
-      expect(screen.getByText(/Page 58/)).toBeInTheDocument()
-    })
+    expect(await screen.findByText('A salt is an ionic compound.')).toBeInTheDocument()
+    expect(screen.getByText(/Page 26/)).toBeInTheDocument()
   })
 
-  it('invokes onClose when the close button is clicked', () => {
-    const { onClose } = renderModal({ isOpen: true })
-
-    const closeBtn = screen.getByLabelText(en.tutor.modal.close)
-    fireEvent.click(closeBtn)
-
+  it('invokes onClose when the close button is clicked', async () => {
+    const { onClose } = renderModal()
+    await screen.findByText(en.tutor.subjects.chemistry)
+    fireEvent.click(screen.getByLabelText(en.tutor.modal.close))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })

@@ -933,14 +933,20 @@
   },
   "tutor": {
     "modal": {
-      "title": "Class 9 AI Tutor",
-      "subtitle": "Select a subject aligned with Punjab Textbook Board (PCTB) curriculum",
+      "title": "Class {class} AI Tutor",
+      "subtitle": "Choose a subject from your {board} books",
       "close": "Close",
       "back": "Back to Subjects",
       "comingSoonTitle": "Coming Soon",
-      "comingSoonNotice": "The AI Tutor for {subject} is currently under development. Stay tuned!",
+      "comingSoonNotice": "The AI Tutor for {subject} isn't available yet — its textbook is still being added.",
       "availableBadge": "Available",
-      "comingSoonBadge": "Coming Soon"
+      "comingSoonBadge": "Coming Soon",
+      "loadingTitle": "AI Tutor",
+      "subjectMeta": "{board} · Class {class}",
+      "loading": "Loading your subjects…",
+      "loadError": "Could not load your subjects.",
+      "empty": "No subjects found for your class.",
+      "retry": "Retry"
     },
     "subjects": {
       "physics": "Physics",
@@ -948,13 +954,21 @@
       "chemistry": "Chemistry",
       "english": "English",
       "urdu": "Urdu",
-      "islamiyat": "Islamiyat"
+      "islamiyat": "Islamiyat",
+      "biology": "Biology",
+      "computerScience": "Computer Science",
+      "pakistanStudies": "Pakistan Studies",
+      "quranTranslation": "Tarjuma-tul-Quran"
+    },
+    "boards": {
+      "PCTB": "Punjab Textbook Board",
+      "STBB": "Sindh Textbook Board"
     },
     "chat": {
-      "title": "Class 9 Physics AI Tutor",
-      "subtitle": "Punjab Textbook Board (PCTB) · Class 9 Physics",
-      "welcome": "Assalam-o-Alaikum! I am your Class 9 Physics AI tutor. Ask questions in English, Roman Urdu, or Urdu script, and I will explain step-by-step with citations to your textbook.",
-      "inputPlaceholder": "Ask a physics question (e.g., How does a thermocouple work?)...",
+      "title": "{subject} AI Tutor",
+      "subtitle": "{board} · Class {class} · {subject}",
+      "welcome": "Assalam-o-Alaikum! I am your Class {class} {subject} AI tutor. Ask questions in English, Roman Urdu, or Urdu script, and I will explain step-by-step with citations to your textbook.",
+      "inputPlaceholder": "Ask a {subject} question…",
       "send": "Send",
       "thinking": "Searching textbook pages and preparing explanation...",
       "references": "Textbook References",
@@ -971,7 +985,15 @@
       "historyEmpty": "No past conversations yet.",
       "historyError": "Could not load your past conversations.",
       "newChat": "New conversation",
-      "disclaimer": "Grounded in official Punjab Textbook Board (PCTB) Class 9 Physics textbook."
+      "disclaimer": "Grounded in your official {board} Class {class} {subject} textbook.",
+      "unavailable": "The {subject} tutor isn't available right now. Please try again in a moment.",
+      "previewTitle": "Page {page} · {subject}",
+      "previewSource": "{board} · Class {class} {subject} — official scan",
+      "pageAlt": "Textbook page {page}",
+      "loadingPage": "Loading page…",
+      "pageError": "Could not load this page.",
+      "back": "Back",
+      "close": "Close"
     }
   },
   "errorPage": {

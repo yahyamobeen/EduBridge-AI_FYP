@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import Protocol, TypedDict
+from typing import TYPE_CHECKING, Protocol, TypedDict
+
+if TYPE_CHECKING:
+    from app.retrieval.physics9.catalogue import Book
 
 # Windows consoles default to cp1252, which cannot encode Urdu. Any path that prints a
 # question - a traceback, a debug line - dies inside the error handler and surfaces as
@@ -52,6 +55,10 @@ CHAPTER_NAMES: dict[int, str] = {
 }
 
 BOOK_PAGES = 200
+
+# The pilot book, and the default wherever no book is named - so every caller written
+# before the tutor served many books keeps meaning exactly what it meant.
+PHYSICS_BOOK = "Punjab_9_Physics"
 
 
 class RetrievalUnavailableError(Exception):
@@ -107,25 +114,33 @@ def chapter_of(page: int) -> int | None:
     return None
 
 
-def page_url(page: int) -> str:
-    """The API path serving one page scan.
+def page_url(page: int, book_id: str = PHYSICS_BOOK) -> str:
+    """The API path serving one page scan of one book.
 
     One definition because it was previously written out at two call sites in the same
     function, and a citation whose URL does not resolve is indistinguishable from a
-    retrieval failure in the interface.
+    retrieval failure in the interface. The route is authenticated and checks that the
+    caller owns the book (tdd.md §3.2a "Many books").
     """
-    return f"/api/tutor/class9/physics/pages/{page}"
+    return f"/api/tutor/books/{book_id}/pages/{page}"
 
 
-def make_hits(scored: list[tuple[int, float]]) -> list[Hit]:
+def make_hits(scored: list[tuple[int, float]], book: Book | None = None) -> list[Hit]:
     """Build the wire shape from (page, score) pairs, in the order given.
 
     Order is the ranking and is never re-sorted here: the heuristic tier's scores are
     rank placeholders, so sorting by score would be a no-op at best and would discard
-    a deliberate ordering at worst.
+    a deliberate ordering at worst. `book` None means Physics 9; a book without
+    chapters reports `chapter` as None on every page.
     """
+    book_id = book.book_id if book is not None else PHYSICS_BOOK
     return [
-        Hit(page=page, chapter=chapter_of(page), score=round(float(score), 3), url=page_url(page))
+        Hit(
+            page=page,
+            chapter=book.chapter_of(page) if book is not None else chapter_of(page),
+            score=round(float(score), 3),
+            url=page_url(page, book_id),
+        )
         for page, score in scored
     ]
 
@@ -149,9 +164,17 @@ class Retriever(Protocol):
         ...
 
     def search(
-        self, question: str, top_k: int = 3, chapter: int | None = None
+        self,
+        question: str,
+        top_k: int = 3,
+        chapter: int | None = None,
+        *,
+        book: Book | None = None,
     ) -> tuple[list[Hit], Timings]:
-        """Rank textbook pages against `question`, best first.
+        """Rank one book's pages against `question`, best first.
+
+        `book` None means Physics 9. A tier that cannot serve the given book raises
+        `RetrievalUnavailableError` rather than answering from another book's pages.
 
         `chapter`, when given, is the session anchor and acts as a score PRIOR, never a
         filter. Hard-scoping to the anchored chapter makes a prerequisite question

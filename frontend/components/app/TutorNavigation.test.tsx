@@ -19,15 +19,14 @@ vi.mock('@/i18n/navigation', () => ({
 vi.mock('@/lib/api/endpoints', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
   askTutor: vi.fn(),
-  getPhysicsTutorInfo: vi.fn(),
+  listTutorBooks: vi.fn(),
   listTutorSessions: vi.fn(),
   getTutorSession: vi.fn(),
+  tutorPagePath: (bookId: string, page: number) => `/tutor/books/${bookId}/pages/${page}`,
 }))
 
-// `RequireRole` resolves `me` itself since classroom Phase 6c, so the dashboard no
-// longer takes it as a prop. Stubbed to hand the render prop a fixed student: this
-// file tests the tutor entry point, and RequireRole's own behaviour is covered by
-// SessionGuard.test.tsx.
+import { listTutorBooks } from '@/lib/api/endpoints'
+
 // `RequireRole` resolves `me` itself since classroom Phase 6c, so the page no longer
 // takes it as a prop. Stubbed to hand the render prop the student under test; its own
 // behaviour is covered by SessionGuard.test.tsx, and what this file tests is the tutor
@@ -62,123 +61,70 @@ const baseStudent: MeResponse = {
   guardian: { required: false, status: null },
 }
 
-describe('AI Tutor Grade Guardrail and Navigation', () => {
+function renderDashboard(me: MeResponse) {
+  currentStudent = me
+  return render(
+    <NextIntlClientProvider locale="en" messages={en}>
+      <DashboardShell me={me} subtitle="">
+        <StudentDashboard />
+      </DashboardShell>
+    </NextIntlClientProvider>,
+  )
+}
+
+// Since the many-books change (tdd.md §3.2a) every student has a tutor: the modal lists
+// their own subjects and marks those without a book as coming soon. Class 9 is no longer
+// special, so the same assertions hold for every class and both boards.
+describe.each([
+  ['Punjab Class 9', { board: 'PCTB' as const, class_level: 9 }],
+  ['Sindh Class 10', { board: 'STBB' as const, class_level: 10 }],
+  ['Punjab Class 11', { board: 'PCTB' as const, class_level: 11 }],
+])('AI Tutor entry points — %s student', (_label, profile) => {
+  const student: MeResponse = {
+    ...baseStudent,
+    profile: {
+      ...baseStudent.profile!,
+      ...profile,
+      student_group: profile.class_level >= 11 ? 'pre_medical' : 'science',
+    },
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
-  })
-
-  describe('Class 9 Student', () => {
-    const class9Student: MeResponse = {
-      ...baseStudent,
-      profile: { ...baseStudent.profile!, class_level: 9 },
-    }
-
-    beforeEach(() => {
-      currentStudent = class9Student
-    })
-
-    it('sidebar AI Tutor button opens the Subject Selection Modal', () => {
-      render(
-        <NextIntlClientProvider locale="en" messages={en}>
-          <DashboardShell me={class9Student} subtitle="">
-            <StudentDashboard />
-          </DashboardShell>
-        </NextIntlClientProvider>,
-      )
-
-      // In sidebar, find the AI Tutor button
-      const tutorButtons = screen.getAllByRole('button', { name: en.nav.items.tutor })
-      expect(tutorButtons.length).toBeGreaterThan(0)
-
-      // Initially no modal dialog is open
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-
-      // Click sidebar tutor button
-      fireEvent.click(tutorButtons[0]!)
-
-      // SubjectModal dialog must now be open with 6 subjects
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
-      expect(screen.getByText(en.tutor.modal.title)).toBeInTheDocument()
-      expect(screen.getByText(en.tutor.subjects.physics)).toBeInTheDocument()
-      expect(screen.getByText(en.tutor.subjects.mathematics)).toBeInTheDocument()
-    })
-
-    it('dashboard AI Tutor card opens the Subject Selection Modal on click', () => {
-      render(
-        <NextIntlClientProvider locale="en" messages={en}>
-          <DashboardShell me={class9Student} subtitle="">
-            <StudentDashboard />
-          </DashboardShell>
-        </NextIntlClientProvider>,
-      )
-
-      // Find the card by its heading
-      const tutorHeading = screen.getByRole('heading', { name: en.dashboard.cards.tutorTitle })
-      const tutorCard = tutorHeading.closest('section')!
-      expect(tutorCard).toBeInTheDocument()
-
-      // Learn more button inside card
-      const learnMoreBtn = within(tutorCard).getByRole('button', {
-        name: en.dashboard.learnMore,
-      })
-      fireEvent.click(learnMoreBtn)
-
-      // SubjectModal dialog must now be open
-      expect(screen.getByRole('dialog')).toBeInTheDocument()
-      expect(screen.getByText(en.tutor.modal.title)).toBeInTheDocument()
+    vi.mocked(listTutorBooks).mockResolvedValue({
+      board: profile.board,
+      class_level: profile.class_level,
+      books: [{ book_id: 'X', subject: 'Chemistry', available: true }],
     })
   })
 
-  describe('Non-Class 9 Student (Class 10)', () => {
-    const class10Student: MeResponse = {
-      ...baseStudent,
-      profile: { ...baseStudent.profile!, class_level: 10 },
-    }
+  it('the sidebar AI Tutor button opens the tutor', async () => {
+    renderDashboard(student)
 
-    beforeEach(() => {
-      currentStudent = class10Student
-    })
+    const tutorButtons = screen.getAllByRole('button', { name: en.nav.items.tutor })
+    expect(tutorButtons.length).toBeGreaterThan(0)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // No student is sent to the old coming-soon page any more.
+    expect(screen.queryByRole('link', { name: en.nav.items.tutor })).not.toBeInTheDocument()
 
-    it('sidebar AI Tutor links to /coming-soon/tutor instead of opening modal', () => {
-      render(
-        <NextIntlClientProvider locale="en" messages={en}>
-          <DashboardShell me={class10Student} subtitle="">
-            <StudentDashboard />
-          </DashboardShell>
-        </NextIntlClientProvider>,
-      )
+    fireEvent.click(tutorButtons[0]!)
 
-      // In sidebar, find the AI Tutor link
-      const tutorLinks = screen.getAllByRole('link', { name: en.nav.items.tutor })
-      expect(tutorLinks.length).toBeGreaterThan(0)
-      expect(tutorLinks[0]).toHaveAttribute('href', '/coming-soon/tutor')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByText(en.tutor.subjects.chemistry)).toBeInTheDocument()
+    expect(listTutorBooks).toHaveBeenCalledTimes(1)
+  })
 
-      // Modal dialog should not be in the document
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+  it('the dashboard AI Tutor card opens the tutor and is not marked unavailable', async () => {
+    renderDashboard(student)
 
-    it('dashboard AI Tutor card links to /coming-soon/tutor instead of opening modal', () => {
-      render(
-        <NextIntlClientProvider locale="en" messages={en}>
-          <DashboardShell me={class10Student} subtitle="">
-            <StudentDashboard />
-          </DashboardShell>
-        </NextIntlClientProvider>,
-      )
+    const tutorCard = screen
+      .getByRole('heading', { name: en.dashboard.cards.tutorTitle })
+      .closest('section')!
+    expect(within(tutorCard).queryByText(en.dashboard.notYetAvailable)).toBeNull()
 
-      const tutorHeading = screen.getByRole('heading', { name: en.dashboard.cards.tutorTitle })
-      const tutorCard = tutorHeading.closest('section')!
-      const tutorCardLink = within(tutorCard).getByRole('link', {
-        name: en.dashboard.learnMore,
-      })
-      expect(tutorCardLink).toBeInTheDocument()
-      expect(tutorCardLink).toHaveAttribute('href', '/coming-soon/tutor')
+    fireEvent.click(within(tutorCard).getByRole('button', { name: en.dashboard.learnMore }))
 
-      // Click link
-      fireEvent.click(tutorCardLink)
-
-      // Modal should NOT be opened
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    })
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByText(en.tutor.subjects.chemistry)).toBeInTheDocument()
   })
 })

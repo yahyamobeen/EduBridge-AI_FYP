@@ -483,6 +483,36 @@ A malformed frame, or a `:` comment (which is what a keep-alive is), yields noth
 than ending the stream — one bad frame must not truncate an answer that is otherwise
 arriving fine.
 
+### The tutor: every student, their own books (tdd.md §3.2a "Many books")
+
+**Entry.** Every student opens the tutor — the sidebar item and the dashboard card both open
+`components/tutor/SubjectModal.tsx` (`DashboardShell.tsx`, `isStudent`); teachers, parents and
+administrators still have no tutor entry (`lib/auth/navigation.ts`, unchanged). The card no
+longer carries the "not available yet" pill (`PlaceholderCard`'s `available` prop).
+
+**Subject picker.** The modal's body mounts on every open and reads `listTutorBooks()`
+(`GET /tutor/books`): the student's own subjects for their board, class and group, each with
+its book and `available`. It holds no subject list of its own. Available subjects come first;
+a subject with no book, or Quran Translation (hidden, `prd.md` FR-17), opens the "coming soon"
+notice. Loading shows placeholder tiles; a failure shows a message and Retry. Subject names
+map from the catalogue's names to `tutor.subjects` keys in `components/tutor/subjects.tsx`
+(an unknown name is shown as sent, never hidden), and board names to `tutor.boards`.
+
+**One chat for every book.** `PhysicsChatView` keeps its name and takes `book`
+(`{bookId, subject, board, classLevel}`): the title, subtitle, welcome, placeholder and
+disclaimer are built from it; `askTutor` sends `book_id`; the four quick-prompt chips are
+Physics questions and appear only for `Punjab_9_Physics`; past conversations are filtered to
+the open book's sessions (the server derives each session's `book_id`). A
+`MODEL_UNAVAILABLE` before the first byte shows `tutor.chat.unavailable` — that book's search
+is down and, outside Physics 9, has no fallback — instead of "could not connect".
+
+**Page previews are fetched, not linked** (`components/tutor/TutorPageImage.tsx`). The page
+route `GET /tutor/books/{book_id}/pages/{n}` is authenticated and checks the student owns the
+book, so it goes through `useAuthorizedImage` (`components/tutor/useAuthorizedImage.ts`) —
+`apiFetch` blob → `readAsDataURL` — the same pattern `TutorFigure` now shares. The path is
+built from `tutorPagePath(bookId, page)` (`lib/api/endpoints.ts`), base-relative, because the
+citation's own `/api/...` url would become `/api/api/...` through `apiFetch`.
+
 ### The tutor chat view
 
 `components/tutor/PhysicsChatView.tsx` consumes that stream. Three things about it are
@@ -747,7 +777,7 @@ Challenge credentials travel as `init.bearer` (`client.ts:103-104`, `:127`), whi
 
 ### Three locales
 
-`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **820 leaf keys each, identical across all three**, and in the same order (re-measured 2026-10-13, after the classroom/tutor merge — both sides of that merge carried stale counts: 785 and 506) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785); the tutor added `degradedNotice` and the four `history*`/`newChat` keys.
+`i18n/routing.ts:16-37` defines `['en', 'ur', 'ur-Latn']` with `en` as default. Messages live in `messages/en.json`, `messages/ur.json`, `messages/ur-Latn.json` — **840 leaf keys each, identical across all three**, and in the same order (re-measured 2026-11-17 after the tutor's many-books strings; previously 820, re-measured 2026-10-13, after the classroom/tutor merge — both sides of that merge carried stale counts: 785 and 506) — phase 1 added `downloadFailed` (A7); phase 1b added 27 administrator keys and the 3 two-factor resend keys that were referenced by live code and existed nowhere (D18); classroom Phases 2–7 added the `classroom` namespace and the dashboard card's keys (562, then 590, 682, 696, 719, 734, 739, 770 and 787), and removing the roster placeholder took two (785); the tutor added `degradedNotice` and the four `history*`/`newChat` keys.
 
 `localeDetection: false` (`:36`). Left on, next-intl negotiates from `Accept-Language` and a `NEXT_LOCALE` cookie, so a browser configured for Urdu — entirely normal in this audience — would be redirected to `/ur` before the visitor had chosen anything. Turning detection off makes `/` resolve to `/en` for everyone and makes language an explicit choice. The trade-off, accepted deliberately at `:31-34`: this also disables the cookie, so a returning visitor who previously chose Urdu lands on `/` in English again. They stay in Urdu while navigating, because every link carries the locale prefix.
 

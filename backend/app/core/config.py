@@ -216,6 +216,10 @@ class Settings(BaseSettings):
     )
     physics_embeddings_path: str = Field(default="", validation_alias="PHYSICS_EMBEDDINGS_PATH")
     physics_pages_dir: str = Field(default="", validation_alias="PHYSICS_PAGES_DIR")
+    # A folder of book folders `<book_id>/{manifest.json, pages/}` written by ml/indexing
+    # (tdd.md §3.2a "Many books"). Empty - the default and the production setting -
+    # means Physics 9 only, from the committed scans, exactly as before.
+    books_dir: str = Field(default="", validation_alias="BOOKS_DIR")
 
     # Which retrieval tier serves a question. `remote` keeps this process free of torch
     # and of the model's ~5 GB — the reason it is the default on a 512 MB instance.

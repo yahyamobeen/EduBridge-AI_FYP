@@ -69,7 +69,9 @@ export function DashboardShell({
   const current = currentItem(items, pathname)
   const accent = ROLE_ACCENT[me.role]
   const initial = avatarInitial(me)
-  const isClass9Student = me.role === 'student' && me.profile?.class_level === 9
+  // Every student has a tutor since the many-books change (tdd.md §3.2a): the modal
+  // lists their own subjects and marks the ones without a book as coming soon.
+  const isStudent = me.role === 'student'
 
   /**
    * The redirect must happen on BOTH paths.
@@ -118,7 +120,7 @@ export function DashboardShell({
 
       <ul className="flex-grow space-y-2">
         {items.map((item) => {
-          const isTutorButton = isClass9Student && item.key === 'tutor'
+          const isTutorButton = isStudent && item.key === 'tutor'
           return (
             <li key={item.key}>
               {isTutorButton ? (
@@ -198,9 +200,7 @@ export function DashboardShell({
 
         <div className="flex-grow overflow-y-auto p-gutter md:p-margin-desktop">{children}</div>
 
-        {isClass9Student && (
-          <SubjectModal isOpen={tutorOpen} onClose={() => setTutorOpen(false)} />
-        )}
+        {isStudent && <SubjectModal isOpen={tutorOpen} onClose={() => setTutorOpen(false)} />}
       </div>
     </TutorContext.Provider>
   )
@@ -219,12 +219,15 @@ export function PlaceholderCard({
   span = 4,
   href,
   onClick,
+  available = false,
 }: {
   title: string
   body: string
   span?: 4 | 6 | 8 | 12
   href?: string
   onClick?: () => void
+  /** A card whose feature works drops the "not available yet" pill. */
+  available?: boolean
 }) {
   const t = useTranslations('dashboard')
   const cols = {
@@ -240,9 +243,11 @@ export function PlaceholderCard({
     >
       <h3 className="mb-2 font-headline text-headline-md text-on-surface">{title}</h3>
       <p className="mb-4 text-body-sm text-on-surface-variant">{body}</p>
-      <p className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-1 text-label-caps uppercase text-on-surface-variant">
-        {t('notYetAvailable')}
-      </p>
+      {!available && (
+        <p className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-1 text-label-caps uppercase text-on-surface-variant">
+          {t('notYetAvailable')}
+        </p>
+      )}
       {href ? (
         <div className="mt-4">
           <Link

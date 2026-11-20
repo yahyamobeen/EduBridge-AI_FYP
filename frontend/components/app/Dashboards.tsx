@@ -48,8 +48,8 @@ export function StudentDashboard() {
               span={4}
               title={tc('tutorTitle')}
               body={tc('tutorBody')}
-              href={me.profile?.class_level === 9 ? undefined : '/coming-soon/tutor'}
-              onClick={me.profile?.class_level === 9 ? openTutor : undefined}
+              onClick={openTutor}
+              available
             />
             <PlaceholderCard span={4} title={tc('quizzesTitle')} body={tc('quizzesBody')} />
             {/*

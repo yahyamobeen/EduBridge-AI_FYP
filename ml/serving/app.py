@@ -1,14 +1,23 @@
-"""ColQwen2 retrieval service for PCTB Physics 9 (tdd.md §3.2a).
+"""ColQwen2 retrieval service for the textbook tutor (tdd.md §3.2a).
 
-A single-purpose appliance: it answers "which textbook pages match this string" and
+A single-purpose appliance: it answers "which pages of THIS book match this string" and
 knows nothing about students, sessions, authentication or Gemini. Those stay in the
 backend. This process exists separately for one reason - the model needs ~5 GB resident
 at bfloat16 and the backend runs on a 512 MB instance.
 
+One instance serves every book (tdd.md §3.2a "Many books"): one model, one query cache,
+and every book's page index. A question's embedding does not depend on the book, so only
+the final MaxSim step is per book. Two ways to load books:
+
+- `INDEX_DIR` - a folder of book folders `<book_id>/<book_id>.colqwen2.pt`, the layout
+  `ml/indexing` writes. Optionally narrowed by `BOOKS` (comma-separated ids).
+- `PAGES_PT` - one file, served as book `PAGES_BOOK` (default `Punjab_9_Physics`). This is
+  the original single-book deployment and what the Docker image bakes in.
+
 Deliberately NOT importable from `backend/`: it is a separate deployable with its own
-dependency set, and `backend/requirements.txt` must never grow a torch dependency. The
-small amount of duplicated knowledge (the book is 200 pages; chapter page ranges) is the
-price of that separation, and is cheaper than a shared package built for two constants.
+dependency set, and `backend/requirements.txt` must never grow a torch dependency. It
+holds no chapter tables: the backend turns a chapter into the page range it sends as
+`anchor`.
 
 Run with ONE worker. Each worker loads its own copy of the model.
 
@@ -25,6 +34,7 @@ import sys
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -41,28 +51,26 @@ if hasattr(sys.stdout, "reconfigure"):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("retrieval")
 
-BOOK_PAGES = 200
-
-# Chapter page ranges, duplicated from the backend on purpose - see the module docstring.
-# Needed here because the anchor prior must be applied BEFORE top-k selection, and the
-# backend only ever sees the pages that survived it.
-CHAPTERS: dict[int, tuple[int, int]] = {
-    1: (5, 27),
-    2: (28, 51),
-    3: (52, 79),
-    4: (80, 104),
-    5: (105, 126),
-    6: (127, 147),
-    7: (148, 160),
-    8: (161, 180),
-    9: (181, 193),
-}
-
+INDEX_DIR = os.environ.get("INDEX_DIR", "")
+BOOKS = [b.strip() for b in os.environ.get("BOOKS", "").split(",") if b.strip()]
 EMBEDDINGS_PATH = Path(os.environ.get("PAGES_PT", "/srv/model/pages.colqwen2.pt"))
+PAGES_BOOK = os.environ.get("PAGES_BOOK", "Punjab_9_Physics")
 EXPECTED_CHECKPOINT = os.environ.get("EXPECTED_CHECKPOINT", "vidore/colqwen2-v1.0")
 DTYPE = os.environ.get("DTYPE", "bfloat16")
 SHARED_SECRET = os.environ.get("RETRIEVAL_SHARED_SECRET", "")
 CACHE_SIZE = int(os.environ.get("CACHE_SIZE", "512"))
+
+# The query model is pinned to the revisions `ml/indexing` encodes pages with, so pages
+# and questions come from the same weights. `revision=` together with the hub id raises
+# RevisionNotFoundError (transformers swaps the id for the base and reuses the revision),
+# so the adapter is fetched at its revision first and the base revision is handed to
+# from_pretrained, which only fetches the files the model needs.
+PINNED_REVISIONS = {
+    "vidore/colqwen2-v1.0": (
+        "2b6ac8fb37f46a49e4841e599583d00ae8a20117",  # adapter
+        "9fe8a713422a7cb4ef79ca77a09b381ee2243101",  # vidore/colqwen2-base
+    ),
+}
 
 # How long a request will wait for the model before giving up. ⚠️ MUST stay below the
 # backend's own read timeout (20 s in `remote.py`), or the backend abandons the request
@@ -77,30 +85,45 @@ MAX_WAIT_S = float(os.environ.get("MAX_WAIT_S", "15"))
 ANCHOR_PRIOR = float(os.environ.get("ANCHOR_PRIOR", "0.05"))
 
 
-def chapter_of(page: int) -> int | None:
-    for chapter, (first, last) in CHAPTERS.items():
-        if first <= page <= last:
-            return chapter
-    return None
-
-
 def normalise(question: str) -> str:
     """Cache key. Case and whitespace only.
 
     Deliberately does NOT strip punctuation or stem: "what is heat" and "what is heat
     capacity" must not collapse onto one entry, and an over-eager key would serve the
     wrong pages confidently. Lowercasing is a no-op for Urdu script, which is fine - it
-    just means those queries key on themselves.
+    just means those queries key on themselves. The key has no book in it on purpose:
+    the embedding of a question is the same whichever book is searched.
     """
     return " ".join(question.lower().split())
 
 
+@dataclass
+class Book:
+    """One book's pages, held in bfloat16 (lossless: the model computes in bfloat16)."""
+
+    book_id: str
+    pages: list[int]
+    docs: Any  # (pages, vectors, dim) bfloat16 tensor
+
+
+def discover(index_dir: Path, allow: list[str]) -> list[tuple[str, Path]]:
+    """(book_id, path) for every `<id>/<id>.colqwen2.pt` under index_dir, sorted."""
+    found = []
+    for folder in sorted(p for p in index_dir.iterdir() if p.is_dir()):
+        path = folder / f"{folder.name}.colqwen2.pt"
+        if path.is_file() and (not allow or folder.name in allow):
+            found.append((folder.name, path))
+    missing = sorted(set(allow) - {book_id for book_id, _ in found})
+    if missing:
+        raise SystemExit(f"BOOKS names books not found under {index_dir}: {missing}")
+    return found
+
+
 class Index:
-    """The stacked page embeddings, the query encoder, and the query-embedding cache."""
+    """Every book's page embeddings, the query encoder, and the query-embedding cache."""
 
     def __init__(self) -> None:
-        self.pages: list[int] = []
-        self.docs: Any = None
+        self.books: dict[str, Book] = {}
         self.checkpoint = ""
         self.vectors_per_page = 0
         self.dim = 0
@@ -115,26 +138,59 @@ class Index:
         self._model = None
         self._processor = None
 
+    @property
+    def total_pages(self) -> int:
+        return sum(len(book.pages) for book in self.books.values())
+
     # -- startup ---------------------------------------------------------------
 
+    def sources(self) -> list[tuple[str, Path]]:
+        if INDEX_DIR:
+            index_dir = Path(INDEX_DIR)
+            if not index_dir.is_dir():
+                raise SystemExit(f"INDEX_DIR {index_dir} is not a folder")
+            found = discover(index_dir, BOOKS)
+            if not found:
+                raise SystemExit(f"no <book>/<book>.colqwen2.pt under INDEX_DIR {index_dir}")
+            return found
+        if not EMBEDDINGS_PATH.exists():
+            raise SystemExit(
+                f"embeddings not found at {EMBEDDINGS_PATH}; set PAGES_PT or INDEX_DIR"
+            )
+        return [(PAGES_BOOK, EMBEDDINGS_PATH)]
+
     def load(self) -> None:
-        """Validate the embeddings, then load the model. Order matters.
+        """Validate every book, then load the model. Order matters.
 
         Every guard runs BEFORE the ~5 GB model load, so a mispaired file fails in
         seconds instead of after a two-minute load. `SystemExit` rather than a degraded
         mode: this process has exactly one job, and a process that cannot do it
-        correctly must not accept traffic. The backend degrades; this does not.
+        correctly must not accept traffic. The backend degrades; this does not. One bad
+        book therefore refuses the whole start - narrow `BOOKS` to leave it out.
         """
+        started = time.monotonic()
+        for book_id, path in self.sources():
+            self.books[book_id] = self._load_book(book_id, path)
+        logger.info(
+            "embeddings OK: %d book(s), %d pages, %d vectors/page, dim %d, checkpoint %s, %.1fs",
+            len(self.books),
+            self.total_pages,
+            self.vectors_per_page,
+            self.dim,
+            self.checkpoint,
+            time.monotonic() - started,
+        )
+        self._load_model()
+
+    def _load_book(self, book_id: str, path: Path) -> Book:
         import torch
 
-        if not EMBEDDINGS_PATH.exists():
-            raise SystemExit(f"embeddings not found at {EMBEDDINGS_PATH}; set PAGES_PT")
-
-        # weights_only=False executes pickle, so this file must be one we control. It is
-        # baked into the image at build time and never fetched at runtime.
-        store = torch.load(EMBEDDINGS_PATH, map_location="cpu", weights_only=False)
-
-        self.checkpoint = store.get("checkpoint", "")
+        # weights_only=True refuses pickled code; the files are plain dicts of tensors,
+        # lists and strings (ml/indexing guarantees it, and the original Physics file
+        # loads the same way). mmap keeps the load peak near one book, not two copies.
+        store = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
+        name = path.name
+        checkpoint = store.get("checkpoint", "")
         pages = store.get("pages", [])
         embeddings = store.get("embeddings", [])
 
@@ -143,47 +199,55 @@ class Index:
         # against ColPali pages produces confidently wrong citations and no error
         # anywhere, because both are 128-dimensional. It is the worst failure in the
         # system precisely because nothing reports it.
-        if self.checkpoint != EXPECTED_CHECKPOINT:
+        if checkpoint != EXPECTED_CHECKPOINT:
             raise SystemExit(
-                f"checkpoint mismatch: {EMBEDDINGS_PATH.name} holds "
-                f"'{self.checkpoint}', expected '{EXPECTED_CHECKPOINT}'. Refusing to "
-                f"start - scoring one model's query against another's pages is silent."
+                f"checkpoint mismatch: {name} holds '{checkpoint}', expected "
+                f"'{EXPECTED_CHECKPOINT}'. Refusing to start - scoring one model's query "
+                f"against another's pages is silent."
             )
+        self.checkpoint = checkpoint
 
-        # Guard 2: a partial encode must not look complete. Pages exactly 1..200.
-        if sorted(pages) != list(range(1, BOOK_PAGES + 1)):
-            missing = sorted(set(range(1, BOOK_PAGES + 1)) - set(pages))
+        # Guard 2: the file is the book it claims to be. The original single-book file
+        # predates the field, which is why a missing book_id is accepted.
+        stored_id = store.get("book_id")
+        if stored_id is not None and stored_id != book_id:
+            raise SystemExit(f"{name} holds book '{stored_id}' but is loaded as '{book_id}'")
+
+        # Guard 3: a partial encode must not look complete. Pages exactly 1..N.
+        expected = store.get("expected_pages") or len(pages)
+        if sorted(pages) != list(range(1, expected + 1)):
+            missing = sorted(set(range(1, expected + 1)) - set(pages))
             raise SystemExit(
-                f"{EMBEDDINGS_PATH.name} does not cover pages 1-{BOOK_PAGES}; "
+                f"{name} does not cover pages 1-{expected}; "
                 f"missing {missing[:10]}{' ...' if len(missing) > 10 else ''}"
             )
 
-        # Guard 3: the page list indexes into the embedding list. A length mismatch
+        # Guard 4: the page list indexes into the embedding list. A length mismatch
         # means every citation is off by an unknown amount.
         if len(pages) != len(embeddings):
             raise SystemExit(
-                f"{EMBEDDINGS_PATH.name} has {len(pages)} pages against "
-                f"{len(embeddings)} embeddings; the page mapping is broken"
+                f"{name} has {len(pages)} pages against {len(embeddings)} embeddings; "
+                f"the page mapping is broken"
             )
 
         if not store.get("complete", True):
-            raise SystemExit(f"{EMBEDDINGS_PATH.name} is marked incomplete")
+            raise SystemExit(f"{name} is marked incomplete")
 
-        self.pages = pages
-        # Stacked once, float32, at startup - so no per-request cast and no padding
-        # allocation on the hot path. ~77 MB for 200 x 755 x 128.
-        self.docs = torch.stack([tensor.to(torch.float32) for tensor in embeddings])
-        self.vectors_per_page = int(self.docs.shape[1])
-        self.dim = int(self.docs.shape[2])
-        logger.info(
-            "embeddings OK: %d pages, %d vectors/page, dim %d, checkpoint %s",
-            len(self.pages),
-            self.vectors_per_page,
-            self.dim,
-            self.checkpoint,
-        )
-
-        self._load_model()
+        # Stacked once, at startup. Every page must have the same shape; a mismatch is a
+        # broken file, reported as one rather than as a bare RuntimeError.
+        try:
+            docs = torch.stack([tensor.to(torch.bfloat16) for tensor in embeddings])
+        except RuntimeError as exc:
+            raise SystemExit(f"{name}: pages have different shapes ({exc})") from exc
+        vectors, dim = int(docs.shape[1]), int(docs.shape[2])
+        if self.books and (vectors, dim) != (self.vectors_per_page, self.dim):
+            raise SystemExit(
+                f"{name}: {vectors}x{dim} per page, but other books are "
+                f"{self.vectors_per_page}x{self.dim}"
+            )
+        self.vectors_per_page, self.dim = vectors, dim
+        order = sorted(range(len(pages)), key=lambda i: pages[i])
+        return Book(book_id, [int(pages[i]) for i in order], docs[order])
 
     def _load_model(self) -> None:
         import colpali_engine.models as models
@@ -204,17 +268,31 @@ class Index:
             torch.set_num_interop_threads(1)
 
         started = time.monotonic()
-        self._model = (
-            getattr(models, model_class)
-            .from_pretrained(self.checkpoint, torch_dtype=getattr(torch, DTYPE), device_map="cpu")
-            .eval()
-        )
-        self._processor = getattr(models, processor_class).from_pretrained(self.checkpoint)
+        dtype = getattr(torch, DTYPE)
+        pinned = PINNED_REVISIONS.get(self.checkpoint)
+        if pinned:
+            from huggingface_hub import snapshot_download
+
+            adapter = snapshot_download(self.checkpoint, revision=pinned[0])
+            self._model = (
+                getattr(models, model_class)
+                .from_pretrained(adapter, revision=pinned[1], dtype=dtype, device_map="cpu")
+                .eval()
+            )
+            self._processor = getattr(models, processor_class).from_pretrained(adapter)
+        else:
+            self._model = (
+                getattr(models, model_class)
+                .from_pretrained(self.checkpoint, dtype=dtype, device_map="cpu")
+                .eval()
+            )
+            self._processor = getattr(models, processor_class).from_pretrained(self.checkpoint)
         logger.info(
-            "%s loaded in %.1fs at %s, %d torch threads",
+            "%s loaded in %.1fs at %s (%s), %d torch threads",
             model_class,
             time.monotonic() - started,
             DTYPE,
+            f"pinned {pinned[0][:8]}/{pinned[1][:8]}" if pinned else "unpinned",
             torch.get_num_threads(),
         )
 
@@ -254,7 +332,7 @@ class Index:
         acquired = self._model_lock.acquire(timeout=MAX_WAIT_S)
         if not acquired:
             # Busy, not broken. The backend turns this into a degraded answer from its
-            # keyword tier rather than an error the student sees.
+            # keyword tier (Physics 9) or a "not available right now" (other books).
             raise HTTPException(
                 status_code=503,
                 detail=f"model busy; waited {MAX_WAIT_S:.0f}s",
@@ -277,42 +355,57 @@ class Index:
         self._store(key, embedding)
         return embedding, elapsed, False
 
+    def book(self, book_id: str) -> Book:
+        book = self.books.get(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail=f"book '{book_id}' is not loaded")
+        return book
+
     def search(
-        self, question: str, top_k: int, chapter: int | None
+        self, book_id: str, question: str, top_k: int, anchor: tuple[int, int] | None
     ) -> tuple[list[int], list[float], float, float, bool]:
         import torch
 
+        book = self.book(book_id)
+        if anchor is not None and not 1 <= anchor[0] <= anchor[1] <= len(book.pages):
+            raise HTTPException(
+                status_code=400,
+                detail=f"anchor {list(anchor)} is outside pages 1-{len(book.pages)}",
+            )
         embedding, encode_s, was_cached = self.encode(question)
 
         started = time.monotonic()
         # Late interaction: each query token takes its best-matching patch on the page,
-        # then sum over query tokens. `docs` is read-only after startup, so this runs
-        # outside the model lock and cache hits are fully concurrent.
-        similarity = torch.einsum("qd,pnd->pqn", embedding, self.docs)
+        # then sum over query tokens. Only the requested book is cast to float32 - at
+        # most ~170 MB for a 440-page book, tens of milliseconds against a 6 s encode -
+        # so every book stays resident in bfloat16 and nothing else is allocated. The
+        # page tensors are read-only after startup, so this runs outside the model lock
+        # and cache hits are fully concurrent.
+        docs = book.docs.to(torch.float32)
+        similarity = torch.einsum("qd,pnd->pqn", embedding, docs)
         scores = similarity.max(dim=2).values.sum(dim=1)
 
-        if chapter is not None:
-            scores = self._apply_anchor(scores, chapter)
+        if anchor is not None:
+            scores = self._apply_anchor(scores, book, anchor)
 
         k = min(max(1, top_k), int(scores.numel()))
         top = torch.topk(scores, k)
         search_s = time.monotonic() - started
 
-        pages = [self.pages[index] for index in top.indices.tolist()]
+        pages = [book.pages[index] for index in top.indices.tolist()]
         return pages, [round(v, 4) for v in top.values.tolist()], encode_s, search_s, was_cached
 
-    def _apply_anchor(self, scores, chapter: int):
+    def _apply_anchor(self, scores, book: Book, anchor: tuple[int, int]):
         """A prior, never a filter. Applied BEFORE top-k, which is why it lives here
         and not in the backend - the backend only sees pages that already survived."""
         import torch
 
-        if chapter not in CHAPTERS:
-            return scores
         spread = float(scores.max() - scores.min())
         if spread <= 0.0:
             return scores
+        first, last = anchor
         mask = torch.tensor(
-            [1.0 if chapter_of(page) == chapter else 0.0 for page in self.pages],
+            [1.0 if first <= page <= last else 0.0 for page in book.pages],
             dtype=scores.dtype,
         )
         return scores + mask * (ANCHOR_PRIOR * spread)
@@ -328,7 +421,7 @@ async def lifespan(_: FastAPI):
     # initialisation - otherwise the first measurement of the day is an outlier and the
     # first student of the day waits for it.
     started = time.monotonic()
-    index.search("warmup", 1, None)
+    index.search(next(iter(index.books)), "warmup", 1, None)
     # The warmup must not pollute the cache or the hit-rate statistics it would
     # otherwise inflate.
     index._cache.clear()
@@ -337,13 +430,24 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="EduBridge retrieval (Physics 9)", lifespan=lifespan)
+app = FastAPI(title="EduBridge retrieval (textbook pages)", lifespan=lifespan)
 
 
 class RetrieveRequest(BaseModel):
+    # Optional so an older backend, which sends no book, still gets the single book it
+    # was written for. Extra fields from that backend (`chapter`) are ignored.
+    book: str | None = Field(default=None, min_length=1, max_length=64)
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=3, ge=1, le=10)
-    chapter: int | None = Field(default=None, ge=1, le=9)
+    anchor: tuple[int, int] | None = None
+
+
+def resolve_book_id(requested: str | None) -> str:
+    if requested is not None:
+        return requested
+    if len(index.books) == 1:
+        return next(iter(index.books))
+    return PAGES_BOOK
 
 
 def _check_secret(provided: str | None) -> None:
@@ -360,17 +464,19 @@ def retrieve(
     payload: RetrieveRequest,
     x_retrieval_secret: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Rank pages against a question.
+    """Rank one book's pages against a question.
 
     A sync `def` on purpose: FastAPI runs it in a threadpool, so a multi-second
     blocking forward pass does not stall the event loop. `async def` here would freeze
     every other request, including `/health`.
     """
     _check_secret(x_retrieval_secret)
+    book_id = resolve_book_id(payload.book)
     pages, scores, encode_s, search_s, was_cached = index.search(
-        payload.question, payload.top_k, payload.chapter
+        book_id, payload.question, payload.top_k, payload.anchor
     )
     return {
+        "book": book_id,
         "pages": pages,
         "scores": scores,
         "encode_ms": round(encode_s * 1000, 2),
@@ -386,9 +492,10 @@ def health() -> dict[str, Any]:
     that needs a credential is one the platform cannot use."""
     total = index.hits + index.misses
     return {
-        "status": "ok" if index.docs is not None else "loading",
+        "status": "ok" if index.books else "loading",
         "checkpoint": index.checkpoint,
-        "pages": len(index.pages),
+        "books": sorted(index.books),
+        "pages": index.total_pages,
         "vectors_per_page": index.vectors_per_page,
         "dim": index.dim,
         "dtype": DTYPE,

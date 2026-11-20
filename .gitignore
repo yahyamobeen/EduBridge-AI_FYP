@@ -71,6 +71,9 @@ supabase/.branches/
 # .pt index and the torch venv, both of which live outside this repo --
 # committing it would bake one developer's folder layout into the project.
 ml/serving/run-colqwen.bat
+# The one-click launcher with this machine's paths filled in (run-books.example.bat is
+# the committed, path-free version it calls).
+ml/serving/run-books.bat
 
 # ml/indexing: the reference files are built locally by `encode_books.py make-reference`
 # from the served index (gitignored) and shipped in the hand-over zip; only the small scan

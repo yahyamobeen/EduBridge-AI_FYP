@@ -2,12 +2,15 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '@/messages/en.json'
+import { ApiError } from '@/lib/api/errors'
 import { PhysicsChatView } from './PhysicsChatView'
+import type { OpenBook } from './subjects'
 
 vi.mock('@/lib/api/endpoints', () => ({
   askTutor: vi.fn(),
   listTutorSessions: vi.fn(),
   getTutorSession: vi.fn(),
+  tutorPagePath: (bookId: string, page: number) => `/tutor/books/${bookId}/pages/${page}`,
 }))
 
 // TutorFigure fetches the crop through the authenticated client, because the figure
@@ -58,22 +61,48 @@ const PAGE_155: PageCitation = {
   page: 155,
   chapter: 7,
   score: 18.4,
-  url: '/api/tutor/class9/physics/pages/155',
+  url: '/api/tutor/books/Punjab_9_Physics/pages/155',
 }
+
+/** The Physics 9 pilot book - most tests below were written against it. */
+const PHYSICS: OpenBook = {
+  bookId: 'Punjab_9_Physics',
+  subject: 'Physics',
+  board: 'PCTB',
+  classLevel: 9,
+}
+
+const CHEMISTRY: OpenBook = {
+  bookId: 'Sindh_10_Chemistry',
+  subject: 'Chemistry',
+  board: 'STBB',
+  classLevel: 10,
+}
+
+function fill(template: string, values: Record<string, string | number>) {
+  return Object.entries(values).reduce(
+    (s, [k, v]) => s.replaceAll(`{${k}}`, String(v)),
+    template,
+  )
+}
+
+const PLACEHOLDER = fill(en.tutor.chat.inputPlaceholder, { subject: en.tutor.subjects.physics })
 
 function renderChat({
   onBack = vi.fn(),
   onClose = vi.fn(),
+  book = PHYSICS,
 }: {
   onBack?: () => void
   onClose?: () => void
+  book?: OpenBook
 } = {}) {
   return {
     onBack,
     onClose,
     ...render(
       <NextIntlClientProvider locale="en" messages={en}>
-        <PhysicsChatView onBack={onBack} onClose={onClose} />
+        <PhysicsChatView book={book} onBack={onBack} onClose={onClose} />
       </NextIntlClientProvider>,
     ),
   }
@@ -87,8 +116,11 @@ describe('PhysicsChatView', () => {
   it('renders title, welcome greeting, and quick prompt chips', () => {
     renderChat()
 
-    expect(screen.getByText(en.tutor.chat.title)).toBeInTheDocument()
-    expect(screen.getByText(en.tutor.chat.welcome)).toBeInTheDocument()
+    const subject = en.tutor.subjects.physics
+    expect(screen.getByText(fill(en.tutor.chat.title, { subject }))).toBeInTheDocument()
+    expect(
+      screen.getByText(fill(en.tutor.chat.welcome, { class: 9, subject })),
+    ).toBeInTheDocument()
     expect(screen.getByText(en.tutor.chat.chip1)).toBeInTheDocument()
     expect(screen.getByText(en.tutor.chat.chip2)).toBeInTheDocument()
     expect(screen.getByText(en.tutor.chat.chip3)).toBeInTheDocument()
@@ -114,6 +146,7 @@ describe('PhysicsChatView', () => {
         message: en.tutor.chat.chip1,
         lang: 'en',
         session_id: null,
+        book_id: 'Punjab_9_Physics',
       })
     })
 
@@ -135,7 +168,7 @@ describe('PhysicsChatView', () => {
     fireEvent.click(romanBtn)
 
     // Type query and send
-    const input = screen.getByPlaceholderText(en.tutor.chat.inputPlaceholder)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
     fireEvent.change(input, { target: { value: 'Pascal ka qanoon kya hai?' } })
     fireEvent.click(screen.getByLabelText(en.tutor.chat.send))
 
@@ -144,18 +177,20 @@ describe('PhysicsChatView', () => {
         message: 'Pascal ka qanoon kya hai?',
         lang: 'ur-Latn',
         session_id: null,
+        book_id: 'Punjab_9_Physics',
       })
     })
   })
 
   it('opens page scan preview dialog when citation is clicked', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Blob(['jpegbytes'], { type: 'image/jpeg' }))
     vi.mocked(askTutor).mockReturnValueOnce(
       streamOf({ pages: [PAGE_155], chunks: ['See chapter 7 page 155.'] }),
     )
 
     renderChat()
 
-    const input = screen.getByPlaceholderText(en.tutor.chat.inputPlaceholder)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
     fireEvent.change(input, { target: { value: 'Show thermocouple diagram' } })
     fireEvent.click(screen.getByLabelText(en.tutor.chat.send))
 
@@ -167,16 +202,27 @@ describe('PhysicsChatView', () => {
     const citationBtn = screen.getByText(/Page 155/).closest('button')!
     fireEvent.click(citationBtn)
 
-    // Preview dialog should open
-    expect(screen.getByText(/Page 155 \(PCTB Physics 9\)/)).toBeInTheDocument()
-    const img = screen.getByAltText(/Textbook Page 155/)
-    expect(img).toHaveAttribute('src', '/api/tutor/class9/physics/pages/155')
+    // Preview dialog should open, titled with the page and the book's subject
+    const title = fill(en.tutor.chat.previewTitle, {
+      page: 155,
+      subject: en.tutor.subjects.physics,
+    })
+    expect(screen.getByText(title)).toBeInTheDocument()
+
+    // The scan is fetched with the bearer token from the BOOK's page route and shown as a
+    // data: URI - never the citation's `/api/...` url (apiFetch would double `/api`) and
+    // never a plain <img src> (the route is authenticated).
+    const img = await screen.findByAltText(fill(en.tutor.chat.pageAlt, { page: 155 }))
+    expect(img.getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/)
+    expect(apiFetch).toHaveBeenCalledWith('/tutor/books/Punjab_9_Physics/pages/155', {
+      responseType: 'blob',
+    })
 
     // Close preview
-    const closeBtns = screen.getAllByLabelText('Close')
+    const closeBtns = screen.getAllByLabelText(en.tutor.chat.close)
     fireEvent.click(closeBtns[closeBtns.length - 1]!)
 
-    expect(screen.queryByText(/Page 155 \(PCTB Physics 9\)/)).not.toBeInTheDocument()
+    expect(screen.queryByText(title)).not.toBeInTheDocument()
   })
 
   it('displays error message and retry button on network failure', async () => {
@@ -186,7 +232,7 @@ describe('PhysicsChatView', () => {
 
     renderChat()
 
-    const input = screen.getByPlaceholderText(en.tutor.chat.inputPlaceholder)
+    const input = screen.getByPlaceholderText(PLACEHOLDER)
     fireEvent.change(input, { target: { value: 'Force formula' } })
     fireEvent.click(screen.getByLabelText(en.tutor.chat.send))
 
@@ -369,6 +415,7 @@ describe('PhysicsChatView history', () => {
     vi.mocked(listTutorSessions).mockResolvedValueOnce([
       {
         id: 'sess-9',
+        book_id: 'Punjab_9_Physics',
         subject: 'physics',
         class_level: 9,
         chapter: 7,
@@ -380,6 +427,7 @@ describe('PhysicsChatView history', () => {
     ])
     vi.mocked(getTutorSession).mockResolvedValueOnce({
       id: 'sess-9',
+      book_id: 'Punjab_9_Physics',
       subject: 'physics',
       class_level: 9,
       chapter: 7,
@@ -421,6 +469,7 @@ describe('PhysicsChatView history', () => {
     vi.mocked(listTutorSessions).mockResolvedValueOnce([
       {
         id: 'sess-9',
+        book_id: 'Punjab_9_Physics',
         subject: 'physics',
         class_level: 9,
         chapter: null,
@@ -432,6 +481,7 @@ describe('PhysicsChatView history', () => {
     ])
     vi.mocked(getTutorSession).mockResolvedValueOnce({
       id: 'sess-9',
+      book_id: 'Punjab_9_Physics',
       subject: 'physics',
       class_level: 9,
       chapter: null,
@@ -537,5 +587,71 @@ describe('PhysicsChatView figures', () => {
       expect(screen.getByText('No diagram needed.')).toBeInTheDocument()
     })
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+  it('a book other than Physics 9 has its own header, placeholder and no Physics chips', () => {
+    renderChat({ book: CHEMISTRY })
+    const subject = en.tutor.subjects.chemistry
+    expect(screen.getByText(fill(en.tutor.chat.title, { subject }))).toBeInTheDocument()
+    expect(
+      screen.getByText(fill(en.tutor.chat.subtitle, { board: 'STBB', class: 10, subject })),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText(fill(en.tutor.chat.inputPlaceholder, { subject })),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(en.tutor.chat.chip1)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        fill(en.tutor.chat.disclaimer, { board: en.tutor.boards.STBB, class: 10, subject }),
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it("MODEL_UNAVAILABLE says the book's tutor is unavailable, not that the internet is down", async () => {
+    vi.mocked(askTutor).mockImplementationOnce(() => {
+      throw new ApiError(503, 'MODEL_UNAVAILABLE', 'busy')
+    })
+    renderChat({ book: CHEMISTRY })
+
+    const subject = en.tutor.subjects.chemistry
+    fireEvent.change(
+      screen.getByPlaceholderText(fill(en.tutor.chat.inputPlaceholder, { subject })),
+      {
+        target: { value: 'What is an ionic bond?' },
+      },
+    )
+    fireEvent.click(screen.getByLabelText(en.tutor.chat.send))
+
+    expect(
+      await screen.findByText(fill(en.tutor.chat.unavailable, { subject })),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(en.tutor.chat.errorFallback)).not.toBeInTheDocument()
+    expect(askTutor).toHaveBeenCalledWith(
+      expect.objectContaining({ book_id: 'Sindh_10_Chemistry' }),
+    )
+  })
+
+  it("past conversations list only this book's sessions", async () => {
+    const session = (id: string, book_id: string | null, opening_question: string) => ({
+      id,
+      book_id,
+      subject: 'Chemistry',
+      class_level: 10,
+      chapter: null,
+      started_at: '2026-11-17T08:00:00Z',
+      message_count: 2,
+      last_message_at: null,
+      opening_question,
+    })
+    vi.mocked(listTutorSessions).mockResolvedValueOnce([
+      session('a', 'Sindh_10_Chemistry', 'What is a salt?'),
+      session('b', 'Sindh_9_English', 'What is a noun?'),
+      session('c', null, 'Orphan question'),
+    ])
+    renderChat({ book: CHEMISTRY })
+
+    fireEvent.click(screen.getByLabelText(en.tutor.chat.history))
+    expect(await screen.findByText('What is a salt?')).toBeInTheDocument()
+    expect(screen.queryByText('What is a noun?')).not.toBeInTheDocument()
+    expect(screen.queryByText('Orphan question')).not.toBeInTheDocument()
   })
 })

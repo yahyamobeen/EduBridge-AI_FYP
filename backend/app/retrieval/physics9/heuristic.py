@@ -26,7 +26,9 @@ from app.retrieval.physics9.base import (
     BOOK_PAGES,
     CHAPTER_NAMES,
     CHAPTERS,
+    PHYSICS_BOOK,
     Hit,
+    RetrievalUnavailableError,
     Timings,
     chapter_of,
     make_hits,
@@ -888,8 +890,14 @@ class HeuristicRetriever:
         return "heuristic"
 
     def search(
-        self, question: str, top_k: int = 3, chapter: int | None = None
+        self, question: str, top_k: int = 3, chapter: int | None = None, *, book=None
     ) -> tuple[list[Hit], Timings]:
+        # The index below describes Physics 9 and nothing else. Answering another book
+        # from it would cite Physics pages for a Chemistry question - so every other
+        # book is refused, which is also what keeps production (where this tier is the
+        # primary one) from doing exactly that (tdd.md §3.2a "Many books").
+        if book is not None and book.book_id != PHYSICS_BOOK:
+            raise RetrievalUnavailableError(f"no keyword index for {book.book_id}")
         started = time.monotonic()
         scored = self._heuristic_match(question, top_k)
         if chapter is not None:
@@ -898,7 +906,7 @@ class HeuristicRetriever:
         # unmeasured. `search` is the real elapsed time - the previous revision
         # reported a hardcoded 0.002, which is a fabricated measurement in a component
         # whose entire purpose is to be measured.
-        return make_hits(scored), Timings(encode=0.0, search=time.monotonic() - started)
+        return make_hits(scored, book), Timings(encode=0.0, search=time.monotonic() - started)
 
     def _heuristic_match(self, question: str, top_k: int) -> list[tuple[int, float]]:
         """Matches query to textbook pages based on curriculum subtopics and evalset anchors."""

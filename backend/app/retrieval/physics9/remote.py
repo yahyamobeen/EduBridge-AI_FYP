@@ -17,6 +17,8 @@ import httpx
 
 from app.retrieval.physics9.base import (
     BOOK_PAGES,
+    CHAPTERS,
+    PHYSICS_BOOK,
     Hit,
     RetrievalUnavailableError,
     Timings,
@@ -48,11 +50,19 @@ class RemoteRetriever:
         return "remote"
 
     def search(
-        self, question: str, top_k: int = 3, chapter: int | None = None
+        self, question: str, top_k: int = 3, chapter: int | None = None, *, book=None
     ) -> tuple[list[Hit], Timings]:
-        payload: dict[str, object] = {"question": question, "top_k": top_k}
-        if chapter is not None:
-            payload["chapter"] = chapter
+        book_id = book.book_id if book is not None else PHYSICS_BOOK
+        pages = book.pages if book is not None else BOOK_PAGES
+        payload: dict[str, object] = {"book": book_id, "question": question, "top_k": top_k}
+        # The service holds no chapter tables: a chapter travels as its page range, and
+        # a book without chapters sends no anchor at all.
+        if book is not None:
+            anchor = book.anchor(chapter)
+        else:
+            anchor = CHAPTERS.get(chapter) if chapter is not None else None
+        if anchor is not None:
+            payload["anchor"] = list(anchor)
 
         headers = {"X-Retrieval-Secret": self._secret} if self._secret else {}
 
@@ -69,7 +79,7 @@ class RemoteRetriever:
             logger.warning("retrieval service unreachable (%s)", type(exc).__name__)
             raise RetrievalUnavailableError(str(type(exc).__name__)) from exc
 
-        return make_hits(_validate(body, top_k)), Timings(
+        return make_hits(_validate(body, top_k, page_count=pages, book_id=book_id), book), Timings(
             encode=_seconds(body.get("encode_ms")),
             search=_seconds(body.get("search_ms")),
         )
@@ -87,7 +97,9 @@ def _seconds(milliseconds: object) -> float:
         return 0.0
 
 
-def _validate(body: object, top_k: int) -> list[tuple[int, float]]:
+def _validate(
+    body: object, top_k: int, *, page_count: int = BOOK_PAGES, book_id: str = PHYSICS_BOOK
+) -> list[tuple[int, float]]:
     """Check the response before it becomes a citation.
 
     The retrieval service is a separate process we do not hold a transaction with, so
@@ -97,6 +109,13 @@ def _validate(body: object, top_k: int) -> list[tuple[int, float]]:
     """
     if not isinstance(body, dict):
         raise RetrievalUnavailableError("response was not an object")
+
+    # An older service echoes no book and serves its one book - accepted. A service
+    # that names a DIFFERENT book answered the wrong question, and its page numbers
+    # would be cited against this one.
+    echoed = body.get("book")
+    if echoed is not None and echoed != book_id:
+        raise RetrievalUnavailableError(f"service answered for {echoed!r}, not {book_id!r}")
 
     pages, scores = body.get("pages"), body.get("scores")
     if not isinstance(pages, list) or not isinstance(scores, list):
@@ -108,8 +127,8 @@ def _validate(body: object, top_k: int) -> list[tuple[int, float]]:
     for page, score in list(zip(pages, scores, strict=True))[:top_k]:
         if not isinstance(page, int) or isinstance(page, bool):
             raise RetrievalUnavailableError("page number was not an integer")
-        if not 1 <= page <= BOOK_PAGES:
-            raise RetrievalUnavailableError(f"page {page} is outside 1-{BOOK_PAGES}")
+        if not 1 <= page <= page_count:
+            raise RetrievalUnavailableError(f"page {page} is outside 1-{page_count}")
         try:
             out.append((page, float(score)))
         except (TypeError, ValueError) as exc:

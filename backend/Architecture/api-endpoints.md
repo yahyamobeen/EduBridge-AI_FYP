@@ -21,12 +21,12 @@ SLO — Student Learning Outcome. SBOM — Software Bill of Materials. KB — Kn
 
 | | Count | How it was measured |
 |---|---|---|
-| Implemented routes | **71** (21 auth + 43 classroom + 7 tutor) | `grep -c "^@router\." backend/app/{auth,classroom,tutor}/routes.py` |
+| Implemented routes | **73** (21 auth + 43 classroom + 9 tutor) | `grep -c "^@router\." backend/app/{auth,classroom,tutor}/routes.py` |
 | Routers in the backend | **3** | `auth_router`, `classroom_router`, `tutor_router` — all mounted at `settings.api_base_path` |
 | Specified in `tdd.md` §3.1 | 23 | rows at `tdd.md:176-198` — `POST /api/auth/admin/login` was added to the table in phase 1b (FR-A2a) |
 | Specified in `tdd.md` §7.2 | 64 | §7.2 consolidates §3.1 plus Tutor (§3.2), Quiz/Practice (§3.5), Spaces/Classroom (§3.6, `tdd.md:325-357` — **44 endpoints**: 40 since v0.4.0, plus the four Phase 6b added on 2026-10-05, counting each method/path pair in a combined row) and its own rows — where `GET /api/admin/rate-limits / PUT` is **two** endpoints |
-| **Total specified** | **87** | 23 + 3 + 6 + 44 + 11 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40; 83 until Phase 6b added 4 on 2026-10-05) |
-| **Specified but missing** | **23** | 87 − 64 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40, Phase 3 built 4, Phase 4 built 12, Phase 5 built 1, Phase 6 built 7, Phase 6b specified and built 4, Phase 7 built 4 and Phase 8 built 1** (§2.8) |
+| **Total specified** | **89** | 23 + 3 + 6 + 44 + 11 + 2 (was 49 before `tdd.md` v0.4.0 grew §3.6 from 6 to 40; 83 until Phase 6b added 4 on 2026-10-05; 87 until the tutor's many-books change added `GET /api/tutor/books` and `GET /api/tutor/books/{book_id}/pages/{n}` to §3.2 on 2026-11-17, specified and built together) |
+| **Specified but missing** | **23** | 89 − 66 — enumerated in §4 below. Phase 3 built the three FR-A8 account-management routes (finding **E1**); phase 1b before it added one specified endpoint AND implemented it in the same change, leaving the total unchanged. Classroom Phase 1 (2026-10-04) added 34 specified endpoints and built none; **classroom Phase 2 built 10 of the 40, Phase 3 built 4, Phase 4 built 12, Phase 5 built 1, Phase 6 built 7, Phase 6b specified and built 4, Phase 7 built 4 and Phase 8 built 1** (§2.8) |
 
 ⚠️ **The "specified but missing" figure is unchanged by the tutor work, and that is not an
 oversight.** §3.2's three generic tutor rows were already counted as specified, and
@@ -307,22 +307,33 @@ cannot see the first's enrolment, that a refusal writes nothing and ends no sess
 teacher's chosen language reaches `app.lookup_user_for_email_flow` — asserted through the function
 production actually calls, not through the ORM.
 
-### 2.7 Class 9 Physics Visual Retrieval Tutor (PCTB)
+### 2.7 AI Tutor — every book the student is entitled to (`tdd.md` §3.2a)
 
-**This table describes the code as it is, not as intended.** The previous revision asserted a
-`tutor_chat` rate limit, `require_role('student')` on the page-scan route, and "full ColQwen2
-MaxSim" — **none of which exist.** Every handler name and line below was re-read from source
-on 2026-10-13.
+**This table describes the code as it is, not as intended.** Every handler name and line below
+was re-read from source on 2026-11-17, when the tutor went from one book (Punjab Class 9
+Physics) to every indexed book (`tdd.md` §3.2a "Many books").
 
 | Route | Handler | Service | Models | Auth | Limit | `tdd.md` |
 |---|---|---|---|---|---|---|
-| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:89` | `answer_physics_query` `retrieval/physics9/service.py:46` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** — the SAME bucket as `/ask` | §3.2a — ⚠️ superseded by `/api/tutor/ask` |
-| `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:120` | path built inline at `:131` | `FileResponse` | ⚠️ **none** | none | §3.2a page asset |
-| `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:139` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a |
-| `POST /api/tutor/ask` | `ask` | `retrieve_for_turn` + `PhysicsGenerator.stream_tokens` | `AskRequest` → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, `require_class_9_student` | **`tutor_ask` (20/min per user)** | §3.2 |
-| `GET /api/tutor/figures/{message_id}` | `get_tutor_figure` | `tutor/service.py` `message_figure` + `tutor/figures.py` `crop_page` | → `image/jpeg` | `require_role('student')`, `require_guardian_verified` | none | §3.2a |
-| `GET /api/tutor/sessions` | `list_tutor_sessions` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
-| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` | `tutor/service.py` `get_session` | → `SessionDetail` | same | `tutor_sessions` (60/min per user) | §3.2 |
+| `GET /api/tutor/books` | `list_tutor_books` `tutor/routes.py:425` | `tutor/service.py` `student_profile` `:43`, `student_subjects` `:59` + `retrieval/physics9/catalogue.py` `Catalogue.for_subject` | → `TutorBooksResponse` | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
+| `POST /api/tutor/ask` | `ask` `tutor/routes.py:320` | `resolve_book` `tutor/routes.py:88`, then `retrieve_for_turn` `tutor/service.py:300` + `PhysicsGenerator.stream_tokens` | `AskRequest` (gained `book_id`) → **`text/event-stream`** | `require_role('student')`, `require_guardian_verified`, then **`resolve_book` inside the handler, after `enforce()`**: the book must be the caller's (board, class, group) and available on this host | **`tutor_ask` (20/min per user)** | §3.2 |
+| `GET /api/tutor/books/{book_id}/pages/{page}` | `get_book_page` `tutor/routes.py:466` | `resolve_book` + `Book.page_path` | `FileResponse`, `Cache-Control: private` | `require_role('student')`, `require_guardian_verified`, `resolve_book` (owns the book) | `tutor_sessions` (60/min per user) | §3.2 |
+| `GET /api/tutor/figures/{message_id}` | `get_tutor_figure` `tutor/routes.py:568` | `tutor/service.py` `message_figure` `:430` (joins the session, whose book the crop comes from) + `tutor/figures.py` `crop_page` | → `image/jpeg` | `require_role('student')`, `require_guardian_verified` | none | §3.2a |
+| `GET /api/tutor/sessions` | `list_tutor_sessions` `tutor/routes.py:511` | `tutor/service.py` `list_sessions` | → `list[SessionSummary]` (gained a derived `book_id`) | `require_role('student')`, `require_guardian_verified` | `tutor_sessions` (60/min per user) | §3.2 |
+| `GET /api/tutor/sessions/{session_id}` | `get_tutor_session` `tutor/routes.py:541` | `tutor/service.py` `get_session` | → `SessionDetail` (gained a derived `book_id`) | same | `tutor_sessions` (60/min per user) | §3.2 |
+| `POST /api/tutor/class9/physics/chat` | `chat_class9_physics` `tutor/routes.py:229` | `answer_physics_query` `retrieval/physics9/service.py` | `PhysicsChatRequest` → `PhysicsChatResponse` | `require_role('student')`, `require_guardian_verified`, `require_class_9_student`; resumes only sessions it opened (subject `physics`) | **`tutor_ask` (20/min per user)** — the SAME bucket as `/ask` | §3.2a — ⚠️ legacy, superseded by `/api/tutor/ask`, unused by the frontend |
+| `GET /api/tutor/class9/physics/pages/{page_num}` | `get_physics_page_image` `tutor/routes.py:612` | `pages_directory()` | `FileResponse` | ⚠️ **none** (defect P1) | none | §3.2a — legacy, unused by the frontend |
+| `GET /api/tutor/class9/physics/info` | `get_physics_tutor_info` `tutor/routes.py:632` | `get_physics_retriever().name` | bare `dict` (no response model) | ⚠️ **none** | none | §3.2a — legacy |
+
+**Books.** A book's id, board, classes, subject and page count come from the
+`manifest.json` files under `BOOKS_DIR` (`retrieval/physics9/catalogue.py`); Physics 9 is built
+in from the committed scans, so production (empty `BOOKS_DIR`) is unchanged. The session's
+book is **derived** from its `subject` and `class_level` with the student's immutable board —
+no column, no migration. Errors (`tdd.md` §3.2): unknown or unowned book, or a missing scan →
+`403 FORBIDDEN_SCOPE`; a page outside the book, a `chapter` the book lacks, or a `book_id`
+that differs from the resumed session's → `400 VALIDATION_ERROR`; a book that is the caller's
+but not available here (no scans, hidden Quran Translation, or retrieval down with no
+fallback) → `503 MODEL_UNAVAILABLE`.
 
 **Persistence.** `POST .../chat` now writes the turn: a `chat_session` row (carrying the
 anchor), a `message` row per side of the exchange, and one `visual_aid` row holding the
@@ -343,10 +354,9 @@ Three properties worth knowing before changing any of it:
    resumed session would let a caller put words in the assistant's mouth and have the
    model treat them as its own prior answer.
 
-⚠️ These routes and the persistence writes **depend on migration
-`20261013120000_tutor_session_anchor.sql`, which is not applied.** Until the owner
-applies it, `POST .../ask` and `POST .../chat` fail on the
-`subject`/`class_level`/`chapter` insert.
+These routes and the persistence writes depend on migration
+`20261013120000_tutor_session_anchor.sql` (`subject`/`class_level`/`chapter`), applied and
+verified on the live database before v0.3.0 (`Claude/HISTORY.md`, 2026-10-16).
 
 ### `POST /api/tutor/ask` — the first streaming endpoint in this backend
 
@@ -402,12 +412,12 @@ unless the local tier actually loaded a file, so it never implies a resident mod
    double its budget by alternating them. Keyed per **user**, never per address — a whole
    school shares one NAT'd IP (`tdd.md` §6.3), so an address key would let one student
    throttle an entire computer lab.
-3. ⚠️ **ColQwen2 does not run.** `service.py:28` hard-codes `load_model=False`, and `torch`
-   and `colpali-engine` are in neither `requirements.txt` (what Render installs) nor
-   `pyproject.toml`. What answers is the keyword index in `retrieval/physics9/retriever.py`
-   (`_heuristic_match`, 63 sub-topics plus 33 anchors) feeding the top-3 page scans to
-   Gemini's vision model. The `.pt` embedding file is gitignored, and on the one path where
-   it *is* found it is stacked to float32 and then never read.
+3. **Which tier answers depends on the host.** ColQwen2 runs in the separate retrieval
+   service (`ml/serving`, the `remote` tier), which on the laptop deployment holds every
+   book's index behind one model. Render sets no `RETRIEVAL_ENDPOINT`, so there the keyword
+   index in `retrieval/physics9/heuristic.py` (`_heuristic_match`, 61 sub-topics plus 32
+   anchors) answers Physics 9 — and refuses every other book rather than cite Physics pages
+   for it.
 
 Also note: `generator.py:54` pins **`gemini-3.6-flash`**, not the "Gemini 2.5 Flash" an
 earlier revision of this page and `HISTORY.md` both claimed.
@@ -716,7 +726,7 @@ wired**; the other still protects nothing:
 |---|---|---|
 | `require_subject_scope` | `app/auth/dependencies.py:206` (since 2026-10-04 it also requires `revoked_at IS NULL`, `:236-242`) | **Still wired to no route.** The classroom routes do not need it — they take a `space_id`, not a `subject_id`, and the space's own scope is checked inside `app.owns_space`. Waits on the subject-report and quiz endpoints (§3.5, §3.6) |
 | `require_guardian_verified` | `app/auth/dependencies.py:248` | **Wired since classroom Phase 2**, through `participant` and `gated_student` (`app/classroom/dependencies.py:22`, `:35`) on every student classroom route except leaving (§2.8). **Also wired on every tutor route** since the Class 9 Physics pilot (§2.7). Still waits on `/api/practice/adaptive`, `/api/quiz/*/attempts*`, `/api/reports/*` |
-| `require_class_9_student` | `app/tutor/routes.py` | **Wired** on `/api/tutor/ask`, `/api/tutor/class9/physics/chat` and `/api/tutor/figures/{message_id}`. Local to the tutor router: it checks the student role and `class_level == 9` |
+| `require_class_9_student` | `app/tutor/routes.py:58` | **Wired only on the legacy `/api/tutor/class9/physics/chat`.** `/api/tutor/ask` and the book routes use `resolve_book` (`app/tutor/routes.py:88`) instead — a plain function called after `enforce()`, checking that the book is the caller's by board, class and group |
 
 `tdd.md:202` specifies that the gate dependency blocks **every** student learning and assessment
 endpoint, and that an authorization-matrix test asserts it on each such route. That test exists
