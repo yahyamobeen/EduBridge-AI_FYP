@@ -69,6 +69,7 @@ def event_stream(
     timings: dict[str, float],
     token_source: Iterator[str],
     intent: str = "retrieve",
+    book_pages: int = BOOK_PAGES,
 ) -> Iterator[bytes]:
     """Emit `pages`, then `token` per chunk, then `done`. Persist before `done`.
 
@@ -120,7 +121,9 @@ def event_stream(
     reply = "".join(chunks)
     # A bad box costs the figure, never the answer - `parse_box` returns None rather
     # than raising, and the prose has already been sent by this point anyway.
-    figure = parse_box(raw_figure, book_pages=BOOK_PAGES) if raw_figure else None
+    # Bounded by THIS book's page count - a figure on page 300 of a 440-page book is
+    # real, and bounding by Physics' 200 pages would drop it silently.
+    figure = parse_box(raw_figure, book_pages=book_pages) if raw_figure else None
 
     message_id: UUID | None = None
     if reply:

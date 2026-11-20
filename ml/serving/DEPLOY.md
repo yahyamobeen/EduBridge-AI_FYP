@@ -56,11 +56,36 @@ AMX, bfloat16 is a *fit* decision and is measurably **slower** than float32 — 
 measured that way on an i5-8265U, and reading that as the ceiling for this approach
 would be wrong.
 
+## Every book on one laptop (the FYP demo)
+
+One process serves every book: one ColQwen2 model and every book's index, because a
+question's embedding does not depend on the book and only the final MaxSim step is per
+book (tdd.md §3.2a "Many books"). Measured on 2026-11-17 on the owner's laptop
+(i5-8265U, 16 GB) with all 65 books: **ready in 116 s** (books 21.5 s, model 37 s, warm-up
+7 s), **~3.4 GB working set** (memory-mapped loading), 4-6 s per new question on the CPU,
+30-80 ms per search, 0 ms for a repeated one.
+
+```bat
+run-books.example.bat C:\path\to\EduBridge-AI_FYP-corpus\out C:\path\to\.venv\Scripts\python.exe
+```
+
+Then point the backend at it: `RETRIEVAL_MODE=remote`, `RETRIEVAL_ENDPOINT=http://127.0.0.1:8100`
+and `BOOKS_DIR` set to the same folder (the backend serves the page scans and reads the
+manifests). Every invalid book file refuses the start - rename a bad book's folder (for
+example `Punjab_11_Biology.WRONG`) or narrow `BOOKS` to leave it out.
+
+`POST /retrieve` takes `{book, question, top_k, anchor?: [first, last]}` and returns `book`
+with the pages; an unknown book is 404 and an anchor outside the book is 400. An older
+backend that sends no `book` gets the single book it was written for.
+
 ## Run it
 
 | Variable | Default | Notes |
 |---|---|---|
-| `PAGES_PT` | `/srv/model/pages.colqwen2.pt` | the embeddings |
+| `INDEX_DIR` | — (empty) | **Every book** (tdd.md §3.2a "Many books"): a folder of book folders `<book_id>/<book_id>.colqwen2.pt`, the layout `ml/indexing` writes. When set, `PAGES_PT` is ignored |
+| `BOOKS` | — (all) | with `INDEX_DIR`, a comma-separated list of book ids to load - fewer books, less RAM |
+| `PAGES_PT` | `/srv/model/pages.colqwen2.pt` | single-book mode, used when `INDEX_DIR` is empty (the Docker image) |
+| `PAGES_BOOK` | `Punjab_9_Physics` | the book id that single file is served as - the original Physics file predates the field |
 | `EXPECTED_CHECKPOINT` | `vidore/colqwen2-v1.0` | guard 1 compares the file against this |
 | `DTYPE` | `bfloat16` | `float32` needs ~9.4 GB and will not fit on an 8 GiB host |
 | `RETRIEVAL_SHARED_SECRET` | — | must match the backend's. Empty disables the check |

@@ -152,6 +152,202 @@ _MAX_BARE_WORDS = 3
 _MAX_FOLLOWUP_WORDS = 8
 
 
+# Words that carry no topic, for books WITHOUT a syllabus vocabulary (every book except
+# Physics 9). There, the guard inverts: a turn is a follow-up only if NOTHING remains
+# after removing these, the follow-up markers and the bare interrogatives. Any other
+# word may name a new topic, and the turn retrieves - the same bias as for Physics,
+# kept by a different test (tdd.md §3.2a, turn routing). Missing a filler here costs a
+# retrieval; never a wrong answer.
+_FILLERS = frozenset(
+    {
+        # English
+        "a",
+        "an",
+        "the",
+        "that",
+        "this",
+        "it",
+        "its",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "to",
+        "of",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "but",
+        "so",
+        "about",
+        "me",
+        "my",
+        "i",
+        "you",
+        "your",
+        "can",
+        "could",
+        "would",
+        "will",
+        "do",
+        "does",
+        "did",
+        "please",
+        "plz",
+        "pls",
+        "more",
+        "once",
+        "one",
+        "same",
+        "thing",
+        "part",
+        "step",
+        "steps",
+        "point",
+        "last",
+        "previous",
+        "above",
+        "answer",
+        "explain",
+        "explanation",
+        "tell",
+        "say",
+        "said",
+        "mean",
+        "means",
+        "meaning",
+        "example",
+        "examples",
+        "detail",
+        "details",
+        "understand",
+        "understood",
+        "not",
+        "dont",
+        "didnt",
+        "no",
+        "yes",
+        "ok",
+        "okay",
+        "thanks",
+        "thank",
+        "sir",
+        "miss",
+        "madam",
+        "bit",
+        "little",
+        "simple",
+        "easier",
+        "easy",
+        "short",
+        "shorter",
+        "again",
+        "still",
+        "get",
+        "got",
+        "how",
+        "give",
+        "another",
+        "different",
+        "what",
+        "why",
+        "which",
+        "with",
+        "words",
+        "word",
+        "now",
+        "just",
+        "really",
+        "very",
+        # Roman Urdu
+        "ye",
+        "yeh",
+        "wo",
+        "woh",
+        "us",
+        "ko",
+        "ka",
+        "ki",
+        "ke",
+        "se",
+        "mein",
+        "main",
+        "mujhe",
+        "muje",
+        "hai",
+        "hain",
+        "tha",
+        "thi",
+        "nahi",
+        "nai",
+        "nahin",
+        "samajh",
+        "samjh",
+        "samjhao",
+        "samjhaen",
+        "samjhayen",
+        "samjha",
+        "aya",
+        "ayi",
+        "dobara",
+        "phir",
+        "aur",
+        "batao",
+        "bataen",
+        "bataiye",
+        "zara",
+        "thora",
+        "thoda",
+        "asaan",
+        "asan",
+        "kya",
+        "kyun",
+        "kyon",
+        "kaise",
+        "kaisay",
+        "matlab",
+        "yani",
+        "acha",
+        "achha",
+        "ji",
+        "jee",
+        "na",
+        "bhi",
+        "tum",
+        "ap",
+        "aap",
+        # Urdu script
+        "یہ",
+        "وہ",
+        "اس",
+        "کو",
+        "کا",
+        "کی",
+        "کے",
+        "سے",
+        "میں",
+        "مجھے",
+        "ہے",
+        "ہیں",
+        "نہیں",
+        "سمجھ",
+        "سمجھائیں",
+        "دوبارہ",
+        "پھر",
+        "اور",
+        "بتائیں",
+        "کیا",
+        "کیوں",
+        "کیسے",
+        "مطلب",
+        "آپ",
+    }
+)
+
+
 def _words(question: str) -> list[str]:
     return re.sub(r"[^\w\s]", " ", question.lower()).split()
 
@@ -165,7 +361,16 @@ def looks_like_reference(question: str) -> bool:
     return False
 
 
-def mentions_a_topic(question: str) -> bool:
+def has_content_words(question: str) -> bool:
+    """Does anything remain once fillers, follow-up markers and bare interrogatives are
+    removed? For books without a syllabus vocabulary, any remaining word might name a
+    new topic, so the turn must be retrieved for."""
+    marker_words = {w for marker in _FOLLOWUP_MARKERS for w in _words(marker)}
+    ignorable = _FILLERS | marker_words | _BARE_INTERROGATIVES
+    return any(word not in ignorable for word in _words(question))
+
+
+def mentions_a_topic(question: str, topic_terms: frozenset[str] = TOPIC_TERMS) -> bool:
     """Does the question name something the syllabus index recognises?
 
     This is the guard that keeps a follow-up reading honest. "Explain that again" names
@@ -183,17 +388,26 @@ def mentions_a_topic(question: str) -> bool:
     worth handling, because it is the one the index's own singular/plural choices create.
     """
     words = set(_words(question))
-    if TOPIC_TERMS & words:
+    if topic_terms & words:
         return True
-    return any(word.rstrip("s") in TOPIC_TERMS or f"{word}s" in TOPIC_TERMS for word in words)
+    return any(word.rstrip("s") in topic_terms or f"{word}s" in topic_terms for word in words)
 
 
-def classify(question: str, *, has_prior_turn: bool) -> Intent:
+def classify(
+    question: str,
+    *,
+    has_prior_turn: bool,
+    topic_terms: frozenset[str] | None = TOPIC_TERMS,
+) -> Intent:
     """`reference`, `followup` or `retrieve`.
 
     Order matters. A reference wins over a follow-up marker, because "ex 4.5 again" is
     still a request for a specific exercise - the marker only says the student has seen
     it before.
+
+    `topic_terms` is the book's syllabus vocabulary - Physics 9's by default. `None`
+    means the book has none, and then any word that is not a filler, a marker or a bare
+    interrogative counts as a possible new topic (`has_content_words`).
     """
     if looks_like_reference(question):
         return "reference"
@@ -207,7 +421,10 @@ def classify(question: str, *, has_prior_turn: bool) -> Intent:
     words = _words(question)
     if len(words) > _MAX_FOLLOWUP_WORDS:
         return "retrieve"
-    if mentions_a_topic(question):
+    if topic_terms is None:
+        if has_content_words(question):
+            return "retrieve"
+    elif mentions_a_topic(question, topic_terms):
         return "retrieve"
 
     lowered = question.lower()

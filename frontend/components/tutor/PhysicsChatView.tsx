@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { useTranslations } from 'next-intl'
 import {
   ArrowLeftIcon,
-  AtomIcon,
   BookIcon,
   CloseIcon,
   HistoryIcon,
@@ -12,8 +11,11 @@ import {
   SparkIcon,
 } from '@/components/ui/Icon'
 import { askTutor, getTutorSession, listTutorSessions } from '@/lib/api/endpoints'
+import { ApiError } from '@/lib/api/errors'
+import { PHYSICS_BOOK, type OpenBook, SubjectIcon, subjectLabel } from './subjects'
 import { TutorFigure } from './TutorFigure'
 import { TutorMarkdown } from './TutorMarkdown'
+import { TutorPageImage } from './TutorPageImage'
 import type {
   PageCitation,
   PhysicsChatMessage,
@@ -27,6 +29,8 @@ import type {
 } from '@/lib/api/types'
 
 type Props = {
+  /** The book this conversation is about (tdd.md §3.2a "Many books"). */
+  book: OpenBook
   onBack: () => void
   onClose: () => void
 }
@@ -56,8 +60,17 @@ function isDegraded(msg: MessageWithCitations): boolean {
   return msg.retriever === 'heuristic' && msg.intent !== 'reference'
 }
 
-export function PhysicsChatView({ onBack, onClose }: Props) {
+/**
+ * The tutor chat for one book. Named for the pilot it began as; it serves every book now,
+ * and everything book-specific - title, welcome, placeholder, page scans, history -
+ * comes from `book`.
+ */
+export function PhysicsChatView({ book, onBack, onClose }: Props) {
   const t = useTranslations('tutor.chat')
+  const tSubs = useTranslations('tutor.subjects')
+  const tBoards = useTranslations('tutor.boards')
+  const subject = subjectLabel(book.subject, tSubs)
+  const boardName = tBoards(book.board)
   const [lang, setLang] = useState<'en' | 'ur-Latn' | 'ur'>('en')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -82,7 +95,9 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
     scrollToBottom()
   }, [messages, loading])
 
-  const quickChips = [t('chip1'), t('chip2'), t('chip3'), t('chip4')]
+  // The four quick prompts are Physics questions, so only the Physics book shows them.
+  const quickChips =
+    book.bookId === PHYSICS_BOOK ? [t('chip1'), t('chip2'), t('chip3'), t('chip4')] : []
 
   async function handleSend(textToSend?: string) {
     const query = (textToSend ?? input).trim()
@@ -104,6 +119,7 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
         message: query,
         lang,
         session_id: sessionIdRef.current,
+        book_id: book.bookId,
       })) {
         if (event === 'pages') {
           // Citations arrive BEFORE the first token. Appending the assistant
@@ -181,12 +197,19 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
           { role: 'assistant', content: t('errorFallback'), error: true },
         ])
       }
-    } catch {
+    } catch (err) {
       // A failure BEFORE the first byte: an ordinary error response, so the
-      // whole turn failed and nothing partial is on screen.
+      // whole turn failed and nothing partial is on screen. MODEL_UNAVAILABLE is
+      // its own message: this book's search is down and, outside Physics 9, there
+      // is no fallback - the student should try again, not check their internet.
+      const unavailable = err instanceof ApiError && err.code === 'MODEL_UNAVAILABLE'
       setMessages([
         ...updatedMessages,
-        { role: 'assistant', content: t('errorFallback'), error: true },
+        {
+          role: 'assistant',
+          content: unavailable ? t('unavailable', { subject }) : t('errorFallback'),
+          error: true,
+        },
       ])
     } finally {
       // `finally`, not `catch`: this screen stays mounted after a send, so
@@ -199,7 +222,9 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
     setShowHistory(true)
     setHistoryError(false)
     try {
-      setSessions(await listTutorSessions(20))
+      // Only this book's conversations: resuming one keeps the same book.
+      const all = await listTutorSessions(20)
+      setSessions(all.filter((session) => session.book_id === book.bookId))
     } catch {
       setHistoryError(true)
     }
@@ -258,20 +283,22 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
           <button
             type="button"
             onClick={onBack}
-            aria-label="Back"
+            aria-label={t('back')}
             className="flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-variant"
           >
             <ArrowLeftIcon className="h-5 w-5 rtl:-scale-x-100" />
           </button>
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-container text-on-primary">
-              <AtomIcon className="h-5 w-5" />
+              <SubjectIcon subject={book.subject} className="h-5 w-5" />
             </span>
             <div>
               <h2 className="text-title-md font-headline font-bold text-on-surface">
-                {t('title')}
+                {t('title', { subject })}
               </h2>
-              <p className="text-body-sm text-on-surface-variant">{t('subtitle')}</p>
+              <p className="text-body-sm text-on-surface-variant">
+                {t('subtitle', { board: book.board, class: book.classLevel, subject })}
+              </p>
             </div>
           </div>
         </div>
@@ -327,7 +354,7 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('close')}
             className="flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-variant"
           >
             <CloseIcon className="h-5 w-5" />
@@ -344,19 +371,23 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
               <SparkIcon className="h-4 w-4" />
             </span>
             <div className="space-y-2">
-              <p className="text-body-md text-on-surface">{t('welcome')}</p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                {quickChips.map((chip, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSend(chip)}
-                    className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-xs font-medium text-primary transition-colors hover:border-primary hover:bg-primary-container/10"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
+              <p className="text-body-md text-on-surface">
+                {t('welcome', { class: book.classLevel, subject })}
+              </p>
+              {quickChips.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {quickChips.map((chip, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSend(chip)}
+                      className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-xs font-medium text-primary transition-colors hover:border-primary hover:bg-primary-container/10"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -539,7 +570,7 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             disabled={loading}
-            placeholder={t('inputPlaceholder')}
+            placeholder={t('inputPlaceholder', { subject })}
             className="flex-1 rounded-lg border border-outline bg-surface px-4 py-2.5 text-body-md text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           />
           <button
@@ -552,7 +583,9 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
             <SendIcon className="h-4 w-4 rtl:-scale-x-100" />
           </button>
         </form>
-        <p className="mt-2 text-center text-xs text-on-surface-variant">{t('disclaimer')}</p>
+        <p className="mt-2 text-center text-xs text-on-surface-variant">
+          {t('disclaimer', { board: boardName, class: book.classLevel, subject })}
+        </p>
       </footer>
 
       {/* Page Zoom Preview Modal */}
@@ -565,29 +598,25 @@ export function PhysicsChatView({ onBack, onClose }: Props) {
           <div className="relative max-h-[90vh] max-w-2xl overflow-hidden rounded-xl bg-surface-container-lowest p-2 shadow-2xl">
             <div className="flex items-center justify-between border-b border-outline-variant/30 px-3 py-2">
               <h3 className="text-title-sm font-headline font-bold text-on-surface">
-                {t('page')} {previewPage} (PCTB Physics 9)
+                {t('previewTitle', { page: previewPage, subject })}
               </h3>
               <button
                 type="button"
                 onClick={() => setPreviewPage(null)}
-                aria-label="Close"
+                aria-label={t('close')}
                 className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-surface-variant"
               >
                 <CloseIcon className="h-4 w-4" />
               </button>
             </div>
             <div className="max-h-[75vh] overflow-y-auto p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/tutor/class9/physics/pages/${previewPage}`}
-                alt={`Textbook Page ${previewPage}`}
-                className="mx-auto h-auto max-w-full rounded shadow"
-                onError={(e) => {
-                  ;(e.target as HTMLElement).style.display = 'none'
-                }}
-              />
+              {/*
+                Fetched with the bearer token and shown as a data: URI - the page
+                route is authenticated and checks the book is the student's.
+              */}
+              <TutorPageImage bookId={book.bookId} page={previewPage} />
               <p className="mt-2 text-center text-xs text-on-surface-variant">
-                Punjab Textbook Board (PCTB) Class 9 Physics Official Scan
+                {t('previewSource', { board: boardName, class: book.classLevel, subject })}
               </p>
             </div>
           </div>

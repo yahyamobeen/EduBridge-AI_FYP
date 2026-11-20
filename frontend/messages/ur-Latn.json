@@ -933,14 +933,20 @@
   },
   "tutor": {
     "modal": {
-      "title": "Class 9 AI Tutor",
-      "subtitle": "Punjab Textbook Board (PCTB) nisab ke mutabiq mazmoon muntakhib karein",
+      "title": "Class {class} AI Tutor",
+      "subtitle": "Apni {board} ki kitabon mein se mazmoon muntakhib karein",
       "close": "Band karein",
       "back": "Mazameen par wapis",
       "comingSoonTitle": "Jald aa raha hai",
-      "comingSoonNotice": "{subject} ke liye AI Tutor filhal tayyari ke marhale mein hai. Juray rahein!",
+      "comingSoonNotice": "{subject} ka AI Tutor abhi dastiyab nahi — is ki darsi kitab shamil ki ja rahi hai.",
       "availableBadge": "Dastiyab",
-      "comingSoonBadge": "Jald dastiyab"
+      "comingSoonBadge": "Jald dastiyab",
+      "loadingTitle": "AI Tutor",
+      "subjectMeta": "{board} · Class {class}",
+      "loading": "Aap ke mazameen load ho rahe hain…",
+      "loadError": "Aap ke mazameen load nahi ho sake.",
+      "empty": "Aap ki class ke liye koi mazmoon nahi mila.",
+      "retry": "Dobara koshish karein"
     },
     "subjects": {
       "physics": "Physics",
@@ -948,13 +954,21 @@
       "chemistry": "Chemistry",
       "english": "English",
       "urdu": "Urdu",
-      "islamiyat": "Islamiyat"
+      "islamiyat": "Islamiyat",
+      "biology": "Biology",
+      "computerScience": "Computer Science",
+      "pakistanStudies": "Pakistan Studies",
+      "quranTranslation": "Tarjuma-tul-Quran"
+    },
+    "boards": {
+      "PCTB": "Punjab Textbook Board",
+      "STBB": "Sindh Textbook Board"
     },
     "chat": {
-      "title": "Class 9 Physics AI Tutor",
-      "subtitle": "Punjab Textbook Board (PCTB) · Class 9 Physics",
-      "welcome": "Assalam-o-Alaikum! Main aap ka Class 9 Physics AI tutor hoon. English, Roman Urdu ya Urdu script mein sawal poochein, main darsi kitab ke hawalon ke sath step-by-step wazahat karoon ga.",
-      "inputPlaceholder": "Physics ka sawal poochein (maslan thermocouple kaise kaam karta hai?)...",
+      "title": "{subject} AI Tutor",
+      "subtitle": "{board} · Class {class} · {subject}",
+      "welcome": "Assalam-o-Alaikum! Main aap ka Class {class} {subject} AI tutor hoon. English, Roman Urdu ya Urdu script mein sawal poochein, main darsi kitab ke hawalon ke sath step-by-step wazahat karoon ga.",
+      "inputPlaceholder": "{subject} ka sawal poochein…",
       "send": "Bheinjein",
       "thinking": "Kitab ke safhat talash aur jawab tayyar kiya ja raha hai...",
       "references": "Darsi Kitab ke Hawale",
@@ -971,7 +985,15 @@
       "historyEmpty": "Abhi koi purani guftagu nahi hai.",
       "historyError": "Purani guftagu load nahi ho saki.",
       "newChat": "Nai guftagu",
-      "disclaimer": "Official Punjab Textbook Board (PCTB) Class 9 Physics kitab par mabni."
+      "disclaimer": "Aap ki official {board} Class {class} {subject} kitab par mabni.",
+      "unavailable": "{subject} ka tutor is waqt dastiyab nahi. Thori der baad dobara koshish karein.",
+      "previewTitle": "Safha {page} · {subject}",
+      "previewSource": "{board} · Class {class} {subject} — official scan",
+      "pageAlt": "Darsi kitab ka safha {page}",
+      "loadingPage": "Safha load ho raha hai…",
+      "pageError": "Yeh safha load nahi ho saka.",
+      "back": "Wapis",
+      "close": "Band karein"
     }
   },
   "errorPage": {

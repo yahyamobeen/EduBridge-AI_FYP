@@ -121,6 +121,91 @@ FIGURES
   figure helps, omit the line entirely - do not emit an empty or guessed box.
 """
 
+BOARD_NAMES = {
+    "PCTB": "Punjab Curriculum and Textbook Board (PCTB)",
+    "STBB": "Sindh Textbook Board (STBB)",
+}
+
+# How the reply may use the book, by the subject's `content_strategy` (the subject
+# catalogue's column, seeded in 20260801120200). "Keep technical terms in English" is
+# right for a science book and wrong for an Urdu one, so it is not said to every book.
+_LANGUAGE_RULES = {
+    "english_language": """- This is the English language subject. Quote words, sentences, poems and
+  passages from the book EXACTLY as printed - never paraphrase a quotation.
+- Explain meanings, grammar and usage in the language of the question. When the
+  student must write an answer in English, give the English they should write.""",
+    "branch_b_urdu_native": """- This book is written in Urdu. Quote Urdu words, verses and passages exactly as
+  printed, in Urdu script, and never translate a quoted line - give it in Urdu and
+  then explain it.
+- Reply in the language of the question. English question -> English. Roman Urdu
+  question -> Roman Urdu. Urdu script question -> Urdu script.""",
+}
+_DEFAULT_LANGUAGE_RULES = """- Reply in the language of the question. English question -> English. Roman Urdu
+  question -> Roman Urdu. Urdu script question -> Urdu script.
+- KEEP TECHNICAL TERMS IN ENGLISH even when the rest is Urdu, unless the book itself
+  is printed in Urdu - then use the book's own terms. The student is examined in the
+  words the book uses.
+- Quote printed text exactly as it appears, in its own script; never translate a
+  quotation.
+- When the answer is something they must reproduce on an exam, give the wording
+  they should write."""
+
+
+def system_prompt_for(
+    book=None, class_level: int | None = None, content_strategy: str | None = None
+) -> str:
+    """The system prompt for one book (tdd.md §3.2a "Many books").
+
+    Physics 9 - or no book at all - gets `SYSTEM_PROMPT` unchanged, word for word, so
+    the pilot's behaviour cannot drift. Every other book gets the same grounding,
+    teaching and figure rules with its own board, class, subject and language rules.
+    """
+    if book is None or getattr(book, "is_physics", False):
+        return SYSTEM_PROMPT
+    board = BOARD_NAMES.get(book.board, book.board)
+    level = class_level if class_level is not None else book.classes[0]
+    subject = book.subject
+    language = _LANGUAGE_RULES.get(content_strategy or "", _DEFAULT_LANGUAGE_RULES)
+    working = (
+        "\n- For a calculation or proof, show every step of the working, the way the book\n"
+        "  sets it out, and state the result clearly at the end."
+        if subject == "Mathematics" or subject in ("Physics", "Chemistry")
+        else ""
+    )
+    article = "an" if subject[:1] in "AEIOU" else "a"
+    return f"""You are {article} {subject} tutor for a Pakistani student in Class {level},
+working from the {board} {subject} textbook. You are shown photographs of the
+textbook pages that were retrieved for this question.
+
+GROUNDING
+- Answer only from the pages shown. If they do not contain the answer, say so
+  plainly - do not fill the gap from memory.
+- Cite the page number you used, like "(p12)".
+- Read text, numbers and symbols off the page carefully. If something on the scan
+  is genuinely unclear, say it is unclear rather than guessing.
+
+LANGUAGE
+{language}
+
+TEACHING
+- Explain, do not transcribe. Short sentences, one idea at a time.
+- If asked to solve a numbered exercise question, give a hint and the method
+  first. Provide the full worked solution only if asked again.{working}
+
+FIGURES
+- If one of the pages shown carries a figure, diagram or table that genuinely
+  helps answer this question, end your reply with a single line in exactly this
+  form, after all the prose, and write nothing after it:
+
+  @@FIGURE {{"page": 12, "box": [0.12, 0.34, 0.88, 0.71], "caption": "Fig. 2.3"}}
+
+- `box` is [left, top, right, bottom] as fractions of the page, 0 to 1, where
+  0,0 is the top-left corner. Enclose the figure and its caption, not the whole
+  page and not a sliver.
+- Only one figure, and only when it adds something the words do not. If no
+  figure helps, omit the line entirely - do not emit an empty or guessed box.
+"""
+
 
 class PhysicsGenerator:
     """Generates grounded pedagogical explanations from retrieved textbook pages."""
@@ -178,6 +263,10 @@ class PhysicsGenerator:
         question: str,
         hits: list[dict[str, Any]],
         history: list[dict[str, str]] | None = None,
+        *,
+        book=None,
+        class_level: int | None = None,
+        content_strategy: str | None = None,
     ) -> dict[str, Any]:
         """The Gemini request body: system prompt, prior turns, page images, question.
 
@@ -205,10 +294,12 @@ class PhysicsGenerator:
 
         # The page scans themselves. Reading the page IS the retrieval result here -
         # there is no extracted text to send, which is the point of visual retrieval.
-        if self.pages_dir and self.pages_dir.exists():
+        # The book's own folder - never the Physics folder for another book's pages.
+        pages_dir = book.pages_dir if book is not None else self.pages_dir
+        if pages_dir and pages_dir.exists():
             for h in hits:
                 page_num = h.get("page")
-                img_path = self.pages_dir / f"p{page_num:03}.jpeg"
+                img_path = pages_dir / f"p{page_num:03}.jpeg"
                 if img_path.exists():
                     try:
                         data = img_path.read_bytes()
@@ -232,7 +323,9 @@ class PhysicsGenerator:
 
         return {
             "contents": contents,
-            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "system_instruction": {
+                "parts": [{"text": system_prompt_for(book, class_level, content_strategy)}]
+            },
             "generation_config": {
                 "temperature": 0.2,
                 # Headroom. The cap covers reasoning AND answer together, so a model
@@ -264,6 +357,10 @@ class PhysicsGenerator:
         question: str,
         hits: list[dict[str, Any]],
         history: list[dict[str, str]] | None = None,
+        *,
+        book=None,
+        class_level: int | None = None,
+        content_strategy: str | None = None,
     ) -> Iterator[str]:
         """Yield generated text as it arrives. Raises on any failure.
 
@@ -289,7 +386,14 @@ class PhysicsGenerator:
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set")
 
-        payload = self.build_payload(question, hits, history)
+        payload = self.build_payload(
+            question,
+            hits,
+            history,
+            book=book,
+            class_level=class_level,
+            content_strategy=content_strategy,
+        )
         yielded = False
         last_error = ""
 

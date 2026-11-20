@@ -410,6 +410,14 @@ flowchart TB
               technical design document won.</td>
           </tr>
           <tr>
+            <td><strong>Every student has a tutor entry</strong> <span class="ln">DashboardShell.tsx</span></td>
+            <td>Since the tutor serves every book (<code>tdd.md</code> §3.2a "Many books"), the sidebar item and
+              the dashboard card open the tutor for <em>every</em> student, not only Class 9. What a student
+              sees is decided by the server: <code>GET /api/tutor/books</code> lists their own subjects for
+              their board, class and group, and a subject with no book is shown as coming soon. Teachers,
+              parents and administrators still have no tutor entry.</td>
+          </tr>
+          <tr>
             <td><strong>The student surface must expose My Classes</strong> <span class="ln">:60</span></td>
             <td>Students are guaranteed the right to see who can view them and to leave any space at any
               time. No mockup had an entry for it, and a right with no route to it is not a right.</td>

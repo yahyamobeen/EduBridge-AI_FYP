@@ -51,6 +51,7 @@ import type {
   SubmissionDraftRequest,
   SubmissionsResponse,
   TutorAskRequest,
+  TutorBooksResponse,
   TutorSessionDetail,
   TutorSessionSummary,
   TwoFactorConfirmRequest,
@@ -348,6 +349,24 @@ export function askTutor(body: TutorAskRequest, signal?: AbortSignal) {
     body,
     ...(signal ? { signal } : {}),
   })
+}
+
+/**
+ * `GET /api/tutor/books` — the caller's subjects for their board, class and group,
+ * each with its book and whether it can be opened (tdd.md §3.2a "Many books").
+ */
+export function listTutorBooks(signal?: AbortSignal): Promise<TutorBooksResponse> {
+  return apiFetch<TutorBooksResponse>('/tutor/books', signal ? { signal } : {})
+}
+
+/**
+ * The API path of one page scan of one book, for `apiFetch`. Base-relative, because
+ * `apiFetch` prepends the API base itself - the citation's own `/api/...` url would
+ * become `/api/api/...`. Authenticated and owner-scoped, so it is fetched as a blob
+ * and shown as a `data:` URI, never put in an `<img src>` directly.
+ */
+export function tutorPagePath(bookId: string, page: number): string {
+  return `/tutor/books/${encodeURIComponent(bookId)}/pages/${page}`
 }
 
 /** The caller's own tutor sessions, newest first. */

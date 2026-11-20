@@ -42,6 +42,7 @@ documents on the right **in the same change** and append to [`HISTORY.md`](HISTO
 | Code area | Docs to update |
 |---|---|
 | `render.yaml` | `backend/Architecture/README.md` deployment notes; `frontend/Architecture/README.md` |
+| `ml/indexing/encode_books.py` — the contract block (checkpoint, revisions, canvas, store keys or dtype) | `tdd.md` §3.2a "Building the index"; the guards in `ml/serving/app.py` and `backend/app/retrieval/physics9/local.py` if what they load changes; `ml/indexing/README.md` |
 | `.github/workflows/*` | `backend/Architecture/README.md` |
 | Anything that changes a **requirement** | **`prd.md` and `tdd.md`**, in the same change, plus the architecture pages |
 | A new finding or a fixed defect | The "Known gaps" section of the page that owns it |

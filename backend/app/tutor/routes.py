@@ -1,16 +1,25 @@
-"""Class 9 AI Tutor Routes.
+"""AI Tutor routes (tdd.md §3.2, §3.2a).
 
-Exposes endpoints for the Class 9 Physics AI Tutor:
-- POST /api/tutor/class9/physics/chat
-- GET  /api/tutor/sessions
-- GET  /api/tutor/sessions/{session_id}
-- GET  /api/tutor/class9/physics/pages/{page_num}
+The tutor serves every book a student is entitled to (tdd.md §3.2a "Many books"):
+
+- GET  /api/tutor/books                       the caller's subjects and their books
+- POST /api/tutor/ask                         a streamed, grounded answer (SSE)
+- GET  /api/tutor/books/{book_id}/pages/{n}   one page scan of one of the caller's books
+- GET  /api/tutor/sessions                    the caller's sessions
+- GET  /api/tutor/sessions/{session_id}       one session with its transcript
+- GET  /api/tutor/figures/{message_id}        the cropped figure for one answer
+
+Legacy Physics 9 pilot routes, kept unchanged and no longer used by the frontend:
+
+- POST /api/tutor/class9/physics/chat         superseded by /ask
+- GET  /api/tutor/class9/physics/pages/{n}    unauthenticated (defect P1)
 - GET  /api/tutor/class9/physics/info
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
@@ -26,10 +35,11 @@ from app.auth.dependencies import (
     require_guardian_verified,
     require_role,
 )
-from app.core.errors import forbidden_scope, model_unavailable, not_grounded
+from app.core.errors import forbidden_scope, model_unavailable, not_grounded, validation_error
 from app.core.ratelimit import TUTOR_ASK_LIMIT, TUTOR_SESSIONS_LIMIT, enforce
 from app.models.enums import UserRole
-from app.retrieval.physics9.base import BOOK_PAGES
+from app.retrieval.physics9.base import BOOK_PAGES, PHYSICS_BOOK, RetrievalUnavailableError
+from app.retrieval.physics9.catalogue import Book, get_catalogue
 from app.retrieval.physics9.service import (
     answer_physics_query,
     get_physics_generator,
@@ -48,7 +58,7 @@ router = APIRouter(prefix="/tutor", tags=["tutor"])
 def require_class_9_student(
     ctx: Annotated[AuthContext, Depends(authenticated)],
 ) -> AuthContext:
-    """Verifies that the acting user is a student currently enrolled in Class 9."""
+    """The legacy `/class9/physics/chat` guard: a student currently in Class 9."""
     if ctx.role != UserRole.student.value:
         raise forbidden_scope("AI Tutor is accessible to students only.")
 
@@ -63,6 +73,69 @@ def require_class_9_student(
     if profile is None or profile.get("class_level") != 9:
         raise forbidden_scope("Class 9 Physics Tutor is restricted to Class 9 students.")
     return ctx
+
+
+@dataclass(frozen=True)
+class BookContext:
+    """The book a request is about, checked against the caller."""
+
+    book: Book
+    board: str
+    class_level: int
+    content_strategy: str | None
+
+
+def resolve_book(ctx: AuthContext, *, book_id: str | None, session_id: UUID | None) -> BookContext:
+    """The book for this request, or a §7.3 error. A plain function, not a `Depends`:
+    `/ask` must call `enforce()` first, and tests replace this one name.
+
+    A resumed session brings its own book (derived from its subject and class); a new
+    one takes `book_id`, defaulting to Physics 9. Either way the book must be the
+    caller's - board, class and group, the rule `app.join_space_by_code` applies to
+    classrooms - and available on this host.
+
+    Errors (tdd.md §3.2): unknown or unowned book → 403 FORBIDDEN_SCOPE; a `book_id`
+    that differs from the resumed session's → 400 VALIDATION_ERROR; the caller's book
+    but not servable here → 503 MODEL_UNAVAILABLE.
+    """
+    profile = tutor_service.student_profile(ctx.session, ctx.user_id)
+    if profile is None:
+        raise forbidden_scope("The tutor needs a student profile.")
+    catalogue = get_catalogue()
+
+    if session_id is not None:
+        meta = tutor_service.session_meta(ctx.session, session_id)
+        book = catalogue.for_session(profile["board"], meta["class_level"], meta["subject"])
+        if book is None:
+            raise forbidden_scope("That chat session is not available.")
+        if book_id is not None and book_id != book.book_id:
+            raise validation_error(
+                message="A conversation stays with one book.",
+                details={"fields": {"book_id": "does not match this conversation's book"}},
+            )
+    else:
+        book = catalogue.get(book_id or PHYSICS_BOOK)
+        if book is None:
+            raise forbidden_scope("That book is not available.")
+
+    subjects = tutor_service.student_subjects(
+        ctx.session, profile["board"], profile["class_level"], profile["student_group"]
+    )
+    subject_row = next((s for s in subjects if s["name"] == book.subject), None)
+    if (
+        book.board != profile["board"]
+        or profile["class_level"] not in book.classes
+        or subject_row is None
+    ):
+        raise forbidden_scope("That book is not one of your subjects.")
+    if not book.available:
+        raise model_unavailable("That book is not available right now.")
+    return BookContext(
+        book=book,
+        board=profile["board"],
+        class_level=profile["class_level"],
+        content_strategy=subject_row.get("content_strategy"),
+    )
 
 
 class ChatMessage(BaseModel):
@@ -104,6 +177,7 @@ class PhysicsChatResponse(BaseModel):
 
 class SessionSummary(BaseModel):
     id: UUID
+    book_id: str | None = None
     subject: str | None
     class_level: int | None
     chapter: int | None
@@ -123,12 +197,25 @@ class TranscriptMessage(BaseModel):
 
 class SessionDetail(BaseModel):
     id: UUID
+    book_id: str | None = None
     subject: str | None
     class_level: int | None
     chapter: int | None
     started_at: datetime
     ended_at: datetime | None
     messages: list[TranscriptMessage]
+
+
+class TutorBook(BaseModel):
+    book_id: str | None
+    subject: str
+    available: bool
+
+
+class TutorBooksResponse(BaseModel):
+    board: str
+    class_level: int
+    books: list[TutorBook]
 
 
 @router.post(
@@ -144,7 +231,7 @@ def chat_class9_physics(
     payload: PhysicsChatRequest,
     ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
 ) -> PhysicsChatResponse:
-    """Grounded conversation with the Class 9 Physics AI Tutor (PCTB).
+    """Grounded conversation with the Class 9 Physics AI Tutor (PCTB). Legacy.
 
     `ctx` is a parameter rather than a bare dependency because this handler needs the
     bound session to persist the turn. The guards that only need to refuse stay in
@@ -153,6 +240,13 @@ def chat_class9_physics(
     # Shares the `tutor_ask` bucket with /tutor/ask on purpose: separate buckets would
     # let a client double its budget by alternating the two routes.
     enforce(request, bucket="tutor_ask", limit=TUTOR_ASK_LIMIT, subject=str(ctx.user_id))
+
+    # This route only ever served Physics 9, so it resumes only the sessions it opened
+    # (subject `physics`) - never a session /ask opened for another book.
+    if payload.session_id is not None:
+        meta = tutor_service.session_meta(ctx.session, payload.session_id)
+        if meta["subject"] != "physics":
+            raise forbidden_scope("That chat session is not available.")
 
     session_id, anchor = tutor_service.open_or_resume_session(
         ctx.session,
@@ -215,16 +309,14 @@ class AskRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     lang: Literal["en", "ur", "ur-Latn"] = "en"
     session_id: UUID | None = None
-    chapter: int | None = Field(default=None, ge=1, le=9)
+    # Checked against the book's own chapters - only Physics 9 has any today.
+    chapter: int | None = Field(default=None, ge=1)
+    # The book for a NEW session; defaults to Physics 9. On resume it must match the
+    # session's book or be omitted (tdd.md §3.2).
+    book_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
-@router.post(
-    "/ask",
-    dependencies=[
-        Depends(require_guardian_verified),
-        Depends(require_class_9_student),
-    ],
-)
+@router.post("/ask", dependencies=[Depends(require_guardian_verified)])
 def ask(
     request: Request,
     payload: AskRequest,
@@ -234,20 +326,33 @@ def ask(
 
     Everything that can fail outright happens HERE, before the response starts, so it
     can still be a §7.3 envelope with a real status code. Once the first byte is on the
-    wire that is impossible - which is why retrieval and the generator's readiness are
-    both checked up front and only token production happens inside the stream.
+    wire that is impossible - which is why the book, retrieval and the generator's
+    readiness are all checked up front and only token production happens inside the
+    stream.
     """
     # First statement, before any work: one serialised model answers one query at a
     # time, so an unbounded caller is a denial of service against the rest of the class,
     # not merely a waste (see TUTOR_ASK_LIMIT).
     enforce(request, bucket="tutor_ask", limit=TUTOR_ASK_LIMIT, subject=str(ctx.user_id))
 
+    context = resolve_book(ctx, book_id=payload.book_id, session_id=payload.session_id)
+    book = context.book
+    if (
+        payload.session_id is None
+        and payload.chapter is not None
+        and book.anchor(payload.chapter) is None
+    ):
+        raise validation_error(
+            message="That chapter is not in this book.",
+            details={"fields": {"chapter": "not a chapter of this book"}},
+        )
+
     session_id, anchor = tutor_service.open_or_resume_session(
         ctx.session,
         ctx.user_id,
         payload.session_id,
-        subject="physics",
-        class_level=9,
+        subject=book.subject,
+        class_level=context.class_level,
         chapter=payload.chapter,
     )
 
@@ -257,14 +362,20 @@ def ask(
         else []
     )
 
-    hits, timings, tier, intent = tutor_service.retrieve_for_turn(
-        ctx.session,
-        session_id,
-        payload.message,
-        anchor=anchor,
-        top_k=3,
-        has_prior_turn=bool(history),
-    )
+    try:
+        hits, timings, tier, intent = tutor_service.retrieve_for_turn(
+            ctx.session,
+            session_id,
+            payload.message,
+            anchor=anchor,
+            top_k=3,
+            has_prior_turn=bool(history),
+            book=book,
+        )
+    except RetrievalUnavailableError as exc:
+        # Only a book other than Physics 9 gets here: it has no keyword fallback, and
+        # answering from another book's pages is never an option (owner decision 2).
+        raise model_unavailable("That book's search is not available right now.") from exc
     if not hits:
         # ⚠️ This is the DEFENSIVE case only. A real grounding gate compares the top
         # score gap against `SIM_THRESHOLD`, which is still [PROPOSED] (tdd.md §8.2)
@@ -289,13 +400,107 @@ def ask(
             retriever=tier,
             intent=intent,
             timings={"encode": round(timings.encode, 3), "search": round(timings.search, 4)},
-            token_source=generator.stream_tokens(payload.message, hits, history),
+            token_source=generator.stream_tokens(
+                payload.message,
+                hits,
+                history,
+                book=book,
+                class_level=context.class_level,
+                content_strategy=context.content_strategy,
+            ),
+            book_pages=book.pages,
         ),
         # charset is explicit: an Urdu answer is utf-8 and a client that guesses
         # latin-1 renders it as mojibake.
         media_type="text/event-stream; charset=utf-8",
         headers=SSE_HEADERS,
     )
+
+
+@router.get(
+    "/books",
+    response_model=TutorBooksResponse,
+    dependencies=[Depends(require_guardian_verified)],
+)
+def list_tutor_books(
+    request: Request,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> TutorBooksResponse:
+    """The caller's subjects - their board, class and group - each with its book.
+
+    A subject with no book, or one that is hidden (Quran Translation, prd.md FR-17), is
+    listed with `available: false`, so the student sees "coming soon" rather than a
+    missing subject (prd.md FR-19).
+    """
+    enforce(
+        request,
+        bucket="tutor_sessions",
+        limit=TUTOR_SESSIONS_LIMIT,
+        subject=str(ctx.user_id),
+    )
+    profile = tutor_service.student_profile(ctx.session, ctx.user_id)
+    if profile is None:
+        raise forbidden_scope("The tutor needs a student profile.")
+    catalogue = get_catalogue()
+    books = []
+    for subject in tutor_service.student_subjects(
+        ctx.session, profile["board"], profile["class_level"], profile["student_group"]
+    ):
+        book = catalogue.for_subject(profile["board"], profile["class_level"], subject["name"])
+        books.append(
+            TutorBook(
+                book_id=book.book_id if book else None,
+                subject=subject["name"],
+                available=bool(book and book.available),
+            )
+        )
+    return TutorBooksResponse(
+        board=profile["board"], class_level=profile["class_level"], books=books
+    )
+
+
+@router.get(
+    "/books/{book_id}/pages/{page}",
+    dependencies=[Depends(require_guardian_verified)],
+)
+def get_book_page(
+    request: Request,
+    book_id: str,
+    page: int,
+    ctx: Annotated[AuthContext, Depends(require_role(UserRole.student.value))],
+) -> FileResponse:
+    """One page scan of one of the caller's books, for a citation preview.
+
+    Authenticated and owner-scoped, unlike the legacy Physics route (defect P1): the
+    book must be the caller's (`resolve_book`). The file path comes from the catalogue
+    entry, never from `book_id` itself.
+    """
+    enforce(
+        request,
+        bucket="tutor_sessions",
+        limit=TUTOR_SESSIONS_LIMIT,
+        subject=str(ctx.user_id),
+    )
+    book = resolve_book(ctx, book_id=book_id, session_id=None).book
+    if not 1 <= page <= book.pages:
+        raise validation_error(
+            message=f"This book has pages 1 to {book.pages}.",
+            details={"fields": {"page": f"must be between 1 and {book.pages}"}},
+        )
+    path = book.page_path(page)
+    if path is None:
+        raise forbidden_scope("That page is not available.")
+    # Private: a shared cache must not serve one student's textbook page to the next.
+    return FileResponse(
+        path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"}
+    )
+
+
+def _session_book_id(board: str | None, row: dict) -> str | None:
+    if board is None:
+        return None
+    book = get_catalogue().for_session(board, row.get("class_level"), row.get("subject"))
+    return book.book_id if book else None
 
 
 @router.get(
@@ -311,7 +516,8 @@ def list_tutor_sessions(
     """The caller's own tutor sessions, newest first (`tdd.md` §3.2).
 
     Ownership is enforced by Row-Level Security, not by a predicate in the query - so
-    there is no `student_id` filter here to forget.
+    there is no `student_id` filter here to forget. Each row carries its book, derived
+    from its subject and class (tdd.md §3.2a "Many books").
     """
     enforce(
         request,
@@ -319,7 +525,12 @@ def list_tutor_sessions(
         limit=TUTOR_SESSIONS_LIMIT,
         subject=str(ctx.user_id),
     )
-    return [SessionSummary(**row) for row in tutor_service.list_sessions(ctx.session, limit)]
+    profile = tutor_service.student_profile(ctx.session, ctx.user_id)
+    board = profile["board"] if profile else None
+    return [
+        SessionSummary(**row, book_id=_session_book_id(board, row))
+        for row in tutor_service.list_sessions(ctx.session, limit)
+    ]
 
 
 @router.get(
@@ -344,7 +555,10 @@ def get_tutor_session(
         limit=TUTOR_SESSIONS_LIMIT,
         subject=str(ctx.user_id),
     )
-    return SessionDetail(**tutor_service.get_session(ctx.session, session_id))
+    detail = tutor_service.get_session(ctx.session, session_id)
+    profile = tutor_service.student_profile(ctx.session, ctx.user_id)
+    board = profile["board"] if profile else None
+    return SessionDetail(**detail, book_id=_session_book_id(board, detail))
 
 
 @router.get(
@@ -357,24 +571,31 @@ def get_tutor_figure(
 ) -> Response:
     """The cropped figure for one answer (`tdd.md` §3.2a, `prd.md` MM-1).
 
-    ⚠️ Unlike the page-scan endpoint beside it, this one IS authenticated and
-    owner-scoped: the box is read through `visual_aid_owner`, so another student's
-    figure is simply not found. Served same-origin because the frontend CSP is
-    `img-src 'self' data:` — an external URL in an `<img>` would be blocked.
+    ⚠️ Authenticated and owner-scoped: the box is read through `visual_aid_owner` and
+    `chat_session_owner`, so another student's figure is simply not found. The page it
+    is cropped from belongs to the answer's own session's book. Served same-origin
+    because the frontend CSP is `img-src 'self' data:` — an external URL in an `<img>`
+    would be blocked.
     """
     stored = tutor_service.message_figure(ctx.session, message_id)
     if stored is None:
         raise forbidden_scope("That figure is not available.")
 
+    profile = tutor_service.student_profile(ctx.session, ctx.user_id)
+    book = get_catalogue().for_session(
+        profile["board"] if profile else "", stored["class_level"], stored["subject"]
+    )
+    if book is None or book.pages_dir is None:
+        raise forbidden_scope("That figure is not available.")
+
     # Re-validated on the way out, not trusted because it was validated on the way in.
     # A row written by an older revision, or by anything other than this code path, is
     # still untrusted input by the time it reaches `Image.crop`.
-    box = parse_box(stored, book_pages=BOOK_PAGES)
-    pages_dir = pages_directory()
-    if box is None or pages_dir is None:
+    box = parse_box(stored["figure"], book_pages=book.pages)
+    if box is None:
         raise forbidden_scope("That figure is not available.")
 
-    image = crop_page(pages_dir, box)
+    image = crop_page(book.pages_dir, box)
     if image is None:
         raise forbidden_scope("That figure is not available.")
 
@@ -389,7 +610,8 @@ def get_tutor_figure(
 
 @router.get("/class9/physics/pages/{page_num}")
 def get_physics_page_image(page_num: int):
-    """Serves a 150 DPI textbook page scan for citation previews."""
+    """Serves a 150 DPI textbook page scan for citation previews. Legacy, unauthenticated
+    (defect P1); the frontend uses `/books/{book_id}/pages/{n}`."""
     if page_num < 1 or page_num > BOOK_PAGES:
         raise HTTPException(
             status_code=404, detail=f"Page {page_num} out of book range (1-{BOOK_PAGES})"

@@ -1,0 +1,16 @@
+# Encoder dependencies for ml/indexing. Pinned to the query side that actually runs
+# (edubridge-chatbot/.venv, the venv ml/serving was first measured in), so pages and
+# queries are encoded by the same code. torch and torchvision are NOT listed here: they
+# come from the PyTorch CUDA index first (setup.bat / setup.sh), and a constraints file
+# written at setup time stops pip from replacing them with PyPI's CPU-only wheel.
+colpali-engine==0.3.18
+transformers==5.17.0
+peft==0.20.0
+accelerate==1.15.0
+huggingface_hub==1.33.0
+tokenizers==0.23.2
+safetensors==0.8.0
+numpy==2.5.3
+pillow==12.3.0
+# Reproduces the served Physics 9 scans byte for byte (p187 included); keep it pinned.
+pymupdf==1.28.2

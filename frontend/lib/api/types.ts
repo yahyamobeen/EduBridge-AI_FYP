@@ -375,6 +375,11 @@ export type TutorAskRequest = {
   /** Null opens a session; `chapter` then sets its anchor, on that turn only. */
   session_id?: string | null
   chapter?: number | null
+  /**
+   * The book for a NEW session (tdd.md §3.2a "Many books"); the server defaults to
+   * Physics 9. On a resumed session it must match the session's book or be omitted.
+   */
+  book_id?: string | null
 }
 
 /** The `pages` frame: retrieval is done, generation has not started. */
@@ -419,6 +424,8 @@ export type TutorDoneEvent = {
 
 export type TutorSessionSummary = {
   id: string
+  /** The session's book, derived by the server from its subject and class. */
+  book_id: string | null
   subject: string | null
   class_level: number | null
   chapter: number | null
@@ -438,12 +445,31 @@ export type TutorTranscriptMessage = {
 
 export type TutorSessionDetail = {
   id: string
+  book_id: string | null
   subject: string | null
   class_level: number | null
   chapter: number | null
   started_at: string
   ended_at: string | null
   messages: TutorTranscriptMessage[]
+}
+
+/**
+ * One of the caller's subjects (`GET /api/tutor/books`). `book_id` is null when the
+ * subject has no book yet; `available` is false for that, for a hidden subject (Quran
+ * Translation, prd.md FR-17) and for a book this host does not serve.
+ */
+export type TutorBook = {
+  book_id: string | null
+  /** The subject catalogue's name: "Physics", "Computer Science", "Pakistan Studies"... */
+  subject: string
+  available: boolean
+}
+
+export type TutorBooksResponse = {
+  board: BoardCode
+  class_level: number
+  books: TutorBook[]
 }
 // Classroom (tdd.md §3.6) — mirrors backend/app/classroom/schemas.py
 // ---------------------------------------------------------------------------

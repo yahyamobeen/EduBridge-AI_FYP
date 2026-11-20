@@ -14,8 +14,20 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import AuthContext, authenticated, require_guardian_verified
 from app.main import create_app
+from app.retrieval.physics9.base import BOOK_PAGES, CHAPTERS
+from app.retrieval.physics9.catalogue import Book
 from app.retrieval.physics9.generator import PhysicsGenerator
-from app.tutor.routes import require_class_9_student
+from app.tutor.routes import BookContext, require_class_9_student
+
+# `/ask` resolves its book with `resolve_book` (tdd.md §3.2a "Many books"). These tests
+# are about streaming and rate limits, not ownership - that has its own tests - so the
+# book is pinned to Physics 9, the book every one of them was written against.
+PHYSICS_CONTEXT = BookContext(
+    book=Book("Punjab_9_Physics", "PCTB", (9,), "Physics", BOOK_PAGES, None, CHAPTERS),
+    board="PCTB",
+    class_level=9,
+    content_strategy="branch_a_english_source",
+)
 
 
 class _Result:
@@ -67,8 +79,9 @@ class _FakeGenerator:
         self.explode_after = explode_after
         self.saw_history = None
 
-    def stream_tokens(self, question, hits, history=None):
+    def stream_tokens(self, question, hits, history=None, **book_args):
         self.saw_history = history
+        self.saw_book_args = book_args
         for index, chunk in enumerate(self.chunks):
             if self.explode_after is not None and index == self.explode_after:
                 raise RuntimeError("upstream died")
@@ -81,6 +94,7 @@ def _client(monkeypatch, app, generator, session_id=None):
     app.dependency_overrides[authenticated] = lambda: ctx
     app.dependency_overrides[require_guardian_verified] = lambda: ctx
     app.dependency_overrides[require_class_9_student] = lambda: ctx
+    monkeypatch.setattr("app.tutor.routes.resolve_book", lambda *_a, **_k: PHYSICS_CONTEXT)
     monkeypatch.setattr("app.tutor.routes.get_physics_generator", lambda: generator)
     return TestClient(app), fake_db
 

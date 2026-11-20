@@ -30,9 +30,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 ENV HF_HOME=/opt/hf
 ARG CHECKPOINT=vidore/colqwen2-v1.0
 ENV CHECKPOINT=${CHECKPOINT}
-RUN python -c "import os; from colpali_engine.models import ColQwen2, ColQwen2Processor; \
-c = os.environ['CHECKPOINT']; ColQwen2.from_pretrained(c, device_map='cpu'); \
-ColQwen2Processor.from_pretrained(c); print('cached', c)"
+# The same pinned revisions app.py loads (PINNED_REVISIONS) - otherwise the cache holds
+# `main` and the service downloads the pinned ones at its first start anyway.
+ARG ADAPTER_REVISION=2b6ac8fb37f46a49e4841e599583d00ae8a20117
+ARG BASE_REVISION=9fe8a713422a7cb4ef79ca77a09b381ee2243101
+RUN python -c "import os; from huggingface_hub import snapshot_download; \
+from colpali_engine.models import ColQwen2, ColQwen2Processor; \
+a = snapshot_download(os.environ['CHECKPOINT'], revision='${ADAPTER_REVISION}'); \
+ColQwen2.from_pretrained(a, revision='${BASE_REVISION}', device_map='cpu'); \
+ColQwen2Processor.from_pretrained(a); print('cached', a)"
 
 WORKDIR /srv
 COPY app.py measure.py ./

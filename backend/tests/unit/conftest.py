@@ -79,3 +79,7 @@ for key, value in _TEST_ENV.items():
 # unconditional. A test that wants to exercise the Gemini path stubs the generator.
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["RETRIEVAL_ENDPOINT"] = ""
+# The same reasoning for a local folder of books: a developer who set BOOKS_DIR for the
+# laptop demo must not have the unit suite read 65 books off their disk. Tests that
+# want books build a temporary folder and point the catalogue at it.
+os.environ["BOOKS_DIR"] = ""

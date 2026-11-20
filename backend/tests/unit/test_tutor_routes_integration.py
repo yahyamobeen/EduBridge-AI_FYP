@@ -60,6 +60,11 @@ class _FakeSession:
             return _FakeResult([{"id": self.session_id, "chapter": params.get("chapter")}])
         if "SELECT id, chapter FROM chat_session" in sql:
             return _FakeResult([{"id": self.session_id, "chapter": 7}])
+        if "SELECT id, subject, class_level, chapter FROM chat_session" in sql:
+            # A session the legacy /chat route opened: subject `physics`, Class 9.
+            return _FakeResult(
+                [{"id": self.session_id, "subject": "physics", "class_level": 9, "chapter": 7}]
+            )
         if "INSERT INTO message" in sql:
             return _FakeResult([uuid4()])
         return _FakeResult([])

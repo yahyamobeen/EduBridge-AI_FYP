@@ -245,13 +245,24 @@ The backend is a modular monolith under `backend/app/<module>/`. Each module exp
 | GET | `/api/tutor/sessions` | Yes | Student (owner) | List own chat sessions, newest first |
 | GET | `/api/tutor/sessions/{id}` | Yes | Student (owner) | Retrieve own chat session |
 | GET | `/api/tutor/figures/{message_id}` | Yes | Student (owner) | The cropped figure for one answer (§3.2a). Keyed on the MESSAGE id, not the `visual_aid` row's: there is one figure per message, and the client already has the message id from `done` |
+| GET | `/api/tutor/books` | Yes | Student (gate-verified) | The caller's subjects for their board, class and group, each with its book and whether it is available on this host (§3.2a "Many books") |
+| GET | `/api/tutor/books/{book_id}/pages/{n}` | Yes | Student (gate-verified, owns the book) | One page scan of one of the caller's books, for a citation preview |
 
 **Wire contract for `/api/tutor/ask`** — previously unspecified, which is how the pilot came
 to ship a non-streaming JSON body instead (v0.4.0).
 
 Request: `{ message: str(1..2000), lang: "en"|"ur"|"ur-Latn", session_id: uuid|null,
-chapter: int|null }`. A null `session_id` opens a session; `chapter` sets the anchor on that
-first turn only.
+chapter: int|null, book_id: str|null }`. A null `session_id` opens a session; `chapter` sets
+the anchor on that first turn only, and is accepted only for a book that has chapters.
+`book_id` chooses the book for a **new** session and defaults to `Punjab_9_Physics`; on a
+resumed session it must equal the session's book or be omitted, because a session belongs to
+exactly one book (§3.2a "Many books").
+
+Book failures, all **before** the first byte: an unknown book, or a book that is not the
+caller's → `403 FORBIDDEN_SCOPE`; a `book_id` that differs from the resumed session's, or a
+`chapter` the book does not have → `400 VALIDATION_ERROR`; a book that is the caller's but is
+not available on this host, or whose retrieval is down with no fallback →
+`503 MODEL_UNAVAILABLE`.
 
 Response: `text/event-stream`. Four event types, in this order:
 
@@ -295,11 +306,13 @@ identifiers** — see §5.9.
 
 ### 3.2a Class 9 Physics pilot — `backend/app/tutor/`, `backend/app/retrieval/physics9/` **[PILOT]**
 
-A deliberately narrow first tutor: **one subject, one book, one class.** It exists to answer
-whether visual retrieval over page scans is viable at all, before the §3.2 orchestrator,
-the §12 knowledge base or the §5.5 text index are built. None of those exist yet.
-**Everything in this section is scoped to the pilot and is not the design for the general
-tutor.**
+It began as a deliberately narrow first tutor: **one subject, one book, one class.** It
+exists to answer whether visual retrieval over page scans is viable at all, before the §3.2
+orchestrator, the §12 knowledge base or the §5.5 text index are built. None of those exist
+yet. Since 2026-11-17 the same pipeline serves **every book the student is entitled to** on
+a laptop deployment (see "Many books" at the end of this section); production still serves
+Physics 9 only. **Everything in this section is scoped to the pilot and is not the design
+for the general tutor.**
 
 **Pilot endpoints** (in addition to §3.2, which they do not replace):
 
@@ -351,8 +364,10 @@ development machine) or `heuristic`. The backend therefore carries **no `torch` 
 it is an optional extra. A remote failure degrades to `heuristic` and the `pages` event names
 the path that answered.
 
-**`heuristic` is a real tier, not a stub.** A hand-maintained syllabus index (63 sub-topics,
-9 chapters) maps keywords to page sets. It serves two purposes the neural retriever cannot:
+**`heuristic` is a real tier, not a stub - for Physics 9 only.** A hand-maintained syllabus
+index (61 sub-topics, 9 chapters) maps keywords to page sets; no other book has one, so for
+every other book this tier refuses (`503 MODEL_UNAVAILABLE`) rather than answer from Physics
+pages. It serves two purposes the neural retriever cannot:
 it answers while a cold or stopped retrieval host starts, and it is the correct mechanism for
 **explicit references** — "Example 7.1", "numerical 7.3" are an index lookup, not a
 similarity search.
@@ -376,7 +391,11 @@ set, and the tutor then explains something adjacent to what the student is looki
 appears to contradict itself.
 
 The follow-up guard tests against the index's **own vocabulary** rather than a hand-written
-stopword list, so the two cannot drift. ⚠️ Plurals are matched in both directions — the
+stopword list, so the two cannot drift. ⚠️ **Books without a syllabus index** (every book
+except Physics 9) have no vocabulary to test against, so for them the guard inverts: a turn is
+a follow-up only if **nothing** remains after removing a small fixed list of filler words and
+the follow-up markers themselves. Any other word counts as a possible new topic and the turn
+retrieves - the same bias, kept by a different test. ⚠️ Plurals are matched in both directions — the
 index holds "thermocouple" and students type "thermocouples", and an exact word-set
 intersection missed it, failing in the dangerous direction.
 
@@ -423,13 +442,14 @@ hard requirement, not a preference — the frontend CSP is `img-src 'self' data:
 already pulled it in: depending on a library only through another package's extra is how a
 dependency silently disappears.
 
-**Interfaces:** `Retriever.search(question, top_k, chapter) -> (hits, timings)` with three
-implementations; `PhysicsGenerator.stream(question, hits, history, lang)`.
+**Interfaces:** `Retriever.search(question, top_k, chapter, *, book) -> (hits, timings)` with
+three implementations (`book` None means Physics 9); `PhysicsGenerator.stream_tokens(question, hits, history, book)`.
 
 **The service itself lives at `ml/serving/`** — a separate deployable, never imported by
-`backend/`. `POST /retrieve` takes `{question, top_k, chapter?}` and returns
-`{pages, scores, encode_ms, search_ms, cached, checkpoint}`; `GET /health` reports
-readiness, the loaded checkpoint and the cache hit rate. Two properties of its design are
+`backend/`. `POST /retrieve` takes `{book, question, top_k, anchor?: [first, last]}` and
+returns `{book, pages, scores, encode_ms, search_ms, cached, checkpoint}`; the backend turns a
+chapter into its page range, so the service holds no chapter tables. `GET /health` reports
+readiness, the books loaded, the loaded checkpoint and the cache hit rate. Two properties of its design are
 load-bearing rather than incidental:
 
 - **A cache hit never touches the model lock.** The page embeddings are read-only after
@@ -446,6 +466,65 @@ load-bearing rather than incidental:
 ⚠️ `pages.colqwen2.pt` is gitignored, so the image cannot be built from a clean clone —
 the file must be supplied at build time. `ml/serving/DEPLOY.md` carries the runbook and
 `ml/serving/measure.py` produces the latency figures this section's claims rest on.
+
+**Building the index: `ml/indexing/`.** The page side of this contract is defined by
+`ml/indexing/encode_books.py`, which builds one index per book named
+`<Board>_<Class>_<Subject>` (72 books: Punjab and Sindh, Classes 9–12) on a GPU machine:
+
+- **Every page of every book is rendered to exactly 1049×1387.** A scan already at that size
+  is copied byte for byte when nothing is drawn over it (no visible text, drawings or
+  annotations; an invisible OCR layer is fine) and it is placed upright; a page within 1% of
+  that shape is scaled to it; anything else is fitted inside it with white margins. On the
+  served Physics 9 PDF this reproduces all 200 served scans byte for byte. One size
+  means 755 vectors per page everywhere, which `torch.stack` at load requires and which
+  keeps MaxSim from favouring larger pages.
+- **The model is pinned:** adapter `vidore/colqwen2-v1.0` at `2b6ac8fb…0117`, base
+  `vidore/colqwen2-base` at `9fe8a713…3101`, bfloat16, processor at checkpoint defaults.
+  ⚠️ The query side (`app.py`, `local.py`) still loads unpinned `main`, so pinning it to the
+  same two revisions is outstanding.
+- **The file** keeps the keys this section's loaders read (`checkpoint`, `pages` 1..N,
+  `embeddings` as N tensors of 755×128, `complete`, `dim`) and stores the tensors in
+  bfloat16, which is lossless because the model computes in bfloat16 and every reader
+  casts to float32. It adds provenance (book, source sha256, both revisions, library
+  versions) and loads with `torch.load(weights_only=True)`.
+- **Figure boxes** come from Docling's layout model only (`figures.py`): its raw output is
+  kept per book and turned into `figures.json` rows of `{page, box, caption,
+  figure_number}` in the same fraction-of-page box format as the `@@FIGURE` line above.
+  Nothing reads them yet; using them is step 1 of `prd.md` MM-1.
+
+**Many books (laptop deployment, 2026-11-17).** The pipeline above - ColQwen2 page
+retrieval, Gemini reading the page images, a `@@FIGURE` crop - serves every book unchanged;
+only the book's folder and page count vary.
+
+- **A book** is `<Board>_<Class>_<Subject>` (`Punjab`/`Sindh`), read at backend start-up from
+  `BOOKS_DIR/<book_id>/manifest.json` (written by `ml/indexing`). Physics 9 is also built in,
+  served from the committed scans, so a host with an empty `BOOKS_DIR` (production) serves
+  exactly what it did before. A book is **available** on a host only if its page folder
+  exists there.
+- **Which books a student may use** - the rule `app.join_space_by_code` already applies to
+  classrooms: the book's board is the student's (`PCTB`→Punjab, `STBB`→Sindh), the student's
+  class is one of the book's classes, and the subject is in the student's group
+  (`subject_group`). Board, class and group are fixed at signup and cannot be changed by the
+  application.
+- **Shared books:** `Sindh_9_English`, `Sindh_10_Urdu` and `Sindh_9_Islamiat` each serve
+  Classes 9 **and** 10 - the board prints one book for both years.
+- **Hidden:** Quran Translation (`prd.md` FR-17 disables generation for it), shown to the
+  student as "coming soon" like a subject with no book.
+- **Chapters are optional.** Only Physics 9 has a chapter table; the PDFs' own outlines are
+  empty or page-number bookmarks. A book without chapters cites pages only and refuses a
+  `chapter` anchor.
+- **No fallback outside Physics 9:** when the retrieval service is down, other books answer
+  `503 MODEL_UNAVAILABLE`.
+- **A session belongs to one book**, derived - not stored - from the session's `subject`
+  (the catalogue name) and `class_level` with the student's immutable board. Pilot rows whose
+  `subject` is lowercase `physics` map to `Punjab_9_Physics`, the only book that ever served
+  them. No migration.
+- **One instance for all books.** One retrieval process holds one ColQwen2 model and every
+  book's index (bfloat16, ~2.5 GB for 14,095 pages); the searched book is cast to float32 per
+  request. A question's embedding does not depend on the book, so one encoder and one query
+  cache serve them all; scaling out means identical replicas that each hold every book.
+- **The query model is pinned** to the same two revisions as `ml/indexing`, so pages and
+  questions are encoded by the same weights.
 
 ### 3.3 Skills & MCP Subsystem — `backend/app/skills/`, `backend/app/mcp/` **[P0 self-skills / P1 full MCP]**
 
@@ -924,7 +1003,7 @@ Each table lists notable columns, keys, and indexes (full DDL for core tables in
 - **(d) Learner analytics (OLTP current-state):** `mastery_estimate(student_id🔗, slo_id🔗, p_mastery, p_transit, p_guess, p_slip, updated_at, version, PK(student_id,slo_id))`, `coverage_record(id, student_id🔗, subject_id🔗, coverage_pct, as_of)`, `exam_readiness_score(id, student_id🔗, subject_id🔗, score, expected_marks, computed_at)`, `review_schedule(id, student_id🔗, slo_id🔗, due_at, interval)`.
 - **(e) Classroom:** `classroom_space(id, owner_id🔗, owner_role='teacher', subject_id🔗, title, status⋈{active,archived})` — never deleted, `join_code(id, space_id🔗, code🔑 ^[A-HJ-NP-Z2-9]{8}$, revoked, expires_at)` — one live per space, `enrollment(id, space_id🔗, student_id🔗, joined_at, left_at, removed_at, muted_at, UNIQUE(space_id,student_id))`, `announcement(id, space_id🔗, author_id🔗, body 1–5000, publish_at, created_at, updated_at)` — a future `publish_at` schedules the post and members cannot read it until then (P3, `20261004130000`); `teacher_subject_scope` gains `revoked_at` (v0.4.0). `assignment`, `assignment_submission` and `submission_grade` (P4, `20261004140000`) — the grade is its own table because all users share one database role, and late/missing/graded are derived, never stored. **Added by classroom phase**, each with its migration: `material_attachment`, `submission_file` (P6, `20261004150000`), `submission_link` (P6b, `20261005120000`); `space_message` + `classroom_space.chat_locked` (P7, `20261005130000`) — the chat table is deliberately **not** `message`, which stays owner-only.
 - **(f) Tutor:** `chat_session(id, student_id🔗, started_at)`, `message(id, session_id🔗, role, content, slo_refs uuid[], ts)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
-- **(f) Tutor:** `chat_session(id, student_id🔗, started_at, ended_at, subject, class_level, chapter)`, `message(id, session_id🔗, role⋈enum, content, slo_refs uuid[], created_at)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
+- **(f) Tutor:** `chat_session(id, student_id🔗, started_at, ended_at, subject, class_level, chapter)` - the session's book is derived from `subject`, `class_level` and the student's board (§3.2a "Many books"), not stored, `message(id, session_id🔗, role⋈enum, content, slo_refs uuid[], created_at)`, `visual_aid(id, message_id🔗, kind⋈enum, payload jsonb, sandboxed=true)`.
   - **Session anchor** — `subject text`, `class_level smallint`, `chapter smallint`, all
     **nullable**, added for the §3.2a pilot. The anchor is a **retrieval prior, not a
     filter**: hard-scoping a session to its chapter makes a prerequisite question ("what is
@@ -1450,6 +1529,7 @@ Python ≥3.12, `uv`; Node ≥20 (Next.js); Docker + docker-compose; PostgreSQL 
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Pinned deliberately. ⚠️ Do not pin a model whose retirement date has passed, and do not list speculative future versions in a failover chain — an unavailable name costs a retry per attempt |
 | `GEMINI_FALLBACK_MODELS` | `[]` (empty) | JSON array of alternates tried, in order, when `GEMINI_MODEL` answers **429 or 503 only** — never a 4xx that means the request itself is wrong. ⚠️ Empty is the correct default: every name must be one the deployment's key can actually call, confirmed with `ListModels`, never inferred from a version number. The row above is the standing warning this key is bounded by |
 | `PHYSICS_EMBEDDINGS_PATH` | — | Path to `pages.colqwen2.pt`. Used only when `RETRIEVAL_MODE=local` |
+| `BOOKS_DIR` | - (empty) | Folder of book folders `<book_id>/{manifest.json, pages/}` produced by `ml/indexing` (§3.2a "Many books"). Empty means Physics 9 only, from `PHYSICS_PAGES_DIR` or the committed scans - the production setting. The retrieval service's own `INDEX_DIR` is documented in `ml/serving/DEPLOY.md` |
 | `PHYSICS_PAGES_DIR` | — | Directory of 200 page scans, served by `/api/tutor/class9/physics/pages/{n}` |
 | `EMAIL_PROVIDER` | `logging` | `logging` (dev/CI) · `sendgrid` (production, chosen v0.3.9) · `resend` (retained, unused). A **`Literal`** — a value outside the three is refused at boot, not ignored (A3). `logging` is refused in production |
 | `SENDGRID_API_KEY` | — | SendGrid Web API key (`SG.…`); required when `EMAIL_PROVIDER=sendgrid` |

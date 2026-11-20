@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.errors import forbidden_scope
-from app.retrieval.physics9.base import Timings, page_url
+from app.retrieval.physics9.base import PHYSICS_BOOK, Timings, page_url
 
 logger = logging.getLogger("edubridge.tutor.service")
 
@@ -38,6 +38,71 @@ HISTORY_TURNS = 4
 # that three other planned consumers already read.
 _ROLE_TO_DB = {"user": "student", "assistant": "assistant", "system": "system"}
 _ROLE_FROM_DB = {"student": "user", "assistant": "assistant", "system": "system"}
+
+
+def student_profile(db: Session, user_id: UUID) -> dict[str, Any] | None:
+    """The caller's board, class and group - fixed at signup, never editable by the app."""
+    row = (
+        db.execute(
+            text(
+                "SELECT board::text AS board, class_level, student_group::text AS student_group "
+                "FROM student_profile WHERE user_id = :uid"
+            ),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    return dict(row) if row else None
+
+
+def student_subjects(
+    db: Session, board: str, class_level: int, student_group: str
+) -> list[dict[str, Any]]:
+    """The subjects of this board and class that the student's group takes.
+
+    The same rule `app.join_space_by_code` applies to classrooms - board, class, and the
+    subject in the student's group (`subject_group`). The reference tables are readable
+    by `app_backend` in a bound session (`20260802140000`), so no SECURITY DEFINER
+    function is needed; `/reference/subjects` already reads them the same way.
+    """
+    rows = (
+        db.execute(
+            text(
+                "SELECT s.id, s.name, s.content_strategy::text AS content_strategy "
+                "  FROM subject s "
+                "  JOIN class_level cl ON cl.id = s.class_level_id "
+                "  JOIN board b ON b.id = cl.board_id "
+                "  JOIN subject_group sg ON sg.subject_id = s.id "
+                " WHERE b.code = CAST(:board AS board_code) AND cl.level = :lvl "
+                "   AND sg.student_group = CAST(:grp AS student_group) "
+                " ORDER BY s.name"
+            ),
+            {"board": board, "lvl": class_level, "grp": student_group},
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(row) for row in rows]
+
+
+def session_meta(db: Session, session_id: UUID) -> dict[str, Any]:
+    """`subject`, `class_level` and `chapter` of one of the caller's sessions.
+
+    The session's book is derived from these (tdd.md §3.2a "Many books"). RLS filters
+    another student's session out, so it answers exactly like a missing one.
+    """
+    row = (
+        db.execute(
+            text("SELECT id, subject, class_level, chapter FROM chat_session WHERE id = :sid"),
+            {"sid": session_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if row is None:
+        raise forbidden_scope("That chat session is not available.")
+    return dict(row)
 
 
 def open_or_resume_session(
@@ -193,7 +258,7 @@ def recent_history(
     ]
 
 
-def last_turn_pages(db: Session, session_id: UUID) -> list[dict[str, Any]]:
+def last_turn_pages(db: Session, session_id: UUID, book=None) -> list[dict[str, Any]]:
     """The pages the previous answer cited, or `[]`.
 
     What a follow-up reuses instead of retrieving again (`app.tutor.turns`). Reusing
@@ -219,12 +284,14 @@ def last_turn_pages(db: Session, session_id: UUID) -> list[dict[str, Any]]:
     )
     if not row:
         return []
+    # The session's own book - a follow-up in Chemistry must cite Chemistry pages.
+    book_id = book.book_id if book is not None else PHYSICS_BOOK
     return [
         {
             "page": page["page"],
             "chapter": page.get("chapter"),
             "score": page.get("score"),
-            "url": page_url(page["page"]),
+            "url": page_url(page["page"], book_id),
         }
         for page in (row or {}).get("pages", [])
     ]
@@ -238,6 +305,7 @@ def retrieve_for_turn(
     anchor: int | None = None,
     top_k: int = 3,
     has_prior_turn: bool = False,
+    book=None,
 ) -> tuple[list[dict[str, Any]], Timings, str, str]:
     """Route the turn, then retrieve. Returns `(hits, timings, tier, intent)`.
 
@@ -250,14 +318,20 @@ def retrieve_for_turn(
     a client cannot tell that apart from the retrieval service being down. One is
     correct behaviour; the other is a degraded answer.
     """
+    from app.retrieval.physics9.heuristic import TOPIC_TERMS
     from app.retrieval.physics9.service import search as neural_search
     from app.retrieval.physics9.service import search_index
     from app.tutor.turns import classify
 
-    intent = classify(question, has_prior_turn=has_prior_turn)
+    physics = book is None or book.book_id == PHYSICS_BOOK
+    # Only Physics 9 has a syllabus vocabulary; every other book gets the stricter
+    # "nothing but fillers and markers" test (tdd.md §3.2a, turn routing).
+    intent = classify(
+        question, has_prior_turn=has_prior_turn, topic_terms=TOPIC_TERMS if physics else None
+    )
 
     if intent == "followup":
-        reused = last_turn_pages(db, session_id)
+        reused = last_turn_pages(db, session_id, book)
         if reused:
             # No retrieval at all: the student is still looking at these pages.
             return reused, Timings(), "reused", intent
@@ -266,11 +340,17 @@ def retrieve_for_turn(
         # from nothing.
         intent = "retrieve"
 
-    if intent == "reference":
-        hits, timings = search_index(question, top_k=top_k, chapter=anchor)
+    if intent == "reference" and physics:
+        hits, timings = search_index(question, top_k=top_k, chapter=anchor, book=book)
         return hits, timings, "heuristic", intent
+    if intent == "reference":
+        # No syllabus index for this book, so an exercise reference is a similarity
+        # search like any other question.
+        intent = "retrieve"
 
-    hits, timings, tier = neural_search(question, top_k=top_k, chapter=anchor)
+    # Raises RetrievalUnavailableError for a book other than Physics 9 when its tier is
+    # down - the route turns that into 503 MODEL_UNAVAILABLE.
+    hits, timings, tier = neural_search(question, top_k=top_k, chapter=anchor, book=book)
     return hits, timings, tier, intent
 
 
@@ -348,21 +428,30 @@ def get_session(db: Session, session_id: UUID) -> dict[str, Any]:
 
 
 def message_figure(db: Session, message_id: UUID) -> dict[str, Any] | None:
-    """The stored crop region for one assistant turn, or None.
+    """The stored crop region for one assistant turn, with its session's subject and
+    class (from which the book is derived), or None.
 
-    Read under RLS through `visual_aid_owner`, so a message belonging to another
-    student simply is not found - which is why this endpoint is safe in a way the
-    page-scan endpoint is not (defect P1).
+    Read under RLS through `visual_aid_owner` and `chat_session_owner`, so a message
+    belonging to another student simply is not found - which is why this endpoint is
+    safe in a way the legacy page-scan endpoint is not (defect P1).
     """
     row = (
         db.execute(
             text(
-                "SELECT payload FROM visual_aid WHERE message_id = :mid AND kind = 'figure' LIMIT 1"
+                "SELECT v.payload, s.subject, s.class_level "
+                "  FROM visual_aid v "
+                "  JOIN message m ON m.id = v.message_id "
+                "  JOIN chat_session s ON s.id = m.session_id "
+                " WHERE v.message_id = :mid AND v.kind = 'figure' LIMIT 1"
             ),
             {"mid": message_id},
         )
-        .scalars()
+        .mappings()
         .one_or_none()
     )
-    figure = (row or {}).get("figure") if row else None
-    return figure if isinstance(figure, dict) else None
+    if row is None:
+        return None
+    figure = (row["payload"] or {}).get("figure")
+    if not isinstance(figure, dict):
+        return None
+    return {"figure": figure, "subject": row["subject"], "class_level": row["class_level"]}

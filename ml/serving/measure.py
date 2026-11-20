@@ -30,7 +30,11 @@ import time
 
 # Importing the service gives us the same Index, the same guards and the same load
 # path - so this measures what actually serves, not a reimplementation of it.
-from app import DTYPE, EMBEDDINGS_PATH, index
+from app import DTYPE, EMBEDDINGS_PATH, INDEX_DIR, PAGES_BOOK, index
+
+# The questions below are Physics 9 questions, so they are measured against that book
+# unless MEASURE_BOOK names another one that is loaded.
+MEASURE_BOOK = os.environ.get("MEASURE_BOOK", PAGES_BOOK)
 
 # Real questions, at realistic lengths and in all three languages. Latency scales with
 # token count, so measuring on "test" would flatter the result. Taken from the labelled
@@ -132,7 +136,7 @@ def run(label: str) -> list[float]:
     timings: list[float] = []
     for lang, question in QUESTIONS:
         started = time.monotonic()
-        pages, _scores, encode_s, search_s, cached = index.search(question, 3, None)
+        pages, _scores, encode_s, search_s, cached = index.search(MEASURE_BOOK, question, 3, None)
         total = time.monotonic() - started
         timings.append(encode_s)
         print(
@@ -153,7 +157,7 @@ def summarise(name: str, timings: list[float]) -> float:
 
 
 def main() -> None:
-    print(f"embeddings: {EMBEDDINGS_PATH}")
+    print(f"embeddings: {INDEX_DIR or EMBEDDINGS_PATH} (measuring {MEASURE_BOOK})")
     load_started = time.monotonic()
     index.load()
     load_s = time.monotonic() - load_started

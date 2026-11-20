@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
-from app.retrieval.physics9.base import RetrievalUnavailableError, Retriever, Timings
+from app.retrieval.physics9.base import (
+    PHYSICS_BOOK,
+    RetrievalUnavailableError,
+    Retriever,
+    Timings,
+)
 from app.retrieval.physics9.generator import PhysicsGenerator
 from app.retrieval.physics9.heuristic import HeuristicRetriever
 
@@ -114,26 +119,36 @@ def pages_directory() -> Path | None:
     )
 
 
-def search(question: str, top_k: int = 3, chapter: int | None = None):
+def search(question: str, top_k: int = 3, chapter: int | None = None, *, book=None):
     """Retrieve, degrading to the heuristic tier if the configured one fails mid-request.
 
     Returns `(hits, timings, tier_name)`. A remote tier fails per-request, not just at
     startup - the host scales to zero or stops on a schedule - so the fallback has to
     live on this path and not only in construction.
+
+    ⚠️ ONLY PHYSICS 9 HAS A FALLBACK. The keyword index describes that book alone, so
+    for any other book a failed tier re-raises `RetrievalUnavailableError` and the route
+    answers `503 MODEL_UNAVAILABLE` - "not available right now", never another book's
+    pages (tdd.md §3.2a "Many books"; owner decision 2026-11-17).
     """
     retriever = get_physics_retriever()
     try:
-        hits, timings = retriever.search(question, top_k=top_k, chapter=chapter)
+        hits, timings = retriever.search(question, top_k=top_k, chapter=chapter, book=book)
         return hits, timings, retriever.name
     except RetrievalUnavailableError as exc:
+        if book is not None and book.book_id != PHYSICS_BOOK:
+            logger.warning(
+                "%s tier failed for %s (%s); no fallback", retriever.name, book.book_id, exc
+            )
+            raise
         logger.warning("%s tier failed mid-request (%s); degrading", retriever.name, exc)
 
     fallback = _get_fallback()
-    hits, timings = fallback.search(question, top_k=top_k, chapter=chapter)
+    hits, timings = fallback.search(question, top_k=top_k, chapter=chapter, book=book)
     return hits, timings, fallback.name
 
 
-def search_index(question: str, top_k: int = 3, chapter: int | None = None):
+def search_index(question: str, top_k: int = 3, chapter: int | None = None, *, book=None):
     """Keyword index only, bypassing the configured tier. Returns `(hits, timings)`.
 
     For an explicit reference - "chp 4 ex 4.5 q 3", "numerical 7.3". MaxSim over a
@@ -144,7 +159,7 @@ def search_index(question: str, top_k: int = 3, chapter: int | None = None):
     pass the intent through to the client, or a correct reference lookup is
     indistinguishable from the retrieval service being down.
     """
-    return _get_fallback().search(question, top_k=top_k, chapter=chapter)
+    return _get_fallback().search(question, top_k=top_k, chapter=chapter, book=book)
 
 
 def answer_physics_query(
