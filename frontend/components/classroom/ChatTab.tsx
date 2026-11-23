@@ -1,11 +1,14 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useFormatter, useTranslations } from 'next-intl'
+import { useFormatter, useLocale, useTranslations } from 'next-intl'
 import { FormBanner } from '@/components/ui/FormFeedback'
-import { ChatIcon, LockIcon } from '@/components/ui/Icon'
+import { ChatIcon, LockIcon, MicIcon } from '@/components/ui/Icon'
+import { SpeakButton } from '@/components/voice/SpeakButton'
 import { deleteMessage, getPeople, postMessage, updateSpace } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
+import { useDictation } from '@/lib/voice/useDictation'
+import { stopSpeech } from '@/lib/voice/useSpeech'
 import type { ChatMessage, PeopleResponse, SpaceDetail } from '@/lib/api/types'
 import { ConfirmInline } from './ConfirmInline'
 import { CARD, CARD_HEADING, FIELD, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles'
@@ -42,6 +45,8 @@ export function ChatTab({
   const format = useFormatter()
   const chat = useChatPoll(spaceId, { isOwner })
   const { messages, status, patchStatus } = chat
+
+  useEffect(() => stopSpeech, [spaceId])
 
   // ── names ──
   const [people, setPeople] = useState<PeopleResponse | null>(null)
@@ -216,6 +221,7 @@ function MessageItem({
   time: string
 }) {
   const t = useTranslations('classroom.chat')
+  const locale = useLocale()
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -252,6 +258,20 @@ function MessageItem({
       <p className="whitespace-pre-wrap break-words text-body-md text-on-surface">
         {message.body}
       </p>
+      {!message.deleted && message.body.trim() !== '' && (
+        <SpeakButton
+          id={`classroom-message-${message.id}`}
+          text={message.body}
+          language={locale === 'en' ? 'en' : locale}
+          labels={{
+            speak: t('speak'),
+            stop: t('stop'),
+            pause: t('pause'),
+            resume: t('resume'),
+          }}
+          className="mt-2"
+        />
+      )}
       {message.deleted && (
         <p className="mt-1 text-body-sm italic text-on-surface-variant">{t('deletedNote')}</p>
       )}
@@ -294,13 +314,28 @@ function Composer({
   onRefused: (reason: 'archived' | 'muted' | 'chat_locked') => void
 }) {
   const t = useTranslations('classroom.chat')
+  const locale = useLocale()
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+
+  const dictation = useDictation({
+    languageHint: locale === 'en' ? 'en' : 'ur',
+    targetScript: locale === 'ur' ? 'arabic' : locale === 'ur-Latn' ? 'latin' : undefined,
+    onTranscript: (text) => setDraft((current) => [current, text].filter(Boolean).join(' ').trim()),
+    onError: setVoiceError,
+    messages: {
+      unsupported: t('micUnsupported'),
+      denied: t('micDenied'),
+      failed: t('micFailed'),
+    },
+  })
 
   async function send() {
     const body = draft.trim()
     if (!body || sending) return
+    stopSpeech()
     setSending(true)
     setError(null)
     try {
@@ -350,7 +385,28 @@ function Composer({
         placeholder={t('placeholder')}
         className={FIELD}
       />
-      <div className="mt-3 flex items-center justify-end">
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => { setVoiceError(null); dictation.toggle() }}
+          disabled={sending || dictation.state === 'processing'}
+          aria-label={dictation.state === 'recording' ? t('micStop') : t('mic')}
+          title={dictation.state === 'recording' ? t('micStop') : t('mic')}
+          className={`relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            dictation.state === 'recording'
+              ? 'border-error bg-error-container text-on-error-container'
+              : 'border-outline bg-surface text-on-surface hover:border-primary hover:bg-surface-container-high'
+          }`}
+        >
+          {dictation.state === 'recording' && (
+            <span className="absolute inset-0 rounded-full animate-ping bg-error/30" aria-hidden="true" />
+          )}
+           {dictation.state === 'processing' ? (
+             <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+           ) : (
+             <MicIcon className="h-5 w-5" />
+           )}
+        </button>
         <button
           type="submit"
           disabled={sending || draft.trim() === ''}
@@ -359,6 +415,12 @@ function Composer({
           {sending ? t('sending') : t('send')}
         </button>
       </div>
+      {dictation.state === 'processing' && (
+        <p role="status" className="mt-2 text-body-sm text-on-surface-variant">{t('transcribing')}</p>
+      )}
+      {voiceError && (
+        <div className="mt-3"><FormBanner>{voiceError}</FormBanner></div>
+      )}
       {error && (
         <div className="mt-3">
           <FormBanner>{error}</FormBanner>

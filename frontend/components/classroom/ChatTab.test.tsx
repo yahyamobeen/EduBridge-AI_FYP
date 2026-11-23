@@ -30,6 +30,8 @@ vi.mock('@/lib/api/endpoints', () => ({
   deleteMessage: (...a: unknown[]) => deleteMessage(...a),
   getPeople: (...a: unknown[]) => getPeople(...a),
   updateSpace: (...a: unknown[]) => updateSpace(...a),
+  speakText: vi.fn(),
+  transcribeAudio: vi.fn(),
 }))
 
 const LOADED = { timeout: 5_000 }

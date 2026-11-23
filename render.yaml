@@ -36,6 +36,10 @@ services:
     # SDKs, so this command is the same whichever provider is selected:
     #   uv export --format requirements-txt --no-hashes --no-emit-project \
     #             --extra email -o requirements.txt
+    # Voice (faster-whisper + edge-tts) is the `voice` extra and is NOT in the
+    # default export: a 512 MB instance cannot host Whisper comfortably, so the
+    # backend boots without it and /api/voice/* answers 503 with a clear message.
+    # Regenerate with `--extra voice` (or both) for a host that can run STT.
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health

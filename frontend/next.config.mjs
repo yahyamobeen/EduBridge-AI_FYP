@@ -84,6 +84,9 @@ const securityHeaders = [
       // server-supplied 2FA QR without injecting markup (tdd.md §6.11).
       "font-src 'self'",
       "img-src 'self' data:",
+      // Blob URLs are used for TTS audio playback (Audio element with
+      // URL.createObjectURL). Without this, the browser blocks the audio.
+      "media-src 'self' blob:",
       // `ws:` in dev only, for Turbopack's hot-reload socket.
       `connect-src 'self' https://challenges.cloudflare.com${apiOrigin ? ` ${apiOrigin}` : ''}${isDev ? ' ws: wss:' : ''}`,
       // What we may FRAME (the Turnstile iframe), distinct from frame-ancestors

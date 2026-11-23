@@ -833,7 +833,17 @@
       "lockedOwner": "The chat is locked: only you can post.",
       "lock": "Lock chat",
       "unlock": "Unlock chat",
-      "lockFailed": "The chat could not be changed. Try again."
+      "lockFailed": "The chat could not be changed. Try again.",
+      "speak": "Read aloud",
+      "stop": "Stop",
+      "pause": "Pause",
+      "resume": "Resume",
+      "mic": "Dictate",
+      "micStop": "Stop recording",
+      "transcribing": "Transcribing…",
+      "micUnsupported": "Your browser cannot record audio.",
+      "micDenied": "Microphone access was denied. Allow it in your browser settings.",
+      "micFailed": "That could not be transcribed. Try again."
     },
     "parent": {
       "title": "Classrooms",
@@ -993,7 +1003,14 @@
       "loadingPage": "Loading page…",
       "pageError": "Could not load this page.",
       "back": "Back",
-      "close": "Close"
+      "close": "Close",
+      "mic": "Mic",
+      "micStop": "Stop",
+      "transcribing": "Transcribing…",
+      "speak": "Speak",
+      "stop": "Stop",
+      "pause": "Pause",
+      "resume": "Resume"
     }
   },
   "errorPage": {

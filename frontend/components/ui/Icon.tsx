@@ -7,14 +7,29 @@
  * assistive technology.
  */
 
-type IconProps = { className?: string }
+type IconProps = {
+  className?: string
+  viewBox?: string
+  width?: number
+  height?: number
+  fill?: string
+}
 
-function Svg({ className, children }: IconProps & { children: React.ReactNode }) {
+function Svg({
+  className,
+  viewBox = '0 0 20 20',
+  width,
+  height,
+  fill = 'none',
+  children,
+}: IconProps & { children: React.ReactNode }) {
   return (
     <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
+      viewBox={viewBox}
+      width={width}
+      height={height}
+      fill={fill}
+      stroke={fill === 'none' ? 'currentColor' : 'none'}
       strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -278,6 +293,64 @@ export function AtomIcon({ className }: IconProps) {
       <circle cx="10" cy="10" r="2" />
       <ellipse cx="10" cy="10" rx="7.5" ry="3.2" transform="rotate(30 10 10)" />
       <ellipse cx="10" cy="10" rx="7.5" ry="3.2" transform="rotate(-30 10 10)" />
+    </Svg>
+  )
+}
+
+export function MicIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect x="8" y="3" width="4" height="8" rx="2" />
+      <path d="M5 9a5 5 0 0 0 10 0" />
+      <line x1="10" y1="14" x2="10" y2="17" />
+      <line x1="7" y1="17" x2="13" y2="17" />
+    </Svg>
+  )
+}
+
+export function MicOffIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <rect x="8" y="3" width="4" height="8" rx="2" />
+      <path d="M5 9a5 5 0 0 0 10 0" />
+      <line x1="10" y1="14" x2="10" y2="17" />
+      <line x1="7" y1="17" x2="13" y2="17" />
+      <line x1="4" y1="4" x2="16" y2="16" />
+    </Svg>
+  )
+}
+
+export function VolumeIcon({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M3 8h3l4-4v12l-4-4H3z" />
+      <path d="M14 7a3 3 0 0 1 0 6" />
+      <path d="M16 5a6 6 0 0 1 0 10" />
+    </Svg>
+  )
+}
+
+export function PlayIcon({ className }: IconProps) {
+  return (
+    <Svg className={className} viewBox="0 0 24 24" width={24} height={24} fill="currentColor">
+      <path d="M8 5v14l11-7z" />
+    </Svg>
+  )
+}
+
+export function PauseIcon({ className }: IconProps) {
+  return (
+    <Svg className={className} viewBox="0 0 24 24" width={24} height={24} fill="currentColor">
+      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+    </Svg>
+  )
+}
+
+/** A filled square: "stop this playback". */
+export function StopIcon({ className }: IconProps) {
+  return (
+    <Svg className={className} viewBox="0 0 24 24" width={24} height={24} fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
     </Svg>
   )
 }

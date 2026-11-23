@@ -11,6 +11,8 @@ vi.mock('@/lib/api/endpoints', () => ({
   askTutor: vi.fn(),
   listTutorSessions: vi.fn(),
   getTutorSession: vi.fn(),
+  speakText: vi.fn(),
+  transcribeAudio: vi.fn(),
   listTutorBooks: vi.fn().mockResolvedValue({
     board: 'STBB',
     class_level: 10,

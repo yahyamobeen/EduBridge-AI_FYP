@@ -7,11 +7,15 @@ import {
   BookIcon,
   CloseIcon,
   HistoryIcon,
+  MicIcon,
+  MicOffIcon,
   SendIcon,
   SparkIcon,
 } from '@/components/ui/Icon'
-import { askTutor, getTutorSession, listTutorSessions } from '@/lib/api/endpoints'
+import { SpeakButton } from '@/components/voice/SpeakButton'
+import { askTutor, getTutorSession, listTutorSessions, transcribeAudio } from '@/lib/api/endpoints'
 import { ApiError } from '@/lib/api/errors'
+import { stopSpeech } from '@/lib/voice/useSpeech'
 import { PHYSICS_BOOK, type OpenBook, SubjectIcon, subjectLabel } from './subjects'
 import { TutorFigure } from './TutorFigure'
 import { TutorMarkdown } from './TutorMarkdown'
@@ -74,6 +78,21 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
   const [lang, setLang] = useState<'en' | 'ur-Latn' | 'ur'>('en')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  // Voice input states: idle | recording | processing | error
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'processing' | 'error'>('idle')
+  const [voiceError, setVoiceError] = useState<string | null>(null)
+  const [ttsGender, setTtsGender] = useState<'female' | 'male'>('female')
+  const [audioLevel, setAudioLevel] = useState(0)
+  // Web Speech API refs
+  const baseTextRef = useRef('')
+  const finalTranscriptRef = useRef('')
+  const recognitionRef2 = useRef<any>(null)
+  // Web Audio API refs for waveform
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const animFrameRef = useRef<number | null>(null)
+  const speechTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [messages, setMessages] = useState<MessageWithCitations[]>([])
   const [previewPage, setPreviewPage] = useState<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -95,6 +114,25 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
     scrollToBottom()
   }, [messages, loading])
 
+  // Cleanup audio resources on unmount
+  useEffect(() => {
+    return () => {
+      stopSpeech()
+      if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+      if (recognitionRef2.current) {
+        recognitionRef2.current.onend = null
+        recognitionRef2.current.stop()
+        recognitionRef2.current = null
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+      }
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      if (audioContextRef.current) audioContextRef.current.close().catch(() => {})
+      if (micStreamRef.current) micStreamRef.current.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
   // The four quick prompts are Physics questions, so only the Physics book shows them.
   const quickChips =
     book.bookId === PHYSICS_BOOK ? [t('chip1'), t('chip2'), t('chip3'), t('chip4')] : []
@@ -103,6 +141,8 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
     const query = (textToSend ?? input).trim()
     if (!query || loading) return
 
+    // Sending a question ends any reply that is still being read aloud.
+    stopSpeech()
     setInput('')
     const userMsg: MessageWithCitations = { role: 'user', content: query }
     const updatedMessages = [...messages, userMsg]
@@ -219,6 +259,7 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
   }
 
   async function openHistory() {
+    stopSpeech()
     setShowHistory(true)
     setHistoryError(false)
     try {
@@ -231,6 +272,7 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
   }
 
   async function loadSession(id: string) {
+    stopSpeech()
     setShowHistory(false)
     setLoading(true)
     try {
@@ -258,9 +300,247 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
   }
 
   function startNewChat() {
+    stopSpeech()
     sessionIdRef.current = null
     setMessages([])
     setShowHistory(false)
+  }
+
+  // Web Speech API (browser-native, real-time interim + final results)
+  // MediaRecorder + Web Audio (backend Whisper STT — works offline)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+
+  function startWaveform(stream: MediaStream) {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 64
+      const source = ctx.createMediaStreamSource(stream)
+      source.connect(analyser)
+      audioContextRef.current = ctx
+      analyserRef.current = analyser
+      micStreamRef.current = stream
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const update = () => {
+        if (!analyserRef.current) return
+        analyserRef.current.getByteFrequencyData(dataArray)
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+        setAudioLevel(avg / 255)
+        animFrameRef.current = requestAnimationFrame(update)
+      }
+      update()
+    } catch {
+      // Web Audio not available — waveform stays static
+    }
+  }
+
+  function stopWaveform() {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current)
+      animFrameRef.current = null
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {})
+      audioContextRef.current = null
+    }
+    analyserRef.current = null
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop())
+      micStreamRef.current = null
+    }
+    setAudioLevel(0)
+  }
+
+  async function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setVoiceState('error')
+      setVoiceError('Microphone is not supported in this browser.')
+      setTimeout(() => { setVoiceState('idle'); setVoiceError(null) }, 4000)
+      return
+    }
+
+    // Starting the microphone always silences the speaker: one audio channel.
+    stopSpeech()
+    setVoiceError(null)
+    setVoiceState('recording')
+    baseTextRef.current = input
+    audioChunksRef.current = []
+    finalTranscriptRef.current = ''
+
+    let stream: MediaStream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      setVoiceState('error')
+      setVoiceError('Microphone access denied. Please allow microphone permissions.')
+      setTimeout(() => { setVoiceState('idle'); setVoiceError(null) }, 4000)
+      return
+    }
+
+    startWaveform(stream)
+
+    // Web Speech API only works well for English and Arabic-script Urdu.
+    // Roman Urdu (Latin script) is mangled by the English recognizer, so
+    // Web Speech API: only use for English (reliable). For Urdu and Roman Urdu,
+    // use backend Whisper (auto-detect) which handles all scripts correctly.
+    const SpeechRecognitionAPI =
+      lang === 'en' && typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null
+
+    if (SpeechRecognitionAPI) {
+      // Real-time path: Web Speech API + MediaRecorder backup
+      const recognition = new SpeechRecognitionAPI()
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.lang = lang === 'ur' ? 'ur-PK' : 'en-US'
+
+    // Timeout: if no speech recognized after 4s, stop Web Speech and
+    // rely on backend Whisper (handles Roman Urdu, Hindi, etc.).
+    speechTimeoutRef.current = setTimeout(() => {
+      if (finalTranscriptRef.current.trim() === '' && recognitionRef2.current === recognition) {
+        recognitionRef2.current.onend = null
+        recognitionRef2.current.stop()
+        recognitionRef2.current = null
+        // Keep recording with MediaRecorder; transcription happens on stop
+      }
+    }, 4000)
+
+      recognition.onresult = (event: any) => {
+        if (speechTimeoutRef.current) clearTimeout(speechTimeoutRef.current)
+        let interim = ''
+        let final = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            final += transcript + ' '
+          } else {
+            interim += transcript
+          }
+        }
+        if (final) {
+          finalTranscriptRef.current += final
+        }
+        const combined = [baseTextRef.current, finalTranscriptRef.current, interim]
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+        setInput(combined)
+      }
+
+      recognition.onerror = (event: any) => {
+        if (event.error === 'not-allowed') {
+          setVoiceState('error')
+          setVoiceError('Microphone access denied. Please allow microphone permissions.')
+          setTimeout(() => { setVoiceState('idle'); setVoiceError(null) }, 4000)
+        } else if (event.error === 'no-speech') {
+          // Ignore — user paused
+        } else if (event.error === 'network') {
+          // Fall back to backend Whisper (offline)
+          setVoiceError(null)
+          // Keep recording with MediaRecorder; transcription happens on stop
+        } else if (event.error !== 'aborted') {
+          setVoiceState('error')
+          setVoiceError('Recognition failed. Please try again.')
+          setTimeout(() => { setVoiceState('idle'); setVoiceError(null) }, 4000)
+        }
+      }
+
+      recognition.onend = () => {
+        if (recognitionRef2.current && voiceState === 'recording') {
+          try {
+            recognitionRef2.current.start()
+          } catch {
+            // Already started or stopped
+          }
+        }
+      }
+
+      recognitionRef2.current = recognition
+      try {
+        recognition.start()
+      } catch {
+        // Fall back to MediaRecorder-only
+      }
+    }
+
+    // MediaRecorder for backend Whisper fallback (always record)
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : ''
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data)
+    }
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop())
+      // Only use backend Whisper if Web Speech didn't produce text
+      const hasRealtimeText = finalTranscriptRef.current.trim().length > 0
+      if (hasRealtimeText) {
+        // Real-time already populated the input; just clean up
+        stopWaveform()
+        setVoiceState('idle')
+        setVoiceError(null)
+        return
+      }
+      // Fallback: transcribe via backend Whisper
+      const blob = new Blob(audioChunksRef.current, { type: mimeType || 'audio/webm' })
+      stopWaveform()
+      setVoiceState('processing')
+      try {
+        // Language hint + target script based on selected language:
+        // - English → en (Latin output)
+        // - Urdu → ur (Arabic output)
+        // - Roman → ur (then transliterated to Latin)
+        // Force the language to prevent Hindi hallucination and mixed scripts.
+        const langHint = lang === 'en' ? 'en' : 'ur'
+        const targetScript = lang === 'ur' ? 'arabic' : 'latin'
+        const res = await transcribeAudio(blob, langHint, targetScript)
+        if (res.transcript) {
+          const merged = [baseTextRef.current, res.transcript].filter(Boolean).join(' ').trim()
+          setInput(merged)
+        }
+      } catch {
+        setVoiceState('error')
+        setVoiceError('Transcription failed. Please try again.')
+        setTimeout(() => { setVoiceState('idle'); setVoiceError(null) }, 4000)
+        return
+      }
+      setVoiceState('idle')
+      setVoiceError(null)
+    }
+    mediaRecorderRef.current = recorder
+    recorder.start(250)
+  }
+
+  function stopRecording() {
+    if (speechTimeoutRef.current) {
+      clearTimeout(speechTimeoutRef.current)
+      speechTimeoutRef.current = null
+    }
+    // Stop Web Speech if active
+    if (recognitionRef2.current) {
+      recognitionRef2.current.onend = null
+      recognitionRef2.current.stop()
+      recognitionRef2.current = null
+    }
+    // Stop MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    // Waveform cleanup happens in onstop
+  }
+
+  function toggleRecording() {
+    if (voiceState === 'recording') {
+      stopRecording()
+    } else if (voiceState === 'idle') {
+      startRecording()
+    }
   }
 
   function onSubmit(e: FormEvent) {
@@ -318,7 +598,10 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
           <div className="flex rounded-lg border border-outline-variant/40 bg-surface p-0.5 text-body-sm font-semibold">
             <button
               type="button"
-              onClick={() => setLang('en')}
+              onClick={() => {
+                stopSpeech()
+                setLang('en')
+              }}
               className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                 lang === 'en'
                   ? 'bg-primary text-on-primary shadow-sm'
@@ -329,7 +612,10 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => setLang('ur-Latn')}
+              onClick={() => {
+                stopSpeech()
+                setLang('ur-Latn')
+              }}
               className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
                 lang === 'ur-Latn'
                   ? 'bg-primary text-on-primary shadow-sm'
@@ -340,7 +626,10 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => setLang('ur')}
+              onClick={() => {
+                stopSpeech()
+                setLang('ur')
+              }}
               className={`rounded-md px-2.5 py-1 font-urdu text-xs transition-colors ${
                 lang === 'ur'
                   ? 'bg-primary text-on-primary shadow-sm'
@@ -482,6 +771,22 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
                 `heuristic` for a reason OTHER than a reference lookup - see
                 `isDegraded`.
               */}
+              {!msg.streaming && msg.role === 'assistant' && !msg.error && msg.content && (
+                <SpeakButton
+                  id={`assistant-${index}`}
+                  text={msg.content}
+                  language={lang}
+                  gender={ttsGender}
+                  labels={{
+                    speak: t('speak'),
+                    stop: t('stop'),
+                    pause: t('pause'),
+                    resume: t('resume'),
+                  }}
+                  className="mt-2"
+                />
+              )}
+
               {isDegraded(msg) && (
                 <p className="mt-2 flex items-start gap-1.5 rounded-md bg-surface-container px-2 py-1.5 text-xs text-on-surface-variant">
                   <SparkIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -563,19 +868,75 @@ export function PhysicsChatView({ book, onBack, onClose }: Props) {
 
       {/* Input Form Footer */}
       <footer className="border-t border-outline-variant/30 bg-surface-container-low p-3 sm:p-4">
+        {voiceError && (
+          <p className="mb-2 text-center text-xs text-error">{voiceError}</p>
+        )}
         <form onSubmit={onSubmit} className="flex items-center gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            disabled={loading}
+            disabled={loading || voiceState === 'processing'}
             placeholder={t('inputPlaceholder', { subject })}
             className="flex-1 rounded-lg border border-outline bg-surface px-4 py-2.5 text-body-md text-on-surface placeholder:text-on-surface-variant/60 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           />
+          {/* Waveform visualization while recording */}
+          {voiceState === 'recording' && (
+            <div className="flex items-center gap-0.5 px-1" aria-hidden="true">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span
+                  key={i}
+                  className="w-1 rounded-full bg-error transition-all duration-75"
+                  style={{
+                    height: `${Math.max(4, audioLevel * 24 + Math.sin(Date.now() / 200 + i) * 4)}px`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={toggleRecording}
+            disabled={loading || voiceState === 'processing'}
+            aria-label={voiceState === 'recording' ? t('micStop') : t('mic')}
+            className={`relative inline-flex h-11 w-11 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+              voiceState === 'recording'
+                ? 'bg-error text-on-error shadow-lg shadow-error/30 scale-110'
+                : voiceState === 'processing'
+                  ? 'border border-outline bg-surface text-on-surface-variant'
+                  : voiceState === 'error'
+                    ? 'border border-error bg-error-container text-on-error-container'
+                    : 'border border-outline bg-surface text-on-surface hover:bg-surface-container-high hover:border-primary'
+            }`}
+          >
+            {voiceState === 'recording' && (
+              <span className="absolute inset-0 rounded-full animate-ping bg-error/30" aria-hidden="true" />
+            )}
+            {voiceState === 'processing' ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" />
+            ) : voiceState === 'error' ? (
+              <MicOffIcon className="h-5 w-5" />
+            ) : (
+              <MicIcon className="h-5 w-5" />
+            )}
+          </button>
+
+          {/* Gender toggle for TTS voice */}
+          <button
+            type="button"
+            onClick={() => setTtsGender(ttsGender === 'female' ? 'male' : 'female')}
+            aria-label={`TTS voice: ${ttsGender}`}
+            title={`Voice: ${ttsGender}`}
+            className="inline-flex h-11 w-9 items-center justify-center rounded-full border border-outline bg-surface text-xs font-bold text-on-surface transition-colors hover:bg-surface-container-high"
+          >
+            {ttsGender === 'female' ? 'F' : 'M'}
+          </button>
+
           <button
             type="submit"
-            disabled={!input.trim() || loading}
+            disabled={!input.trim() || loading || voiceState === 'processing' || voiceState === 'recording'}
             aria-label={t('send')}
             className="inline-flex h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 font-semibold text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
           >

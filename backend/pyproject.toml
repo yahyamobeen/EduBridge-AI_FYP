@@ -37,6 +37,11 @@ dependencies = [
     # the tutor's figure cropping breaks with nothing in the manifest explaining why.
     # `requirements.txt` already pins the same version, so Render needs no change.
     "pillow>=10.0.0",
+    # FastAPI form/file parsing (multipart) — required by /api/voice/transcribe and
+    # any route that accepts `Form`/`File` params. FastAPI treats it as optional,
+    # but a missing install turns into a runtime "Form data requires python-multipart"
+    # error, so declare it as a hard dependency.
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +66,12 @@ email = ["resend>=2.0.0", "sendgrid>=6.11.0"]
 # used, and the build fails on a small instance:
 #   --index-url https://download.pytorch.org/whl/cpu
 retrieval = ["torch>=2.4.0", "colpali-engine>=0.3.18"]
+# In-process voice (STT via faster-whisper, TTS via Edge TTS) for the demo path.
+# Heavy-ish: faster-whisper pulls CTranslate2 + ONNX Runtime (~250 MB). Kept as
+# an extra so a minimal production image (and Render's default build) need not
+# carry it; install with `uv sync --extra voice`. The MCP-based voice layer
+# (tdd.md §3.7) is a separate, later epic and is NOT this extra.
+voice = ["faster-whisper>=1.2.0", "edge-tts>=7.0.0", "av>=11,<13"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

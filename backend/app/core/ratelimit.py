@@ -141,6 +141,12 @@ TUTOR_ASK_LIMIT = Limit(max_requests=20, window_seconds=60)
 # the same reasoning as ME_UPDATE_LIMIT above.
 TUTOR_SESSIONS_LIMIT = Limit(max_requests=60, window_seconds=60)
 
+# Voice: STT runs Whisper on the CPU, so a tight ceiling protects the whole class
+# from one caller; TTS is cheaper but still metered (Edge TTS network call).
+VOICE_TRANSCRIBE_LIMIT = Limit(max_requests=10, window_seconds=60)
+VOICE_SPEAK_LIMIT = Limit(max_requests=30, window_seconds=60)
+VOICE_CLEAN_LIMIT = Limit(max_requests=60, window_seconds=60)
+
 _lock = threading.Lock()
 _hits: dict[str, list[float]] = defaultdict(list)
 

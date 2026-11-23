@@ -10,6 +10,8 @@ vi.mock('@/lib/api/endpoints', () => ({
   askTutor: vi.fn(),
   listTutorSessions: vi.fn(),
   getTutorSession: vi.fn(),
+  speakText: vi.fn(),
+  transcribeAudio: vi.fn(),
   tutorPagePath: (bookId: string, page: number) => `/tutor/books/${bookId}/pages/${page}`,
 }))
 

@@ -833,7 +833,17 @@
       "lockedOwner": "Chat band hai: sirf aap paigham bhej sakte hain.",
       "lock": "Chat band karen",
       "unlock": "Chat kholein",
-      "lockFailed": "Chat mein tabdeeli nahin ho saki. Dobara koshish karen."
+      "lockFailed": "Chat mein tabdeeli nahin ho saki. Dobara koshish karen.",
+      "speak": "Bol kar sunayein",
+      "stop": "Rokein",
+      "pause": "Waqfa",
+      "resume": "Jari rakhein",
+      "mic": "Bol kar likhein",
+      "micStop": "Recording band karein",
+      "transcribing": "Likha ja raha hai…",
+      "micUnsupported": "Aap ka browser awaz record nahi kar sakta.",
+      "micDenied": "Microphone ki ijazat nahi mili. Browser settings mein ijazat dein.",
+      "micFailed": "Ise likha nahi ja saka. Dobara koshish karein."
     },
     "parent": {
       "title": "Classroom",
@@ -993,7 +1003,14 @@
       "loadingPage": "Safha load ho raha hai…",
       "pageError": "Yeh safha load nahi ho saka.",
       "back": "Wapis",
-      "close": "Band karein"
+      "close": "Band karein",
+      "mic": "Mic",
+      "micStop": "Rokein",
+      "transcribing": "Likha ja raha hai…",
+      "speak": "Bol kar sunayein",
+      "stop": "Rokein",
+      "pause": "Waqfa",
+      "resume": "Jari rakhein"
     }
   },
   "errorPage": {

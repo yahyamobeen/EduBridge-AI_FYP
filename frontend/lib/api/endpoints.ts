@@ -722,3 +722,32 @@ export function setMemberMuted(
 export function getParentClassrooms(signal?: AbortSignal): Promise<ParentOverviewResponse> {
   return apiFetch<ParentOverviewResponse>('/parent/classrooms', withSignal(signal))
 }
+
+// Voice (demo path): STT + TTS + text cleaning.
+
+export type TranscribeResponse = {
+  transcript: string
+  language: string
+  duration_seconds: number
+}
+
+export function transcribeAudio(file: Blob, languageHint?: string, targetScript?: string, signal?: AbortSignal): Promise<TranscribeResponse> {
+  const form = new FormData()
+  form.append('file', file, 'recording.webm')
+  if (languageHint) form.append('language_hint', languageHint)
+  if (targetScript) form.append('target_script', targetScript)
+  return apiFetch<TranscribeResponse>('/voice/transcribe', {
+    method: 'POST',
+    formData: form,
+    ...(signal ? { signal } : {}),
+  })
+}
+
+export function speakText(text: string, language?: string, gender?: string, signal?: AbortSignal): Promise<Blob> {
+  return apiFetch<Blob>('/voice/speak', {
+    method: 'POST',
+    body: { text, language, gender_preference: gender },
+    responseType: 'blob',
+    ...(signal ? { signal } : {}),
+  })
+}

@@ -202,6 +202,11 @@ export type ApiRequestInit = {
    */
   rawBody?: Blob
   /**
+   * Sent as multipart/form-data (browser sets the boundary). Used for voice
+   * transcription uploads. Mutually exclusive with `body`/`rawBody`.
+   */
+  formData?: FormData
+  /**
    * 'blob' returns a SUCCESSFUL body as a Blob — a file download. An error is
    * still parsed as the JSON envelope, so a refused download is an ApiError.
    */
@@ -224,21 +229,25 @@ export type ApiRequestInit = {
 async function rawRequest<T>(path: string, init: ApiRequestInit): Promise<T> {
   const token = init.bearer ?? getAccessToken()
   const raw = init.rawBody !== undefined
+  const form = init.formData !== undefined
   const response = await fetch(resolve(path), {
     method: init.method ?? 'GET',
     // Carries the httpOnly refresh cookie.
     credentials: 'include',
     headers: {
-      // A raw body carries its own type, set by the caller.
-      ...(raw ? {} : { 'Content-Type': 'application/json' }),
+      // A raw body carries its own type, set by the caller; multipart sets
+      // its own boundary, so neither gets an explicit Content-Type here.
+      ...(raw || form ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init.headers,
     },
-    ...(raw
-      ? { body: init.rawBody }
-      : init.body === undefined
-        ? {}
-        : { body: JSON.stringify(init.body) }),
+    ...(form
+      ? { body: init.formData }
+      : raw
+        ? { body: init.rawBody }
+        : init.body === undefined
+          ? {}
+          : { body: JSON.stringify(init.body) }),
     ...(init.signal ? { signal: init.signal } : {}),
   })
 
